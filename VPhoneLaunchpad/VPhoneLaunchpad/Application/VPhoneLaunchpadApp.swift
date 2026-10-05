@@ -22,16 +22,19 @@ struct VPhoneLaunchpadApp: App {
                 .confirmCloseDuringCreation(delegate)
                 .onAppear { delegate.model = model }
         }
+        // Each page names itself in its own header.
         .windowToolbarStyle(.unified(showsTitle: false))
         // Nor is any saved: the window's frame is kept under its own name.
         .restorationBehavior(.disabled)
         .commands {
-            CommandGroup(replacing: .newItem) {}
-            CommandGroup(after: .appSettings) {
-                Button("Host Setup…") { model.present(.hostSetup) }
-                Button("Core Bundle…") { model.present(.coreBundle) }
-            }
+            VPhoneLaunchpadCommands(model: model)
         }
+
+        Settings {
+            VPhoneLaunchpadSettingsView()
+                .environment(model)
+        }
+        .restorationBehavior(.disabled)
 
         MenuBarExtra(isInserted: $showsInMenuBar) {
             VPhoneLaunchpadMenuBarMenu()

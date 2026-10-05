@@ -1,70 +1,67 @@
 import SwiftUI
+import VPhoneDesignKit
 
+/// The main window: the sidebar's pages beside the page picked in it. Host
+/// Setup and Bundles are pages like the others; a bundle install is the one
+/// sheet over all of them.
 struct VPhoneLaunchpadRootView: View {
     @Environment(VPhoneLaunchpadModel.self) private var model
+    #if DEBUG
+        @Environment(\.openSettings) private var openSettings
+    #endif
 
     var body: some View {
-        @Bindable var model = model
         @Bindable var host = model.host
         @Bindable var bundles = model.bundles
-        VPhoneLaunchpadMachinesView()
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .toolbar {
-                ToolbarItemGroup(placement: .navigation) {
-                    panelButton(.hostSetup, systemImage: "checklist", needsAttention: model.hostNeedsAttention)
-                    panelButton(.coreBundle, systemImage: "shippingbox", needsAttention: model.bundleNeedsAttention)
-                }
+        NavigationSplitView {
+            VPhoneLaunchpadSidebar()
+                .navigationSplitViewColumnWidth(DK.Metric.sidebarWidth)
+        } detail: {
+            page
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .navigationTitle(model.destination.localizedTitle)
+        .task { await model.start() }
+        // Coming back from System Settings, with or without Host Setup open.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            host.refreshDeveloperTools()
+        }
+        .sheet(isPresented: Binding(get: { model.panel == .bundleInstall }, set: {
+            if !$0 {
+                model.panel = nil
             }
-            .navigationTitle("Machines")
-            .task { await model.start() }
-            // Free space changes as machines restore and IPSWs download; the
-            // Host Setup row follows it.
-            .task {
-                while !Task.isCancelled {
-                    try? await Task.sleep(for: .seconds(5))
-                    host.refreshDiskSpace()
-                }
-            }
-            // Coming back from Settings, with or without Host Setup open.
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                host.refreshDeveloperTools()
-                host.refreshDiskSpace()
-            }
-            .sheet(item: $model.panel, onDismiss: model.panelDidDismiss) { panel in
-                Group {
-                    switch panel {
-                    case .hostSetup:
-                        VPhoneLaunchpadHostSetupView()
-                    case .coreBundle:
-                        VPhoneLaunchpadCoreBundleView()
-                    case .bundleInstall:
-                        VPhoneLaunchpadInstallView()
-                    }
-                }
+        })) {
+            VPhoneLaunchpadInstallView()
                 .environment(model)
+        }
+        // Host Setup and Bundles show their own errors; these cover work
+        // done on another page or with none open, such as the helper update
+        // on launch.
+        .errorAlert($host.actionError, isEnabled: model.panel == nil && model.destination != .hostSetup)
+        .errorAlert($bundles.actionError, isEnabled: model.panel == nil && model.destination != .bundles)
+        #if DEBUG
+            .onReceive(NotificationCenter.default.publisher(for: VPhoneLaunchpadPreview.settingsNotification)) { _ in
+                openSettings()
             }
-            // A sheet shows its own errors; these cover work done with none
-            // open, such as the helper update on launch.
-            .errorAlert($host.actionError, isEnabled: model.panel == nil)
-            .errorAlert($bundles.actionError, isEnabled: model.panel == nil)
+        #endif
     }
 
-    private func panelButton(_ panel: VPhoneLaunchpadModel.Panel, systemImage: String, needsAttention: Bool) -> some View {
-        Button {
-            model.present(panel)
-        } label: {
-            Label {
-                Text(panel.title)
-            } icon: {
-                if needsAttention {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.yellow)
-                } else {
-                    Image(systemName: systemImage)
-                }
-            }
+    @ViewBuilder
+    private var page: some View {
+        switch model.destination {
+        case .machines:
+            VPhoneLaunchpadMachinesView()
+        case .firmwares:
+            VPhoneLaunchpadFirmwaresView()
+        case .disks:
+            VPhoneLaunchpadDisksView()
+        case .bundles:
+            VPhoneLaunchpadCoreBundleView()
+        case .network:
+            VPhoneLaunchpadNetworkView()
+        case .hostSetup:
+            VPhoneLaunchpadHostSetupView()
         }
-        .help(needsAttention ? "\(panel.title) needs attention" : panel.title)
     }
 }
 

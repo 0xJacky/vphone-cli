@@ -1,13 +1,16 @@
 import Foundation
 import Observation
+import VPhoneDesignKit
 
 /// Owns the host checks, the installed bundles and the machine library. The
-/// window always shows the machines; Host Setup and Core Bundle are sheets
-/// over it. On launch the first stage that is not ready opens by itself, and
-/// a toolbar button marks a stage that regresses later.
+/// window shows one page at a time, picked in the sidebar: the machines, and
+/// beside them Host Setup and Bundles. On launch the first stage that is not
+/// ready opens by itself, and the sidebar marks a stage that regresses later.
 @MainActor
 @Observable
 final class VPhoneLaunchpadModel {
+    /// What `present(_:)` asks for. Host Setup and Core Bundle are pages of
+    /// the window; only a bundle install is a sheet.
     enum Panel: String, Identifiable {
         case hostSetup
         case coreBundle
@@ -34,9 +37,10 @@ final class VPhoneLaunchpadModel {
     let machines: VPhoneLaunchpadMachineLibrary
     let leases: VPhoneLaunchpadLeases
 
+    /// The page the window shows.
+    var destination: DKLaunchpadDestination = .machines
+    /// The sheet over the window: only ever `.bundleInstall`.
     var panel: Panel?
-    /// The panel to open once the sheet on screen has closed.
-    private var queuedPanel: Panel?
     private(set) var isStarted = false
 
     init() {
@@ -48,29 +52,25 @@ final class VPhoneLaunchpadModel {
         bundles.boundMachines = { [machines] version in machines.machineNames(boundTo: version) }
     }
 
-    // MARK: - Panels
+    // MARK: - Pages
 
-    /// Opens `next`. Another panel on screen closes first, so `next` arrives
-    /// as a sheet of its own instead of replacing that sheet's content.
+    /// Opens `next`: Host Setup and Core Bundle select their page, a bundle
+    /// install opens its sheet.
     func present(_ next: Panel) {
-        guard let current = panel, current != next else {
-            panel = next
-            return
+        switch next {
+        case .hostSetup: show(.hostSetup)
+        case .coreBundle: show(.bundles)
+        case .bundleInstall: panel = .bundleInstall
         }
-        queuedPanel = next
-        panel = nil
     }
 
-    /// Called when a panel's sheet starts to close. On macOS that is the same
-    /// update that cleared `panel`, while the sheet is still attached; setting
-    /// `next` here would swap it into the closing sheet. The next turn of the
-    /// main actor runs after the sheet has gone.
-    func panelDidDismiss() {
-        guard let next = queuedPanel else {
-            return
+    /// Selects a page. The install sheet, when it is open, steps aside so
+    /// the page is not hidden behind it; the install carries on.
+    func show(_ destination: DKLaunchpadDestination) {
+        if panel != nil {
+            panel = nil
         }
-        queuedPanel = nil
-        Task { panel = next }
+        self.destination = destination
     }
 
     // MARK: - Attention
@@ -132,7 +132,11 @@ final class VPhoneLaunchpadModel {
         // An unfinished install reopens its own sheet instead.
         if panel == nil {
             if bundles.progress == nil || bundles.progress?.isFinished == true {
-                panel = !host.requiredPassed ? .hostSetup : !bundles.isReady ? .coreBundle : nil
+                if !host.requiredPassed {
+                    destination = .hostSetup
+                } else if !bundles.isReady {
+                    destination = .bundles
+                }
             } else {
                 panel = .bundleInstall
             }
@@ -167,8 +171,8 @@ final class VPhoneLaunchpadModel {
 
     // MARK: - Bundle install
 
-    /// An install shows its progress in a sheet of its own, which replaces
-    /// the Core Bundle sheet it started from.
+    /// An install shows its progress in a sheet of its own, over the page it
+    /// started from.
     /// `keepsDefault` leaves the default version as it is, as
     /// `vphone-launchpad-cli bundle install-* --keep-default` asks.
     func installBundle(_ release: VPhoneLaunchpadRelease, keepsDefault: Bool = false) async {

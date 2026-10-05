@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import VPhoneDesignKit
 
 // MARK: - Setting
 
@@ -15,43 +16,58 @@ enum VPhoneLaunchpadMenuBar {
 
 // MARK: - Menu
 
+/// The menu bar icon's menu: Open Launchpad, then the machines grouped by
+/// what they are doing (Running, Stopped, Busy), then Quit.
 struct VPhoneLaunchpadMenuBarMenu: View {
     @Environment(VPhoneLaunchpadModel.self) private var model
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Button("Open Launchpad") {
+        DKMenuContent(Self.items(model) {
             NSApp.setActivationPolicy(.regular)
             openWindow(id: "main")
             NSApp.activate()
-        }
-        Divider()
-        if model.machines.machines.isEmpty {
-            Text("No Machines")
-        }
-        ForEach(model.machines.machines) { machine in
-            let state = model.machines.state(of: machine.path)
-            Menu {
-                switch state {
-                case .running:
-                    Button("Stop") {
-                        Task { await model.machines.stop(machine.path) }
-                    }
-                case .stopped:
-                    Button("Start") { Task { await model.machines.start(machine.path) } }
-                    Button("Start Headless") { Task { await model.machines.start(machine.path, headless: true) } }
-                case let .busy(activity):
-                    Text(activity)
-                }
-            } label: {
-                Label(machine.name, systemImage: state == .running ? "circle.fill" : "circle")
+        })
+    }
+
+    static func items(_ model: VPhoneLaunchpadModel, open: @escaping @MainActor () -> Void) -> [DKMenuItem] {
+        let library = model.machines
+        var running: [DKMenuItem] = []
+        var stopped: [DKMenuItem] = []
+        var busy: [DKMenuItem] = []
+        for machine in library.machines {
+            let path = machine.path
+            switch library.state(of: path) {
+            case .running:
+                running.append(.submenu(machine.name, items: [
+                    DKMenuItem(String(localized: "Stop")) { Task { await library.stop(path) } },
+                ]))
+            case .stopped:
+                stopped.append(.submenu(machine.name, items: [
+                    DKMenuItem(String(localized: "Start")) { Task { await library.start(path) } },
+                    DKMenuItem(String(localized: "Start Headless")) { Task { await library.start(path, headless: true) } },
+                ]))
+            case let .busy(activity):
+                busy.append(DKMenuItem(String(localized: "\(machine.name) — \(activity)")).disabled())
             }
         }
-        Divider()
-        Button("Quit") {
-            NSApp.terminate(nil)
+
+        var items = [DKMenuItem(String(localized: "Open Launchpad"), action: open)]
+        if library.machines.isEmpty {
+            items += [.separator, DKMenuItem(String(localized: "No Machines")).disabled()]
         }
-        .keyboardShortcut("q")
+        for (title, group) in [
+            (String(localized: "Running"), running),
+            (String(localized: "Stopped"), stopped),
+            (String(localized: "Busy"), busy),
+        ] where !group.isEmpty {
+            items += [.separator, .header(title)] + group
+        }
+        items += [
+            .separator,
+            DKMenuItem(String(localized: "Quit"), shortcut: DKShortcut("q", .command)) { NSApp.terminate(nil) },
+        ]
+        return items
     }
 }
 

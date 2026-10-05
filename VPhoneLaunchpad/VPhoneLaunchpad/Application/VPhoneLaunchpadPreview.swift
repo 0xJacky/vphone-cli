@@ -1,11 +1,13 @@
 #if DEBUG
     import AppKit
     import SwiftUI
+    import VPhoneDesignKit
 
     /// Debug-only snapshot mode. Launched with VPHONE_LAUNCHPAD_SNAPSHOT_DIR
-    /// set, the app fills every model with mock data, steps through each page
-    /// and sheet in light and dark appearance, draws the window into a PNG
-    /// with cacheDisplay (no screen-recording permission needed), and quits.
+    /// set, the app fills every model with mock data, steps through each page,
+    /// sheet and Settings tab in light and dark appearance, draws the window
+    /// into a PNG with cacheDisplay (no screen-recording permission needed),
+    /// and quits.
     enum VPhoneLaunchpadPreview {
         static let outputDirectory = ProcessInfo.processInfo.environment["VPHONE_LAUNCHPAD_SNAPSHOT_DIR"]
             .map { URL(fileURLWithPath: $0, isDirectory: true) }
@@ -14,7 +16,12 @@
             outputDirectory != nil
         }
 
+        /// The model the run fills, for the sidebar drawn beside each shot.
+        private static weak var previewModel: VPhoneLaunchpadModel?
+
         static let sheetNotification = Notification.Name("VPhoneLaunchpadPreviewSheet")
+        /// Opens the Settings window, on the tab given as the object.
+        static let settingsNotification = Notification.Name("VPhoneLaunchpadPreviewSettings")
         /// The source a Core Bundle sheet opens on.
         static var coreBundleSource = VPhoneLaunchpadCoreBundleView.Source.releases
         /// The pages New Machine and machine settings open on.
@@ -44,9 +51,11 @@
 
             try? await Task.sleep(for: .seconds(1))
             if let window = mainWindow {
-                window.setContentSize(NSSize(width: 980, height: 700))
+                window.setContentSize(NSSize(width: 1200, height: 760))
                 window.center()
             }
+            previewModel = model
+            reportShortcutConflicts(to: directory)
 
             for (suffix, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
                 NSApp.appearance = NSAppearance(named: appearance)
@@ -55,25 +64,32 @@
                 model.host.applyPreview(blocked: true)
                 model.leases.applyPreview(orphans: 0)
                 model.bundles.applyPreview(installing: false)
-                await panel(model, .hostSetup, "01-host-setup-first-run", suffix)
+                await page(model, .hostSetup, "01-host-setup-first-run", suffix)
 
                 model.helper.applyPreview(.ready("1"))
                 model.host.applyPreview(blocked: false)
                 model.bundles.applyPreview(installing: true)
-                await panel(model, .coreBundle, "02-core-bundle-first-install", suffix)
+                await page(model, .bundles, "02-bundles-first-install", suffix)
+                model.panel = .bundleInstall
+                await shot("02a-bundle-install", suffix)
+                model.panel = nil
+                try? await Task.sleep(for: .milliseconds(800))
 
                 model.bundles.applyPreview(installing: false)
-                await panel(model, .coreBundle, "03-core-bundle", suffix)
+                await page(model, .bundles, "03-bundles", suffix)
                 coreBundleSource = .actions
-                await panel(model, .coreBundle, "03b-core-bundle-actions", suffix)
+                // The page reads the source when it appears.
+                model.destination = .machines
+                await page(model, .bundles, "03b-bundles-actions", suffix)
                 coreBundleSource = .releases
 
                 model.leases.applyPreview(orphans: 119)
-                await panel(model, .hostSetup, "04-host-setup-passed", suffix)
+                await page(model, .hostSetup, "04-host-setup-passed", suffix)
                 await standalone("04b-skill-install", suffix, size: NSSize(width: 520, height: 460)) {
                     VPhoneLaunchpadSkillInstallView()
                 }
 
+                model.destination = .machines
                 model.machines.selection = [path("research-01")]
                 await shot("05-machines", suffix)
                 // A deleted machine takes its table row with it. A cell that
@@ -141,24 +157,46 @@
                 }
                 await sheet(.export([labMachine]), "11-export", suffix)
                 await sheet(.console(path("research-01")), "12-console", suffix)
+
+                await page(model, .firmwares, "13-firmwares", suffix)
+                await page(model, .disks, "14-disks", suffix)
+                await page(model, .network, "15-network", suffix)
+
+                // A skipped check and a bundle kept without preflight, so the
+                // Settings lists have a row. Both go back afterwards.
+                model.host.setSkipped(.physicalMac, true)
+                model.bundles.setAccepted(releases[2].version, true)
+                for tab in VPhoneLaunchpadSettingsView.Tab.allCases {
+                    await settings(tab, "16-settings-\(tab.rawValue)", suffix)
+                }
+                model.host.setSkipped(.physicalMac, false)
+                model.bundles.setAccepted(releases[2].version, false)
+                settingsWindow?.close()
+                model.destination = .machines
             }
             NSApp.terminate(nil)
         }
 
         private static var mainWindow: NSWindow? {
-            NSApp.windows.first { $0.isVisible && $0.sheetParent == nil && $0.frame.width > 400 }
+            NSApp.windows.first { window in
+                window.isVisible && window.sheetParent == nil && window.identifier?.rawValue.hasPrefix("main") == true
+            }
         }
 
-        private static func panel(
+        private static var settingsWindow: NSWindow? {
+            NSApp.windows.first { window in
+                window.isVisible && window.identifier?.rawValue.localizedCaseInsensitiveContains("settings") == true
+            }
+        }
+
+        private static func page(
             _ model: VPhoneLaunchpadModel,
-            _ panel: VPhoneLaunchpadModel.Panel,
+            _ destination: DKLaunchpadDestination,
             _ name: String,
             _ suffix: String,
         ) async {
-            model.panel = panel
+            model.show(destination)
             await shot(name, suffix)
-            model.panel = nil
-            try? await Task.sleep(for: .milliseconds(800))
         }
 
         private static func sheet(_ sheet: VPhoneLaunchpadMachinesView.Sheet, _ name: String, _ suffix: String) async {
@@ -166,6 +204,19 @@
             await shot(name, suffix)
             NotificationCenter.default.post(name: sheetNotification, object: nil)
             try? await Task.sleep(for: .milliseconds(800))
+        }
+
+        /// Opens the Settings window on `tab` and draws it, toolbar and all.
+        private static func settings(_ tab: VPhoneLaunchpadSettingsView.Tab, _ name: String, _ suffix: String) async {
+            NotificationCenter.default.post(name: settingsNotification, object: tab)
+            try? await Task.sleep(for: .milliseconds(500))
+            // The first post opens the window; its view sees only the next.
+            NotificationCenter.default.post(name: settingsNotification, object: tab)
+            try? await Task.sleep(for: .milliseconds(1500))
+            if let window = settingsWindow {
+                window.appearance = NSApp.appearance
+                draw(window, name, suffix)
+            }
         }
 
         /// Draws one view in a plain window of its own. Used for the inspector,
@@ -198,27 +249,86 @@
         }
 
         private static func shot(_ name: String, _ suffix: String) async {
+            // cacheDisplay leaves the sidebar's rows out, as it does the
+            // inspector column. The sidebar is drawn in a window of its own
+            // and laid over the column.
+            let sidebar = mainWindow.flatMap { window -> NSWindow? in
+                guard window.attachedSheet == nil, let model = previewModel else { return nil }
+                let size = NSSize(width: DK.Metric.sidebarWidth, height: window.contentLayoutRect.height)
+                let sidebar = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+                sidebar.isReleasedWhenClosed = false
+                sidebar.appearance = NSApp.appearance
+                sidebar.contentView = NSHostingView(rootView: VPhoneLaunchpadSidebar().environment(model))
+                sidebar.orderBack(nil)
+                return sidebar
+            }
+            defer { sidebar?.close() }
             try? await Task.sleep(for: .milliseconds(1500))
-            guard let directory = outputDirectory, let window = mainWindow else {
+            guard let window = mainWindow else {
                 return
             }
-            let target = window.attachedSheet ?? window
-            guard let view = target.contentView?.superview ?? target.contentView,
+            if let sheet = window.attachedSheet {
+                draw(sheet, name, suffix)
+            } else {
+                draw(window, name, suffix, overlay: sidebar?.contentView)
+            }
+        }
+
+        private static func draw(_ target: NSWindow, _ name: String, _ suffix: String, overlay: NSView? = nil) {
+            guard let directory = outputDirectory,
+                  let view = target.contentView?.superview ?? target.contentView,
                   let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)
             else {
                 return
             }
             view.cacheDisplay(in: view.bounds, to: bitmap)
+            if let overlay, let layer = overlay.bitmapImageRepForCachingDisplay(in: overlay.bounds) {
+                overlay.cacheDisplay(in: overlay.bounds, to: layer)
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+                layer.draw(in: NSRect(origin: .zero, size: overlay.bounds.size))
+                NSGraphicsContext.restoreGraphicsState()
+            }
             let url = directory.appendingPathComponent("\(name)-\(suffix).png")
             try? bitmap.representation(using: .png, properties: [:])?.write(to: url)
+        }
+
+        /// Writes the shortcuts more than one menu item claims in the live
+        /// menu bar to `shortcut-conflicts.txt`; empty when there are none.
+        private static func reportShortcutConflicts(to directory: URL) {
+            func items(_ menu: NSMenu) -> [DKMenuItem] {
+                menu.items.compactMap { item in
+                    if let submenu = item.submenu {
+                        return .submenu(item.title, items: items(submenu))
+                    }
+                    guard !item.isSeparatorItem, !item.title.isEmpty else {
+                        return nil
+                    }
+                    return DKMenuItem(
+                        item.title,
+                        shortcut: DKShortcut(keyEquivalent: item.keyEquivalent, modifierMask: item.keyEquivalentModifierMask),
+                        isAlternate: item.isAlternate,
+                    )
+                }
+            }
+            let menus = (NSApp.mainMenu?.items ?? []).compactMap { item in
+                item.submenu.map { DKMenu(item.title, items: items($0)) }
+            }
+            let report = DKShortcutConflicts.find(in: menus).map(\.description).joined(separator: "\n")
+            try? report.write(to: directory.appendingPathComponent("shortcut-conflicts.txt"), atomically: true, encoding: .utf8)
+            // The menus as built, to check titles, order and shortcuts.
+            let listing = menus.map { menu in
+                ([menu.title] + menu.items.map { "  \($0.title) \($0.shortcut?.displayText ?? "")" }).joined(separator: "\n")
+            }
+            try? listing.joined(separator: "\n").write(to: directory.appendingPathComponent("menus.txt"), atomically: true, encoding: .utf8)
         }
 
         // MARK: - Mock data
 
         static let releases: [VPhoneLaunchpadRelease] = [
-            release("2.0.2", "2026-09-25T09:10:00Z", "4be1f0c29a7d6e3b58c0a1d2e9f47b6c3d5a8e1f02b9c7d4e6a3f5b8c1d0e2a9", 16_170_112),
-            release("2.0.1", "2026-09-25T03:53:35Z", "98daa4d0b00a6188f87c698e73018d497ca34396f31f95e9e872dd93e488322f", 16_162_877),
-            release("2.0.0", "2026-09-24T19:56:17Z", "d57fd532e308dcc6901ec0d58e3a226da5e1a5ec022c2b2b3572894954f167b3", 16_160_944),
+            release("2.6.2", "2026-09-25T09:10:00Z", "4be1f0c29a7d6e3b58c0a1d2e9f47b6c3d5a8e1f02b9c7d4e6a3f5b8c1d0e2a9", 16_170_112),
+            release("2.6.1", "2026-09-25T03:53:35Z", "98daa4d0b00a6188f87c698e73018d497ca34396f31f95e9e872dd93e488322f", 16_162_877),
+            release("2.6.0", "2026-09-24T19:56:17Z", "d57fd532e308dcc6901ec0d58e3a226da5e1a5ec022c2b2b3572894954f167b3", 16_160_944),
         ]
 
         private static func release(_ version: String, _ date: String, _ sha256: String, _ size: Int64) -> VPhoneLaunchpadRelease {
