@@ -3,7 +3,8 @@ import Foundation
 // MARK: - Sizes
 
 /// How the Library pages write sizes: decimal units, as the Finder does, with
-/// one decimal below 100 GB ("9.4 GB", "13.9 GB") and none above ("166 GB").
+/// one decimal below 100 GB ("9.4 GB", "13.9 GB"), none above ("166 GB") and none
+/// on a whole number ("31 GB").
 nonisolated enum VPhoneLaunchpadLibraryFormat {
     static func size(_ bytes: Int64) -> String {
         let value = Double(max(0, bytes))
@@ -11,9 +12,13 @@ nonisolated enum VPhoneLaunchpadLibraryFormat {
         for (scale, unit) in units where value >= scale {
             let scaled = value / scale
             // 99.96 GB rounds to "100.0 GB" with one decimal; write it as 100.
-            let text = scaled >= 99.95 || unit == "KB" || unit == "MB"
+            var text = scaled >= 99.95 || unit == "KB" || unit == "MB"
                 ? String(format: "%.0f", scaled.rounded())
                 : String(format: "%.1f", scaled)
+            // A whole number keeps no decimal, as the design writes it: "31 GB", not "31.0 GB".
+            if text.hasSuffix(".0") {
+                text.removeLast(2)
+            }
             return "\(text) \(unit)"
         }
         return "\(Int64(value)) bytes"

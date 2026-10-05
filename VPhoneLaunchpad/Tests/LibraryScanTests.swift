@@ -35,6 +35,7 @@ struct LibraryScanTests {
         expect(Format.size(99_960_000_000) == "100 GB", Format.size(99_960_000_000))
         expect(Format.size(524_288) == "524 KB", Format.size(524_288))
         expect(Format.size(0) == "0 bytes", Format.size(0))
+        expect(Format.size(31_000_000_000) == "31 GB", Format.size(31_000_000_000))
         expect(Format.compactSize(31_200_000_000) == "31 GB", Format.compactSize(31_200_000_000))
         expect(Format.compactSize(2_400_000_000) == "2.4 GB", Format.compactSize(2_400_000_000))
         expect(Format.diskSize(64_000_000_000) == "64 GB", Format.diskSize(64_000_000_000))
