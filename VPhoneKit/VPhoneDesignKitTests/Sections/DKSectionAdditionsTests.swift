@@ -76,8 +76,8 @@ struct DKSectionAdditionsTests {
     @Test
     func `a byte segment writes its size`() {
         let segment = DKUsageSegment("Machine disks", bytes: 1536, color: DK.Palette.accent)
-        #expect(segment.valueText == "1.50 KB")
-        #expect(segment.accessibilityText == "Machine disks 1.50 KB")
+        #expect(segment.valueText == "1.5 KB")
+        #expect(segment.accessibilityText == "Machine disks 1.5 KB")
         #expect(DKUsageSegment("Free", value: 1, color: DK.Palette.track).accessibilityText == "Free")
     }
 }

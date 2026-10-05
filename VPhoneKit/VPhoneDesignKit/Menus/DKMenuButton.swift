@@ -67,7 +67,7 @@ public struct DKMenuButton: View {
         .disabled(!spec.isEnabled)
         .help(spec.help ?? (isIconOnly ? spec.label : ""))
         .accessibilityLabel(spec.label)
-        .accessibilityHint("Opens a menu")
+        .accessibilityHint(String(localized: "Opens a menu", bundle: .main, comment: "VoiceOver hint for a button that opens a menu"))
     }
 
     private var isIconOnly: Bool {

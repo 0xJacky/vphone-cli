@@ -29,7 +29,7 @@ struct VPhonePanelFormatTests {
 
     @Test
     func `sizes, durations and percentages follow DKFormat`() {
-        #expect(VPhonePanelFormat.bytes(8_589_934_592) == "8.00 GB")
+        #expect(VPhonePanelFormat.bytes(8_589_934_592) == "8 GB")
         #expect(VPhonePanelFormat.bytes(182_000_000) == "174 MB")
         #expect(VPhonePanelFormat.duration(20) == "20 s")
         #expect(VPhonePanelFormat.duration(20.9) == "20 s")

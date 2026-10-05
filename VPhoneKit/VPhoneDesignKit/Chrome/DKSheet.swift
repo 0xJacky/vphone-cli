@@ -230,7 +230,8 @@ public struct DKSheet<Pages: View, Content: View, Accessory: View>: View {
         }
         .frame(width: width)
         .background(DK.Palette.window)
-        .foregroundStyle(DK.Palette.ink)
+        // No foreground style on the whole sheet: it would also paint the
+        // placeholders of the fields inside in ink, so they read as values.
         .font(DK.Typeface.body)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)

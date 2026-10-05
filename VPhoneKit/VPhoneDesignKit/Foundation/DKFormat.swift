@@ -48,7 +48,8 @@ public enum DKFormat {
             unit += 1
             (rounded, decimals) = threeSignificant(scaled)
         }
-        return "\(sign)\(fixed(rounded, decimals)) \(byteUnits[unit])"
+        // The design writes sizes without trailing zeros: "8 GB", "9.4 GB", "38.1 GB".
+        return "\(sign)\(trimmed(fixed(rounded, decimals))) \(byteUnits[unit])"
     }
 
     public static func bytes(_ value: Int) -> String {
@@ -293,6 +294,21 @@ public enum DKFormat {
     /// Fixed decimals, always with "." (`String(format:)` without a locale is POSIX).
     private static func fixed(_ x: Double, _ decimals: Int) -> String {
         String(format: "%.\(decimals)f", x)
+    }
+
+    /// Drops a fraction's trailing zeros and a bare point: "8.00" → "8", "1.50" → "1.5".
+    private static func trimmed(_ text: String) -> String {
+        guard text.contains(".") else {
+            return text
+        }
+        var out = Substring(text)
+        while out.hasSuffix("0") {
+            out = out.dropLast()
+        }
+        if out.hasSuffix(".") {
+            out = out.dropLast()
+        }
+        return String(out)
     }
 
     private static func grouped(_ magnitude: UInt64) -> String {

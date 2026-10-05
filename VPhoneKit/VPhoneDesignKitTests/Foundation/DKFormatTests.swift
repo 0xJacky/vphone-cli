@@ -19,14 +19,14 @@ struct DKFormatTests {
     @Test
     func testBytesContractExamples() {
         #expect(DKFormat.bytes(512 as Int64?) == "512 B")
-        #expect(DKFormat.bytes(1536 as Int64?) == "1.50 KB")
-        #expect(DKFormat.bytes(1_048_575 as Int64?) == "1.00 MB")
+        #expect(DKFormat.bytes(1536 as Int64?) == "1.5 KB")
+        #expect(DKFormat.bytes(1_048_575 as Int64?) == "1 MB")
         #expect(DKFormat.bytes(5_000_000 as Int64?) == "4.77 MB")
-        #expect(DKFormat.bytes(3 * Self.GiB) == "3.00 GB")
+        #expect(DKFormat.bytes(3 * Self.GiB) == "3 GB")
         #expect(DKFormat.bytes(Int64(12.3 * Double(Self.GiB))) == "12.3 GB")
         #expect(DKFormat.bytes(123 * Self.GiB) == "123 GB")
-        #expect(DKFormat.bytes(5 * Self.TiB) == "5.00 TB")
-        #expect(DKFormat.bytes(Self.PiB) == "1.00 PB")
+        #expect(DKFormat.bytes(5 * Self.TiB) == "5 TB")
+        #expect(DKFormat.bytes(Self.PiB) == "1 PB")
     }
 
     @Test
@@ -34,23 +34,23 @@ struct DKFormatTests {
         #expect(DKFormat.bytes(nil as Int64?) == "—")
         #expect(DKFormat.bytes(0 as Int64?) == "0 B")
         #expect(DKFormat.bytes(0) == "0 B")
-        #expect(DKFormat.bytes(1536) == "1.50 KB")
+        #expect(DKFormat.bytes(1536) == "1.5 KB")
         #expect(DKFormat.bytes(Int.max) == DKFormat.bytes(Int64.max))
     }
 
     @Test
     func testBytesByteTierBoundary() {
         #expect(DKFormat.bytes(1023) == "1023 B")
-        #expect(DKFormat.bytes(1024) == "1.00 KB")
-        #expect(DKFormat.bytes(1025) == "1.00 KB")
+        #expect(DKFormat.bytes(1024) == "1 KB")
+        #expect(DKFormat.bytes(1025) == "1 KB")
     }
 
     @Test
     func testBytesDecimalBoundariesRoundFirst() {
         // 10 KB: 9.994 is 9.99; 9.995 is 10.0, not "10.00".
         #expect(DKFormat.bytes(10_234) == "9.99 KB")
-        #expect(DKFormat.bytes(10_235) == "10.0 KB")
-        #expect(DKFormat.bytes(10 * Self.KiB) == "10.0 KB")
+        #expect(DKFormat.bytes(10_235) == "10 KB")
+        #expect(DKFormat.bytes(10 * Self.KiB) == "10 KB")
         // 100 KB: 99.949 is 99.9; 99.950 is 100, not "100.0".
         #expect(DKFormat.bytes(102_348) == "99.9 KB")
         #expect(DKFormat.bytes(102_349) == "100 KB")
@@ -62,15 +62,15 @@ struct DKFormatTests {
     func testBytesUnitBoundariesRoundFirst() {
         // 1023.499 KB is 1023 KB; 1023.5 KB is 1.00 MB, never "1024 KB".
         #expect(DKFormat.bytes(1_048_063) == "1023 KB")
-        #expect(DKFormat.bytes(1_048_064) == "1.00 MB")
-        #expect(DKFormat.bytes(Self.MiB) == "1.00 MB")
-        #expect(DKFormat.bytes(Self.MiB + 1) == "1.00 MB")
-        #expect(DKFormat.bytes(Self.GiB - 1) == "1.00 GB")
-        #expect(DKFormat.bytes(Self.GiB) == "1.00 GB")
-        #expect(DKFormat.bytes(Self.TiB - 1) == "1.00 TB")
-        #expect(DKFormat.bytes(Self.PiB - 1) == "1.00 PB")
+        #expect(DKFormat.bytes(1_048_064) == "1 MB")
+        #expect(DKFormat.bytes(Self.MiB) == "1 MB")
+        #expect(DKFormat.bytes(Self.MiB + 1) == "1 MB")
+        #expect(DKFormat.bytes(Self.GiB - 1) == "1 GB")
+        #expect(DKFormat.bytes(Self.GiB) == "1 GB")
+        #expect(DKFormat.bytes(Self.TiB - 1) == "1 TB")
+        #expect(DKFormat.bytes(Self.PiB - 1) == "1 PB")
         #expect(DKFormat.bytes(1023 * Self.MiB) == "1023 MB")
-        #expect(DKFormat.bytes(10 * Self.GiB - 1) == "10.0 GB")
+        #expect(DKFormat.bytes(10 * Self.GiB - 1) == "10 GB")
     }
 
     @Test
@@ -88,16 +88,16 @@ struct DKFormatTests {
     @Test
     func testBytesNegative() {
         #expect(DKFormat.bytes(-512) == "-512 B")
-        #expect(DKFormat.bytes(-1536) == "-1.50 KB")
-        #expect(DKFormat.bytes(-1_048_575) == "-1.00 MB")
+        #expect(DKFormat.bytes(-1536) == "-1.5 KB")
+        #expect(DKFormat.bytes(-1_048_575) == "-1 MB")
     }
 
     @Test
     func testBytesExtremes() {
         // Int64.max is about 8 EiB: the extra EB unit, never "8192 PB", and no crash.
-        #expect(DKFormat.bytes(Int64.max) == "8.00 EB")
-        #expect(DKFormat.bytes(Int64.min) == "-8.00 EB")
-        #expect(DKFormat.bytes(1024 * Self.PiB) == "1.00 EB")
+        #expect(DKFormat.bytes(Int64.max) == "8 EB")
+        #expect(DKFormat.bytes(Int64.min) == "-8 EB")
+        #expect(DKFormat.bytes(1024 * Self.PiB) == "1 EB")
     }
 
     // MARK: - count
@@ -417,7 +417,7 @@ struct DKFormatTests {
                        ".formatted(", "String(format: \"%'", "localizedString", "Calendar.current"] {
             #expect(!(code.contains(banned)), "DKFormat must not depend on the locale: found \(banned)")
         }
-        #expect(DKFormat.bytes(1536) == "1.50 KB")
+        #expect(DKFormat.bytes(1536) == "1.5 KB")
         #expect(DKFormat.percent(0.987, decimals: 1) == "98.7%")
         #expect(DKFormat.count(1_234_567) == "1,234,567")
     }

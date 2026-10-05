@@ -100,7 +100,7 @@ public struct DKDetailBar<Content: View>: View {
             arranged
         }
         .font(DK.Typeface.body)
-            .foregroundStyle(DK.Palette.ink)
+            // No foreground style on the bar: it would paint field placeholders in ink.
             .padding(.vertical, 14)
             .padding(.horizontal, DK.Space.s4)
             .frame(maxWidth: .infinity, alignment: .leading)
