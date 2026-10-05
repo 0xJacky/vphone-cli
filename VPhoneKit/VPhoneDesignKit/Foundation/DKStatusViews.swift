@@ -7,16 +7,19 @@ import SwiftUI
 public struct DKStatusDot: View {
     public let tone: DKTone
     public var label: String?
+    /// 8pt by default; sidebar meta and tabs use 6pt, the helper footer 7pt.
+    public var size: CGFloat
 
-    public init(_ tone: DKTone, label: String? = nil) {
+    public init(_ tone: DKTone, label: String? = nil, size: CGFloat = DK.Metric.dot) {
         self.tone = tone
         self.label = label
+        self.size = size
     }
 
     public var body: some View {
         Circle()
             .fill(tone == .neutral ? DK.Palette.dotIdle : tone.color)
-            .frame(width: DK.Metric.dot, height: DK.Metric.dot)
+            .frame(width: size, height: size)
             .accessibilityHidden(label == nil)
             .accessibilityLabel(label ?? "")
     }

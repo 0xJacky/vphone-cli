@@ -103,6 +103,26 @@ public struct DKButton: View {
     }
 }
 
+/// A pill, or the rounded square of a tile. A capsule rather than a huge corner
+/// radius, which leaves flat spots at the ends of a stroked pill.
+struct DKButtonShape: InsettableShape {
+    var isTile: Bool
+    var inset: CGFloat = 0
+
+    func path(in rect: CGRect) -> Path {
+        let r = rect.insetBy(dx: inset, dy: inset)
+        return isTile
+            ? RoundedRectangle(cornerRadius: max(0, DK.Radius.control - inset), style: .continuous).path(in: r)
+            : Capsule(style: .circular).path(in: r)
+    }
+
+    func inset(by amount: CGFloat) -> DKButtonShape {
+        var shape = self
+        shape.inset += amount
+        return shape
+    }
+}
+
 /// The style behind `DKButton`; usable on any `Button` that wants the look.
 public struct DKButtonStyle: ButtonStyle {
     public var variant: DKButtonVariant
@@ -116,7 +136,7 @@ public struct DKButtonStyle: ButtonStyle {
     }
 
     public func makeBody(configuration: Configuration) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        let shape = DKButtonShape(isTile: size == .tile)
         configuration.label
             .font(font)
             .foregroundStyle(foreground)
@@ -131,7 +151,10 @@ public struct DKButtonStyle: ButtonStyle {
     // MARK: Geometry
 
     private var height: CGFloat? {
-        switch size {
+        if variant == .plain, size == .regular || size == .small {
+            return nil
+        }
+        return switch size {
         case .regular, .icon: DK.Metric.controlHeight
         case .small: 28
         case .largeIcon: 40
@@ -153,10 +176,6 @@ public struct DKButtonStyle: ButtonStyle {
         case .tile: 8
         default: variant == .plain ? 2 : DK.Space.s3
         }
-    }
-
-    private var cornerRadius: CGFloat {
-        size == .tile ? DK.Radius.control : 999
     }
 
     private var font: Font {

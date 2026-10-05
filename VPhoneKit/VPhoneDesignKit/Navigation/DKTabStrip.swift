@@ -181,7 +181,7 @@ struct DKTabCloseButton: View {
     var body: some View {
         Button(action: action) {
             // DKGlyph has no plain cross; the design draws "✕".
-            Image(systemName: "xmark")
+            Image(systemName: DKGlyph.close.symbolName)
                 .font(.system(size: 9, weight: .semibold))
                 .frame(width: 22, height: 22)
                 .foregroundStyle(DK.Palette.muted)

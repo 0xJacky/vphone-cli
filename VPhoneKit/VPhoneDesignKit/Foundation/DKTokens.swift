@@ -75,6 +75,9 @@ public extension DK {
         public static let terminalBlue = dynamic(0x0869CB, 0x0A84FF)
         public static let terminalGreen = dynamic(0x26A439, 0x32D74B)
         public static let terminalRed = dynamic(0xCC372E, 0xFF453A)
+        public static let terminalYellow = dynamic(0x9A6C00, 0xFFD60A)
+        public static let terminalMagenta = dynamic(0xAD3DA4, 0xDA70D6)
+        public static let terminalCyan = dynamic(0x0E7C86, 0x5AC8FA)
 
         // MARK: File icons
 
@@ -146,6 +149,8 @@ public extension DK {
         /// Two-line table rows (a title over a monospaced subtitle).
         public static let tableRowHeightRoomy: CGFloat = 58
         public static let statusBarHeight: CGFloat = 26
+        public static let statusBarHeightCompact: CGFloat = 22
+        public static let tabStripHeight: CGFloat = 36
         public static let sidebarWidth: CGFloat = 232
         public static let dot: CGFloat = 8
         public static let hairline: CGFloat = 1
@@ -163,7 +168,7 @@ public extension DK {
         public static let captionStrong = Font.system(size: 12, weight: .semibold)
         public static let footnote = Font.system(size: 11)
         public static let sectionTitle = Font.system(size: 12, weight: .semibold)
-        public static let pageTitle = Font.system(size: 15, weight: .bold)
+        public static let pageTitle = Font.system(size: 15, weight: .semibold)
         public static let sheetTitle = Font.system(size: 17, weight: .semibold)
         public static let mono = Font.system(size: 12, design: .monospaced)
         public static let monoSmall = Font.system(size: 11, design: .monospaced)

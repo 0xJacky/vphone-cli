@@ -37,6 +37,12 @@ public enum DKTone: String, Sendable, CaseIterable, Hashable {
         }
     }
 
+    /// Toned text on a plain ground: `ink`, except for `.accent`, whose `ink` is
+    /// the white that sits on an accent fill.
+    public var text: Color {
+        self == .accent ? DK.Palette.accent : ink
+    }
+
     /// The tinted fill behind badges, banners and highlighted rows.
     public var surface: Color {
         switch self {
