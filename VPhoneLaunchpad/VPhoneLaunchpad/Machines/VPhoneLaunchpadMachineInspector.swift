@@ -1,82 +1,21 @@
 import AppKit
 import SwiftUI
-
-// MARK: - State label
-
-/// A machine's run state as the table and the inspector show it.
-struct VPhoneLaunchpadMachineStateLabel: View {
-    let state: VPhoneLaunchpadMachineLibrary.RunState
-    /// An export's or a creation's IPSW download progress, shown as a bar in
-    /// place of the activity text, which becomes its help tag.
-    var progress: Double?
-
-    var body: some View {
-        let (status, text): (VPhoneLaunchpadStatus, String) = switch state {
-        case .running: (.passed, String(localized: "Running"))
-        case .stopped: (.pending, String(localized: "Stopped"))
-        case let .busy(activity): (.running, activity)
-        }
-        if let progress {
-            HStack(spacing: 6) {
-                ProgressView(value: progress)
-                    .controlSize(.small)
-                Text(progress, format: .percent.precision(.fractionLength(0)))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
-            .help(text)
-        } else {
-            Label {
-                Text(text).lineLimit(1)
-            } icon: {
-                VPhoneLaunchpadStatusIcon(status: status)
-            }
-        }
-    }
-}
-
-// MARK: - Core Bundle label
-
-/// The version a machine runs with, as the table shows it, with a warning
-/// when that version is gone or the guest environment came from another.
-struct VPhoneLaunchpadMachineBundleLabel: View {
-    let machine: VPhoneLaunchpadMachinePath
-    @Environment(VPhoneLaunchpadModel.self) private var model
-
-    var body: some View {
-        let library = model.machines
-        let version = library.bundleVersion(for: machine)
-        let warning: String? = if let version, !model.bundles.selectableVersions.contains(version) {
-            String(localized: "VPhone.bundle \(version) is not installed. Choose Change Core Bundle… to run this machine with another version.")
-        } else if let binding = library.bindings[machine], binding.hasMixedVersions, let guest = binding.guestEnvironment {
-            String(localized: "The guest environment is from \(guest).") + " " + VPhoneLaunchpadMachineInspector.mixedHelp
-        } else {
-            nil
-        }
-        HStack(spacing: 4) {
-            Text(verbatim: version ?? "—")
-                .lineLimit(1)
-                .truncationMode(.middle)
-            if warning != nil {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.yellow)
-                    .imageScale(.small)
-            }
-        }
-        .help(warning ?? version ?? "")
-    }
-}
+import VPhoneDesignKit
 
 // MARK: - Inspector
 
-/// The trailing inspector for the selected machine. Values are split into
-/// short rows, since the column is narrow, and long ones truncate in the
-/// middle.
+/// The trailing inspector for the selected machine: a header with the
+/// machine's state and its run actions, then its Core Bundle layers,
+/// patches, firmware, hardware, network, identity and console. Long values
+/// truncate in the middle, since the column is narrow.
 struct VPhoneLaunchpadMachineInspector: View {
     let machine: VPhoneLaunchpadMachine
     let onShowProgress: (VPhoneLaunchpadMachinePath) -> Void
     let onOpenConsole: (VPhoneLaunchpadMachinePath) -> Void
-    var onChangeBundle: (VPhoneLaunchpadMachine) -> Void = { _ in }
+    /// Opens one of the Machines page's sheets from the more menu.
+    var onPresent: (VPhoneLaunchpadMachinesView.Sheet) -> Void = { _ in }
+    /// Asks the page to confirm deleting the machine.
+    var onDelete: ([VPhoneLaunchpadMachinePath]) -> Void = { _ in }
     @Environment(VPhoneLaunchpadModel.self) private var model
     @State private var showsCommands = false
     @State private var patchCatalog: VPhoneLaunchpadPatchCatalog?
@@ -93,87 +32,38 @@ struct VPhoneLaunchpadMachineInspector: View {
         model.machines
     }
 
+    private var actions: VPhoneLaunchpadMachineActions {
+        VPhoneLaunchpadMachineActions(model: model, present: onPresent, delete: onDelete)
+    }
+
+    private var isStopped: Bool {
+        library.state(of: machine.path) == .stopped
+    }
+
     var body: some View {
-        Form {
-            Section {
-                if let creation = library.creations[machine.path] {
-                    creationSummary(creation)
-                }
-                LabeledContent("State") {
-                    VPhoneLaunchpadMachineStateLabel(
-                        state: library.state(of: machine.path),
-                        progress: library.progress(of: machine.path),
-                    )
-                }
-                if let started = library.startedAt[machine.path] {
-                    LabeledContent("Started", value: started.formatted(date: .omitted, time: .shortened))
-                }
-                if let firmwareName = machine.firmwareName {
-                    LabeledContent("Firmware", value: firmwareName)
-                }
-            } header: {
-                Text(machine.name)
-                    .font(.headline)
-            }
-
-            Section("Firmware") {
-                if let info = machine.restoreInfo {
-                    LabeledContent("iOS", value: "\(info.ios.version) (\(info.ios.build))")
-                    LabeledContent("cloudOS", value: "\(info.cloudOS.version) (\(info.cloudOS.build))")
-                } else {
-                    Text("Not restored").foregroundStyle(.secondary)
-                }
-            }
-
-            coreBundleSection
-
-            patchesSection
-
-            Section("Hardware") {
-                LabeledContent("CPU", value: String(localized: "\(machine.cpuCount) cores"))
-                LabeledContent("Memory", value: VPhoneLaunchpadMachinesView.memory(machine.memoryMB))
-                LabeledContent("Disk", value: VPhoneLaunchpadMachinesView.disk(machine.diskSizeBytes))
-                LabeledContent("Network", value: machine.networkDescription)
-                if let address = machine.addressDescription {
-                    LabeledContent("IPv4 Address", value: address)
-                }
-                if !machine.network.macAddress.isEmpty {
-                    LabeledContent("MAC Address", value: machine.network.macAddress)
-                }
-                if let name = machine.network.localHostName {
-                    LabeledContent("mDNS Name", value: "\(name).local")
-                }
-                ForEach(machine.network.portForwards ?? [], id: \.self) { forward in
-                    LabeledContent("Port Forward", value: "\(forward.transport.uppercased()) \(forward.hostAddress ?? "127.0.0.1"):\(forward.hostPort) → \(forward.guestPort)")
-                }
-                if machine.unlocksAtStartup == true {
-                    LabeledContent("Unlock at Startup", value: String(localized: "On"))
-                }
-            }
-
-            Section("Identity") {
-                if let udid = machine.udid {
-                    value("UDID", udid)
-                }
-                value(
-                    "Location",
-                    VPhoneLaunchpadHostSetup.abbreviated(machine.path.url),
-                )
-            }
-
-            Section("Console") {
-                HStack {
-                    Button {
-                        onOpenConsole(machine.path)
-                    } label: {
-                        Label("Open Console", systemImage: "arrow.up.right")
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                VStack(alignment: .leading, spacing: DK.Space.s4) {
+                    if let creation = library.creations[machine.path] {
+                        creationSummary(creation)
                     }
-                    Spacer()
-                    Button("Recent Commands") { showsCommands = true }
+                    mixedBanner
+                    coreBundleSection
+                    patchesSection
+                    firmwareSection
+                    hardwareSection
+                    networkSection
+                    identitySection
+                    consoleSection
                 }
+                .padding(.horizontal, DK.Space.s5)
+                .padding(.top, DK.Space.s4)
+                .padding(.bottom, DK.Space.s6)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .formStyle(.grouped)
+        .background(DK.Palette.window)
         .task(id: patchReadKey) {
             await loadPatches()
         }
@@ -201,7 +91,160 @@ struct VPhoneLaunchpadMachineInspector: View {
         String(localized: "The host programs and the guest environment come from different Core Bundles. Update the guest environment to match.")
     }
 
+    // MARK: - Header
+
+    /// The device glyph, name, device and OS, the state chip, and Start or
+    /// Stop with the console and the more menu.
+    private var header: some View {
+        let status = VPhoneLaunchpadMachineStatus(machine.path, library: library)
+        let identity = HStack(alignment: .top, spacing: 14) {
+            DKIcon(machine.glyph, size: 26)
+                .foregroundStyle(DK.Palette.inkSecondary)
+                .frame(width: 48, height: 48)
+                .background(DK.Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: DK.Radius.window, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: DK.Radius.window, style: .continuous).strokeBorder(DK.Palette.line, lineWidth: DK.Metric.hairline))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: machine.name)
+                    .font(DK.Typeface.sheetTitle)
+                    .foregroundStyle(DK.Palette.ink)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+                    .accessibilityAddTraits(.isHeader)
+                Text(verbatim: subtitle)
+                    .font(DK.Typeface.body)
+                    .foregroundStyle(DK.Palette.muted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(subtitle)
+                DKBadge(status.text, tone: status.tone)
+                    .help(status.text)
+                    .padding(.top, 6)
+            }
+        }
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: DK.Space.s3) {
+                identity
+                Spacer(minLength: 0)
+                headerActions
+            }
+            VStack(alignment: .leading, spacing: DK.Space.s3) {
+                identity
+                headerActions
+            }
+        }
+        .padding(.horizontal, DK.Space.s5)
+        .padding(.top, DK.Space.s5)
+        .padding(.bottom, DK.Space.s4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(DK.Palette.divider).frame(height: DK.Metric.hairline)
+        }
+    }
+
+    /// "iPhone17,3 · iOS 26.6.2 (23G90)"; a machine not yet restored has
+    /// neither.
+    private var subtitle: String {
+        let parts = [machine.restoreInfo?.device, machine.osDescription].compactMap(\.self)
+        return parts.isEmpty ? String(localized: "Not restored") : parts.joined(separator: " · ")
+    }
+
+    private var headerActions: some View {
+        let path = machine.path
+        let state = library.state(of: path)
+        let isCreating = library.creations[path]?.isRunning == true
+        let actions = actions
+        return HStack(spacing: 6) {
+            if isCreating {
+                DKButton(DKButtonSpec(String(localized: "Show Progress"), variant: .primary) {
+                    onShowProgress(path)
+                })
+            } else if state == .running {
+                DKButton(DKButtonSpec(
+                    String(localized: "Stop"),
+                    glyph: .stop,
+                    help: String(localized: "Stop \(machine.name)"),
+                ) { actions.stop([machine]) })
+            } else {
+                DKButton(DKButtonSpec(
+                    String(localized: "Start"),
+                    glyph: .play,
+                    variant: .primary,
+                    isEnabled: state == .stopped,
+                    help: String(localized: "Start the selected machine"),
+                ) { actions.start([machine]) })
+            }
+            if !isCreating {
+                DKButton(DKButtonSpec(String(localized: "Open Console"), glyph: .terminal, size: .icon) {
+                    onOpenConsole(path)
+                })
+            }
+            VPhoneLaunchpadMachineMoreButton(items: actions.items(for: [machine]))
+        }
+        .fixedSize()
+    }
+
+    // MARK: - Creation
+
+    @ViewBuilder
+    private func creationSummary(_ creation: VPhoneLaunchpadCreationPipeline) -> some View {
+        if creation.isRunning {
+            let steps = VPhoneLaunchpadCreationPipeline.Step.allCases.count
+            let step = creation.current
+            DKCard(.padded) {
+                HStack(alignment: .firstTextBaseline, spacing: DK.Space.s3) {
+                    Text(step.map { String(localized: "Step \($0.rawValue + 1) of \(steps) · \($0.title)") } ?? String(localized: "Creating \(creation.options.name)"))
+                        .font(DK.Typeface.bodyStrong)
+                        .foregroundStyle(DK.Palette.ink)
+                    Spacer(minLength: 0)
+                    if let fraction = creation.downloadFraction {
+                        Text(fraction, format: .percent.precision(.fractionLength(0)))
+                            .font(DK.Typeface.body)
+                            .monospacedDigit()
+                            .foregroundStyle(DK.Palette.muted)
+                    }
+                }
+                // Only the IPSW download reports how far it has come.
+                if let fraction = creation.downloadFraction {
+                    DKProgress(value: fraction, tone: .warning, label: step?.title)
+                } else {
+                    DKProgress.indeterminate(tone: .warning, label: step?.title)
+                }
+            }
+        } else if creation.isFinished {
+            DKBanner(String(localized: "Created"), tone: .info, actionLabel: String(localized: "View Details")) {
+                onShowProgress(creation.machine)
+            }
+        } else {
+            DKBanner(
+                creation.failure?.message ?? String(localized: "Creation stopped"),
+                tone: .danger,
+                actionLabel: String(localized: "View Details"),
+            ) {
+                onShowProgress(creation.machine)
+            }
+        }
+    }
+
     // MARK: - Core Bundle
+
+    /// The host programs and the guest environment from different bundles.
+    /// The banner's button updates the guest environment, under the rules of
+    /// the menu item of that name.
+    @ViewBuilder
+    private var mixedBanner: some View {
+        if library.bindings[machine.path]?.hasMixedVersions == true {
+            let path = machine.path
+            let library = library
+            DKBanner(Self.mixedHelp, action: DKButtonSpec(
+                String(localized: "Update Guest Environment"),
+                size: .small,
+                isEnabled: isStopped && machine.restoreInfo != nil && machine.customFirmwareInstalled != false,
+            ) {
+                Task { await library.updateGuestEnvironment(path) }
+            })
+        }
+    }
 
     /// The three layers a bundle provides, each from the bundle that last
     /// wrote it. A new binding reaches the host programs at the next start
@@ -210,30 +253,47 @@ struct VPhoneLaunchpadMachineInspector: View {
         let binding = library.bindings[machine.path]
         let version = library.bundleVersion(for: machine.path)
         let isInstalled = version.map(model.bundles.selectableVersions.contains) ?? false
-        return Section("Core Bundle") {
-            layer(
-                "Host Programs",
-                version ?? String(localized: "Unknown"),
-                warning: isInstalled ? nil : version.map { String(localized: "VPhone.bundle \($0) is not installed.") },
-                help: String(localized: "vphone-cli and vphone-vm come from this bundle at every start."),
-            )
-            layer(
-                "Guest Environment",
-                binding?.guestEnvironment ?? String(localized: "Unknown"),
-                warning: binding?.hasMixedVersions == true ? Self.mixedHelp : nil,
-                help: String(localized: "vphoned and the hook libraries in the guest."),
-            )
-            layer(
-                "Boot Chain",
-                binding?.bootChain ?? String(localized: "Unknown"),
-                help: String(localized: "The Core Bundle that built the boot chain when the machine was created."),
-            )
-            HStack {
-                Spacer()
-                Button("Change…") { onChangeBundle(machine) }
-                    .disabled(model.bundles.selectableVersions.isEmpty || library.creations[machine.path]?.isRunning == true)
-            }
+        let unknown = String(localized: "Unknown")
+        return DKSection(
+            String(localized: "Core Bundle"),
+            accessory: DKButtonSpec(
+                String(localized: "Change…"),
+                isEnabled: actions.canChangeBundle([machine]),
+            ) { onPresent(.changeBundle([machine])) },
+            items: [
+                layer(
+                    String(localized: "Host Programs"),
+                    version ?? unknown,
+                    help: String(localized: "vphone-cli and vphone-vm come from this bundle at every start."),
+                    warning: isInstalled ? nil : version.map { String(localized: "VPhone.bundle \($0) is not installed.") },
+                ),
+                layer(
+                    String(localized: "Guest Environment"),
+                    binding?.guestEnvironment ?? unknown,
+                    help: String(localized: "vphoned and the hook libraries in the guest."),
+                    warns: binding?.hasMixedVersions == true,
+                ),
+                layer(
+                    String(localized: "Boot Chain"),
+                    binding?.bootChain ?? unknown,
+                    help: String(localized: "The Core Bundle that built the boot chain when the machine was created."),
+                ),
+            ],
+        )
+    }
+
+    /// One layer: its version as a badge, in the warning tone when `warns`,
+    /// what it is, and a warning line when there is one to spell out.
+    private func layer(_ title: String, _ version: String, help: String, warning: String? = nil, warns: Bool = false) -> DKListItem {
+        var lines: [DKListItem.Line] = [DKListItem.Line(help)]
+        if let warning {
+            lines.append(DKListItem.Line(warning, tone: .warning))
         }
+        return DKListItem(
+            title,
+            badges: [DKListItem.Badge(version, tone: warns || warning != nil ? .warning : .neutral)],
+            lines: lines,
+        )
     }
 
     // MARK: - Patches
@@ -265,82 +325,112 @@ struct VPhoneLaunchpadMachineInspector: View {
     @ViewBuilder
     private var patchesSection: some View {
         if library.creations[machine.path]?.isRunning != true {
-            Section("Patches") {
+            VStack(alignment: .leading, spacing: DK.Space.s2) {
                 if let catalog = patchCatalog, patchCatalogMachine == machine.path {
-                    LabeledContent(
-                        "Preset",
-                        value: catalog.preset(catalog.activePreset)?.displayTitle ?? catalog.activePreset,
-                    )
-                    LabeledContent("Overrides") {
-                        Text(catalog.overrideCount == 0
-                            ? String(localized: "None")
-                            : String(localized: "\(catalog.overrideCount) changed from the preset"))
-                            .help(overridesHelp(catalog))
-                    }
-                    if catalog.installed == true, let pending = catalog.pendingPatches {
-                        LabeledContent("Not Applied") {
-                            HStack(spacing: 4) {
-                                if pending > 0 {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .foregroundStyle(.yellow)
-                                        .imageScale(.small)
-                                }
-                                if pending == 0 {
-                                    Text("None")
-                                } else {
-                                    Text("^[\(pending) patch](inflect: true)")
-                                }
-                            }
+                    DKSection(String(localized: "Patches")) {
+                        DKKeyValueRow(DKKeyValue(
+                            String(localized: "Preset"),
+                            catalog.preset(catalog.activePreset)?.displayTitle ?? catalog.activePreset,
+                        ))
+                        DKKeyValueRow(DKKeyValue(
+                            String(localized: "Overrides"),
+                            catalog.overrideCount == 0
+                                ? String(localized: "None")
+                                : String(localized: "\(catalog.overrideCount) changed from the preset"),
+                        ))
+                        .help(overridesHelp(catalog))
+                        if catalog.installed == true, let pending = catalog.pendingPatches {
+                            DKKeyValueRow(DKKeyValue(
+                                String(localized: "Not Applied"),
+                                pending == 0 ? String(localized: "None") : Self.inflected("^[\(pending) patch](inflect: true)"),
+                                tone: pending == 0 ? .success : .warning,
+                            ))
                             .help(pendingHelp(catalog, pending: pending))
                         }
-                        // The kernelcache has its own button below; only the
-                        // restore-only patches need this spelled-out dead-end.
-                        if catalog.pendingRestorePatches > 0 {
-                            Text("Boot chain: ^[\(catalog.pendingRestorePatches) patch](inflect: true) (TXM, device tree, LLB) not applied; only a restore applies them, which erases the data. Run `vphone-cli fw patches \(machine.name)` for each.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
                     }
-                    HStack {
-                        Spacer()
-                        if catalog.installed == true, catalog.pendingKernelPatches > 0 {
-                            Button("Update Kernel") {
-                                Task {
-                                    await library.updateKernel(machine.path)
-                                    patchRevision += 1
-                                }
-                            }
-                            .disabled(library.state(of: machine.path) != .stopped)
-                            .help(library.state(of: machine.path) == .stopped
-                                ? String(localized: "Swaps the Preboot kernelcache for the one this machine's patches resolve to, keeping the data (no restore).")
-                                : String(localized: "Stop the machine to update its kernel."))
-                        }
-                        if catalog.installed == true, catalog.pendingGuestPatches > 0 {
-                            Button("Apply to Guest") {
-                                Task {
-                                    await library.updateGuestEnvironment(machine.path)
-                                    patchRevision += 1
-                                }
-                            }
-                            .disabled(library.state(of: machine.path) != .stopped)
-                            .help(library.state(of: machine.path) == .stopped
-                                ? String(localized: "Updates the guest environment, which turns guest patches on or off to match this machine’s choice.")
-                                : String(localized: "Stop the machine to apply its patch choice to the guest."))
-                        }
-                        Button("Edit…") { editedPatches = catalog.selection }
+                    // The kernelcache has its own button below; only the
+                    // restore-only patches need this spelled-out dead-end.
+                    if catalog.installed == true, catalog.pendingPatches != nil, catalog.pendingRestorePatches > 0 {
+                        footnote(Text("Boot chain: ^[\(catalog.pendingRestorePatches) patch](inflect: true) (TXM, device tree, LLB) not applied; only a restore applies them, which erases the data. Run `vphone-cli fw patches \(machine.name)` for each."))
                     }
+                    patchActions(catalog)
                 } else if let patchCatalogError {
-                    Text("Unavailable")
-                        .foregroundStyle(.secondary)
-                        .help(patchCatalogError)
+                    DKSection(String(localized: "Patches")) {
+                        Text("Unavailable")
+                            .font(DK.Typeface.body)
+                            .foregroundStyle(DK.Palette.muted)
+                            .frame(maxWidth: .infinity, minHeight: DK.Metric.rowHeight, alignment: .leading)
+                            .padding(.horizontal, 14)
+                            .help(patchCatalogError)
+                    }
                 } else {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(maxWidth: .infinity)
+                    DKSection(String(localized: "Patches")) {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(maxWidth: .infinity, minHeight: DK.Metric.rowHeight)
+                    }
                 }
             }
         }
+    }
+
+    /// Update Kernel and Apply to Guest while patches are pending, then
+    /// Edit. A running machine says why the first two are dimmed.
+    private func patchActions(_ catalog: VPhoneLaunchpadPatchCatalog) -> some View {
+        let showsKernel = catalog.installed == true && catalog.pendingKernelPatches > 0
+        let showsGuest = catalog.installed == true && catalog.pendingGuestPatches > 0
+        return VStack(alignment: .leading, spacing: 6) {
+            if !isStopped, showsKernel || showsGuest {
+                footnote(Text("Stop the machine to apply."))
+            }
+            HStack(spacing: 6) {
+                Spacer(minLength: 0)
+                patchButtons(catalog, showsKernel: showsKernel, showsGuest: showsGuest)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func patchButtons(_ catalog: VPhoneLaunchpadPatchCatalog, showsKernel: Bool, showsGuest: Bool) -> some View {
+        let path = machine.path
+        let library = library
+        let isStopped = isStopped
+        Group {
+            if showsKernel {
+                DKButton(DKButtonSpec(
+                    String(localized: "Update Kernel"),
+                    size: .small,
+                    isEnabled: isStopped,
+                    help: isStopped
+                        ? String(localized: "Swaps the Preboot kernelcache for the one this machine's patches resolve to, keeping the data (no restore).")
+                        : String(localized: "Stop the machine to update its kernel."),
+                ) {
+                    Task {
+                        await library.updateKernel(path)
+                        patchRevision += 1
+                    }
+                })
+            }
+            if showsGuest {
+                DKButton(DKButtonSpec(
+                    String(localized: "Apply to Guest"),
+                    size: .small,
+                    isEnabled: isStopped,
+                    help: isStopped
+                        ? String(localized: "Updates the guest environment, which turns guest patches on or off to match this machine’s choice.")
+                        : String(localized: "Stop the machine to apply its patch choice to the guest."),
+                ) {
+                    Task {
+                        await library.updateGuestEnvironment(path)
+                        patchRevision += 1
+                    }
+                })
+            }
+            DKButton(DKButtonSpec(String(localized: "Edit…"), size: .small) {
+                editedPatches = catalog.selection
+            })
+        }
+        .fixedSize()
     }
 
     private func pendingHelp(_ catalog: VPhoneLaunchpadPatchCatalog, pending: Int) -> String {
@@ -398,46 +488,120 @@ struct VPhoneLaunchpadMachineInspector: View {
         }
     }
 
-    private func layer(_ title: LocalizedStringKey, _ value: String, warning: String? = nil, help: String) -> some View {
-        LabeledContent(title) {
-            HStack(spacing: 4) {
-                if warning != nil {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.yellow)
-                        .imageScale(.small)
+    // MARK: - Facts
+
+    private var firmwareSection: some View {
+        DKSection(String(localized: "Firmware")) {
+            if let info = machine.restoreInfo {
+                factRow(DKKeyValue(machine.osName, "\(info.ios.version) (\(info.ios.build))"))
+                factRow(DKKeyValue("cloudOS", "\(info.cloudOS.version) (\(info.cloudOS.build))"))
+                if let firmwareName = machine.firmwareName {
+                    // An unfinished install cannot boot.
+                    factRow(DKKeyValue(
+                        String(localized: "Variant"),
+                        firmwareName,
+                        tone: machine.customFirmwareInstalled == false ? .warning : nil,
+                    ))
                 }
-                Text(value)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-            }
-            .help(warning ?? help)
-        }
-    }
-
-    private func value(_ title: LocalizedStringKey, _ value: String) -> some View {
-        LabeledContent(title) {
-            Text(value)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
-                .help(value)
-        }
-    }
-
-    private func creationSummary(_ creation: VPhoneLaunchpadCreationPipeline) -> some View {
-        LabeledContent {
-            Button(creation.isRunning ? LocalizedStringKey("Show Progress") : LocalizedStringKey("View Details")) {
-                onShowProgress(creation.machine)
-            }
-        } label: {
-            if creation.isRunning {
-                Label { Text("Creating: \(creation.current?.title ?? "")") } icon: { VPhoneLaunchpadStatusIcon(status: .running) }
-            } else if creation.isFinished {
-                Label { Text("Created") } icon: { VPhoneLaunchpadStatusIcon(status: .passed) }
             } else {
-                Label { Text(creation.failure?.message ?? String(localized: "Creation stopped")) } icon: { VPhoneLaunchpadStatusIcon(status: .failed) }
+                Text("Not restored")
+                    .font(DK.Typeface.body)
+                    .foregroundStyle(DK.Palette.muted)
+                    .frame(maxWidth: .infinity, minHeight: DK.Metric.rowHeight, alignment: .leading)
+                    .padding(.horizontal, 14)
             }
         }
+    }
+
+    private var hardwareSection: some View {
+        var rows = [
+            DKKeyValue(String(localized: "CPU"), String(localized: "\(machine.cpuCount) cores")),
+            DKKeyValue(String(localized: "Memory"), VPhoneLaunchpadMachinesView.memory(machine.memoryMB)),
+            DKKeyValue(String(localized: "Disk"), VPhoneLaunchpadMachinesView.disk(machine.diskSizeBytes)),
+        ]
+        if machine.unlocksAtStartup == true {
+            rows.append(DKKeyValue(String(localized: "Unlock at Startup"), String(localized: "On")))
+        }
+        return facts(String(localized: "Hardware"), rows)
+    }
+
+    private var networkSection: some View {
+        var rows = [DKKeyValue(String(localized: "Mode"), machine.networkDescription)]
+        if let address = machine.addressDescription {
+            rows.append(DKKeyValue(String(localized: "IPv4 Address"), address, monospaced: true))
+        }
+        if !machine.network.macAddress.isEmpty {
+            rows.append(DKKeyValue(String(localized: "MAC Address"), machine.network.macAddress, monospaced: true))
+        }
+        if let name = machine.network.localHostName {
+            rows.append(DKKeyValue(String(localized: "mDNS Name"), "\(name).local", monospaced: true))
+        }
+        for (index, forward) in (machine.network.portForwards ?? []).enumerated() {
+            rows.append(DKKeyValue(
+                String(localized: "Port Forward"),
+                "\(forward.transport.uppercased()) \(forward.hostAddress ?? "127.0.0.1"):\(forward.hostPort) → \(forward.guestPort)",
+                monospaced: true,
+                id: "forward-\(index)",
+            ))
+        }
+        return facts(String(localized: "Network"), rows)
+    }
+
+    private var identitySection: some View {
+        var rows: [DKKeyValue] = []
+        if let udid = machine.udid {
+            rows.append(DKKeyValue("UDID", udid, monospaced: true))
+        }
+        rows.append(DKKeyValue(String(localized: "Location"), VPhoneLaunchpadHostSetup.abbreviated(machine.path.url), monospaced: true))
+        return facts(String(localized: "Identity"), rows)
+    }
+
+    private func facts(_ title: String, _ rows: [DKKeyValue]) -> some View {
+        DKSection(title) {
+            ForEach(rows) { factRow($0) }
+        }
+    }
+
+    /// A key-value row whose full value is its help tag, since long values
+    /// truncate.
+    private func factRow(_ row: DKKeyValue) -> some View {
+        DKKeyValueRow(row)
+            .help(row.value)
+    }
+
+    // MARK: - Console
+
+    /// The tail of the machine's console log, following it while the machine
+    /// runs, with the full console and the recent commands a click away.
+    private var consoleSection: some View {
+        let path = machine.path
+        let isRunning = library.state(of: path) == .running
+        return DKSection(
+            String(localized: "Console"),
+            accessory: DKButtonSpec(String(localized: "Open Console")) { onOpenConsole(path) },
+            card: false,
+        ) {
+            VStack(alignment: .trailing, spacing: DK.Space.s2) {
+                VPhoneLaunchpadConsoleTail(url: VPhoneLaunchpadMachineLibrary.consoleLog(path), following: isRunning)
+                    .frame(height: 150)
+                DKButton(DKButtonSpec(String(localized: "Recent Commands"), size: .small) { showsCommands = true })
+            }
+        }
+    }
+
+    // MARK: - Helpers
+
+    private func footnote(_ text: Text) -> some View {
+        text
+            .font(DK.Typeface.caption)
+            .lineSpacing(3)
+            .foregroundStyle(DK.Palette.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, DK.Space.s1)
+    }
+
+    /// A string with an inflection rule applied: "1 patch", "2 patches".
+    private static func inflected(_ resource: LocalizedStringResource) -> String {
+        String(AttributedString(localized: resource).characters)
     }
 }

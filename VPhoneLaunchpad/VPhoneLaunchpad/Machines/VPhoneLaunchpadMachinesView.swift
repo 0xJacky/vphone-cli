@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import VPhoneDesignKit
 
 struct VPhoneLaunchpadMachinesView: View {
     typealias MachinePath = VPhoneLaunchpadMachinePath
@@ -30,11 +31,18 @@ struct VPhoneLaunchpadMachinesView: View {
         }
     }
 
+    /// The header's filter. Machines that are busy (being created, exported
+    /// or shut down) show only under All.
+    enum Scope: Hashable {
+        case all, running, stopped
+    }
+
     @Environment(VPhoneLaunchpadModel.self) private var model
     @State private var sheet: Sheet?
     /// The machines the delete confirmation is for; empty when it is closed.
     @State private var deletion: [MachinePath] = []
     @State private var filter = ""
+    @State private var scope = Scope.all
     /// Empty keeps the order `vm list` returns; a header click replaces it.
     @State private var sortOrder: [KeyPathComparator<VPhoneLaunchpadMachine>] = []
     /// The table appears only once `vm list` returns, after the window has
@@ -47,205 +55,155 @@ struct VPhoneLaunchpadMachinesView: View {
         model.machines
     }
 
-    /// The machines the table shows: those matching the search, in the
-    /// header's order.
+    private var actions: VPhoneLaunchpadMachineActions {
+        VPhoneLaunchpadMachineActions(
+            model: model,
+            present: { sheet = $0 },
+            delete: { deletion = $0 },
+        )
+    }
+
+    /// The machines the table shows: those in the scope that match the
+    /// search, in the header's order.
     private var rows: [VPhoneLaunchpadMachine] {
         let needle = filter.trimmingCharacters(in: .whitespaces)
-        let matching = needle.isEmpty ? library.machines : library.machines.filter { Self.matches($0, needle) }
+        let matching = library.machines.filter { machine in
+            inScope(machine) && (needle.isEmpty || Self.matches(machine, needle))
+        }
         return matching.sorted(using: sortOrder)
+    }
+
+    private func inScope(_ machine: VPhoneLaunchpadMachine) -> Bool {
+        switch scope {
+        case .all: true
+        case .running: library.state(of: machine.path) == .running
+        case .stopped: library.state(of: machine.path) == .stopped
+        }
     }
 
     var body: some View {
         @Bindable var library = library
         @Bindable var model = model
-        Group {
-            if library.machines.isEmpty {
-                emptyState
-            } else if rows.isEmpty {
-                ContentUnavailableView.search(text: filter)
-            } else {
-                table(selection: $library.selection)
+        VStack(spacing: 0) {
+            header
+            Group {
+                if library.machines.isEmpty {
+                    emptyState
+                } else if rows.isEmpty {
+                    if filter.trimmingCharacters(in: .whitespaces).isEmpty {
+                        ContentUnavailableView("No Machines in This View", systemImage: "iphone")
+                    } else {
+                        ContentUnavailableView.search(text: filter)
+                    }
+                } else {
+                    table(selection: $library.selection)
+                }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .background(DK.Palette.window)
         // A hidden machine stays out of the selection, so Start, Delete and
         // the inspector act only on rows the table shows.
-        .onChange(of: filter) {
-            let visible = Set(rows.map(\.path))
-            library.selection.formIntersection(visible)
-        }
+        .onChange(of: filter) { dropHiddenSelection() }
+        .onChange(of: scope) { dropHiddenSelection() }
         .inspector(isPresented: $model.showsInspector) {
-            Group {
-                if let machine = library.selected {
-                    VPhoneLaunchpadMachineInspector(
-                        machine: machine,
-                        onShowProgress: { path in sheet = .creation(path) },
-                        onOpenConsole: { path in sheet = .console(path) },
-                        onChangeBundle: { machine in sheet = .changeBundle([machine]) },
-                    )
-                } else if library.selection.count > 1 {
-                    ContentUnavailableView("\(library.selection.count) Machines Selected", systemImage: "iphone")
-                } else {
-                    ContentUnavailableView("No Selection", systemImage: "iphone")
+            inspector
+                .inspectorColumnWidth(min: 300, ideal: 380, max: 520)
+                // The toggle belongs to the inspector's own toolbar section.
+                // Put in the content's toolbar, the section and its background
+                // were set up at launch but not again after the inspector was
+                // hidden and shown.
+                .toolbar {
+                    ToolbarItem(placement: .automatic) {
+                        inspectorToggle
+                    }
                 }
-            }
-            .inspectorColumnWidth(min: 300, ideal: 360, max: 520)
-            // The toggle belongs to the inspector's own toolbar section. Put in
-            // the content's toolbar, the section and its background were set up
-            // at launch but not again after the inspector was hidden and shown.
-            .toolbar { inspectorToolbar }
         }
-        .toolbar { toolbar }
         #if DEBUG
-            .onReceive(NotificationCenter.default.publisher(for: VPhoneLaunchpadPreview.sheetNotification)) { note in
-                sheet = note.object as? Sheet
-            }
+        .onReceive(NotificationCenter.default.publisher(for: VPhoneLaunchpadPreview.sheetNotification)) { note in
+            sheet = note.object as? Sheet
+        }
         #endif
-            .sheet(item: $sheet) { sheet in
-                sheetContent(sheet)
-                    .environment(model)
-            }
-            .confirmationDialog(
-                deletion.count == 1 ? "Delete \(deletion[0].name)?" : "Delete \(deletion.count) Machines?",
-                isPresented: Binding(get: { !deletion.isEmpty }, set: {
-                    if !$0 {
-                        deletion = []
-                    }
-                }),
-            ) {
-                Button("Delete", role: .destructive) {
-                    let machines = deletion
-                    Task {
-                        for machine in machines {
-                            await library.delete(machine)
-                        }
+        .sheet(item: $sheet) { sheet in
+            sheetContent(sheet)
+                .environment(model)
+        }
+        .confirmationDialog(
+            deletion.count == 1 ? "Delete \(deletion[0].name)?" : "Delete \(deletion.count) Machines?",
+            isPresented: Binding(get: { !deletion.isEmpty }, set: {
+                if !$0 {
+                    deletion = []
+                }
+            }),
+        ) {
+            Button("Delete", role: .destructive) {
+                let machines = deletion
+                Task {
+                    for machine in machines {
+                        await library.delete(machine)
                     }
                 }
-            } message: {
-                if deletion.count == 1 {
-                    Text("The machine's disk, firmware and settings are removed. This cannot be undone.")
-                } else {
-                    Text("Their disks, firmware and settings are removed. This cannot be undone.")
+            }
+        } message: {
+            if deletion.count == 1 {
+                Text("The machine's disk, firmware and settings are removed. This cannot be undone.")
+            } else {
+                Text("Their disks, firmware and settings are removed. This cannot be undone.")
+            }
+        }
+        .alert(
+            library.actionError?.message ?? "",
+            isPresented: Binding(get: { library.actionError != nil }, set: {
+                if !$0 {
+                    library.actionError = nil
                 }
-            }
-            .alert(
-                library.actionError?.message ?? "",
-                isPresented: Binding(get: { library.actionError != nil }, set: {
-                    if !$0 {
-                        library.actionError = nil
-                    }
-                }),
-                presenting: library.actionError,
-            ) { _ in
-                Button("OK") {}
-            } message: { error in
-                Text(error.detail ?? "")
-            }
-    }
-
-    // MARK: - Toolbar
-
-    /// The machine list's own tools. Host Setup and Core Bundle hold the
-    /// leading edge; the space pushes New Machine and the search field to the
-    /// list's trailing edge. What acts on the selection is in the inspector.
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        flexibleSpace
-        ToolbarItem(placement: .automatic) {
-            Menu {
-                Button("New Machine…") { sheet = .newMachine }
-                Button("Import…") { chooseImport() }
-                    .disabled(library.globalActivity != nil)
-            } label: {
-                Label("New Machine", systemImage: "plus")
-            }
-            .menuIndicator(.hidden)
-            .help("Create a machine")
-            .disabled(model.bundles.defaultVersion == nil)
-        }
-        // Without it, macOS 26 draws New Machine and the search field in
-        // one glass capsule.
-        if #available(macOS 26, *) {
-            ToolbarSpacer(.fixed)
-        }
-        ToolbarItem(placement: .automatic) {
-            VPhoneLaunchpadSearchField(text: $filter, prompt: String(localized: "Search machines"))
-                .frame(width: 200)
+            }),
+            presenting: library.actionError,
+        ) { _ in
+            Button("OK") {}
+        } message: { error in
+            Text(error.detail ?? "")
         }
     }
 
-    /// Space that pushes what follows to the trailing edge. On macOS 26 a
-    /// `Spacer` in a `ToolbarItem` is an item like any other: it joins the
-    /// next item's glass capsule and stretches it, leaving the icon at the
-    /// capsule's far end. `ToolbarSpacer` is space between capsules.
-    @ToolbarContentBuilder
-    private var flexibleSpace: some ToolbarContent {
-        if #available(macOS 26, *) {
-            ToolbarSpacer(.flexible)
-        } else {
-            ToolbarItem(placement: .automatic) {
-                Spacer()
-            }
-        }
+    private func dropHiddenSelection() {
+        let visible = Set(rows.map(\.path))
+        library.selection.formIntersection(visible)
     }
 
-    /// The inspector toggle, then Start or Stop for the selection beside the
-    /// actions menu at the window's trailing edge. Those two go away with the
-    /// inspector; the context menu and a double-click still reach them.
-    @ToolbarContentBuilder
-    private var inspectorToolbar: some ToolbarContent {
-        let selected = library.selectedMachines
-        let stopped = selected.filter { library.state(of: $0.path) == .stopped }
-        let running = selected.filter { library.state(of: $0.path) == .running }
-        ToolbarItem(placement: .automatic) {
-            inspectorToggle
-        }
-        if model.showsInspector {
-            flexibleSpace
-            ToolbarItemGroup(placement: .automatic) {
-                if stopped.isEmpty, !running.isEmpty {
-                    Button {
-                        stop(running)
-                    } label: {
-                        Label("Stop", systemImage: "stop.fill")
-                    }
-                    .help("Stop \(running.map(\.name).joined(separator: ", "))")
-                } else {
-                    Button {
-                        start(stopped)
-                    } label: {
-                        Label("Start", systemImage: "play.fill")
-                    }
-                    .help("Start the selected machine")
-                    .disabled(stopped.isEmpty)
-                }
-                Menu {
-                    machineActions(selected)
-                } label: {
-                    Label("Actions", systemImage: "ellipsis")
-                }
-                .disabled(selected.isEmpty)
-                // A menu with its arrow gets a capsule of its own; without it
-                // the menu shares Start's.
-                .menuIndicator(.hidden)
-            }
-        }
-    }
+    // MARK: - Header
 
-    private func start(_ machines: [VPhoneLaunchpadMachine], headless: Bool = false) {
-        Task {
-            for machine in machines {
-                await library.start(machine.path, headless: headless)
-            }
-        }
-    }
-
-    private func stop(_ machines: [VPhoneLaunchpadMachine]) {
-        Task {
-            await withTaskGroup(of: Void.self) { group in
-                for machine in machines {
-                    group.addTask { await library.stop(machine.path) }
-                }
-            }
+    /// The page's title, counts and tools: the state filter, New Machine,
+    /// Import and the search field. What acts on the selection is in the
+    /// inspector and the context menu.
+    private var header: some View {
+        let all = library.machines
+        let running = all.count { library.state(of: $0.path) == .running }
+        let stopped = all.count { library.state(of: $0.path) == .stopped }
+        let shown = String(AttributedString(localized: "^[\(rows.count) machine](inflect: true)").characters)
+        let hasBundle = model.bundles.defaultVersion != nil
+        return DKPageHeader(
+            String(localized: "Machines"),
+            subtitle: String(localized: "\(shown) · \(running) running"),
+        ) {
+            DKSegmented(String(localized: "Show"), selection: $scope, options: [
+                DKSegmentOption(String(localized: "All"), value: .all, count: all.count),
+                DKSegmentOption(String(localized: "Running"), value: .running, count: running),
+                DKSegmentOption(String(localized: "Stopped"), value: .stopped, count: stopped),
+            ])
+            DKButton(DKButtonSpec(
+                String(localized: "New Machine"),
+                glyph: .plus,
+                variant: .primary,
+                isEnabled: hasBundle,
+                help: String(localized: "Create a machine"),
+            ) { sheet = .newMachine })
+            DKButton(DKButtonSpec(
+                String(localized: "Import…"),
+                glyph: .download,
+                isEnabled: hasBundle && library.globalActivity == nil,
+            ) { chooseImport() })
+            DKSearchField(String(localized: "Search machines"), text: $filter, width: 180)
         }
     }
 
@@ -258,160 +216,138 @@ struct VPhoneLaunchpadMachinesView: View {
         .help(model.showsInspector ? "Hide the inspector" : "Show the inspector")
     }
 
-    /// The same actions in the toolbar menu and the table's context menu.
-    /// Several machines get the batch actions: one settings edit, export and
-    /// delete, which need every machine stopped, then start and stop.
+    // MARK: - Inspector
+
     @ViewBuilder
-    private func machineActions(_ machines: [VPhoneLaunchpadMachine]) -> some View {
-        // Only while one of them is exporting or waiting to.
-        let exporting = machines.filter { library.exports[$0.path] != nil }
-        if !exporting.isEmpty {
-            Button("Cancel Export") {
-                for machine in exporting {
-                    library.cancelExport(machine.path)
-                }
-            }
-            Divider()
-        }
-        if machines.count > 1 {
-            let stopped = machines.filter { library.state(of: $0.path) == .stopped }
-            let running = machines.filter { library.state(of: $0.path) == .running }
-            let allStopped = stopped.count == machines.count
-            Button("Settings…") { sheet = .settings(machines) }
-                .disabled(!allStopped)
-            changeBundleButton(machines)
-            Button("Export…") { sheet = .export(machines.map(\.path)) }
-                .disabled(!allStopped)
-            Button("Delete…", role: .destructive) { deletion = machines.map(\.path) }
-                .disabled(!allStopped)
-            Divider()
-            Button("Start") { start(stopped) }
-                .disabled(stopped.isEmpty)
-            Button("Start Headless") { start(stopped, headless: true) }
-                .disabled(stopped.isEmpty)
-            Button("Stop") { stop(running) }
-                .disabled(running.isEmpty)
-            Divider()
-            Button("Show in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting(machines.map(\.path.url))
-            }
-        } else if let machine = machines.first {
-            let isStopped = library.state(of: machine.path) == .stopped
-            Button("Start Headless") { Task { await library.start(machine.path, headless: true) } }
-                .disabled(!isStopped)
-            Divider()
-            Button("Settings…") { sheet = .settings([machine]) }
-                .disabled(!isStopped)
-            changeBundleButton([machine])
-            Button("Rename…") { sheet = .rename(machine.path) }
-                .disabled(!isStopped)
-            Button("Clone…") { sheet = .clone(machine.path) }
-                .disabled(!isStopped)
-            Button("Export…") { sheet = .export([machine.path]) }
-                .disabled(!isStopped)
-            // Open while the machine runs too, to read the list; taking,
-            // reverting and deleting wait for it to stop.
-            Button("Snapshots…") { sheet = .snapshots(machine.path) }
-                .disabled(library.creations[machine.path]?.isRunning == true)
-            Button("Install Custom Firmware") {
-                Task { await library.installCustomFirmware(machine.path) }
-            }
-            // Only for an unfinished install: that is when the restore tree it
-            // reads is still there. A finished one removes it.
-            .disabled(!isStopped || machine.customFirmwareInstalled != false)
-            // The finished-install counterpart: redeploys the machine's own
-            // bundle's guest resources without the restore tree.
-            Button("Update Guest Environment") {
-                Task { await library.updateGuestEnvironment(machine.path) }
-            }
-            .disabled(!isStopped || machine.restoreInfo == nil || machine.customFirmwareInstalled == false)
-            Divider()
-            Button("Show in Finder") {
-                NSWorkspace.shared.activateFileViewerSelecting([machine.path.url])
-            }
-            Button("Open Console") { sheet = .console(machine.path) }
-            Button("Show Console Log") {
-                NSWorkspace.shared.open(VPhoneLaunchpadMachineLibrary.consoleLog(machine.path))
-            }
-            Button("Show Patch Log") {
-                NSWorkspace.shared.open(VPhoneLaunchpadMachineLibrary.consoleLog(machine.path, suffix: "-patch"))
-            }
-            .disabled(!FileManager.default.fileExists(atPath: VPhoneLaunchpadMachineLibrary.consoleLog(machine.path, suffix: "-patch").path))
-            Divider()
-            Button("Delete…", role: .destructive) { deletion = [machine.path] }
-                .disabled(!isStopped)
+    private var inspector: some View {
+        if let machine = library.selected {
+            VPhoneLaunchpadMachineInspector(
+                machine: machine,
+                onShowProgress: { path in sheet = .creation(path) },
+                onOpenConsole: { path in sheet = .console(path) },
+                onPresent: { sheet = $0 },
+                onDelete: { deletion = $0 },
+            )
+        } else if library.selection.count > 1 {
+            selectionSummary(library.selectedMachines)
+        } else {
+            ContentUnavailableView("No Selection", systemImage: "iphone")
         }
     }
 
-    /// Rebinding applies at the next start, so running machines may change
-    /// too. A machine still being created gets its bundle from the pipeline.
-    private func changeBundleButton(_ machines: [VPhoneLaunchpadMachine]) -> some View {
-        Button("Change Core Bundle…") { sheet = .changeBundle(machines) }
-            .disabled(model.bundles.selectableVersions.isEmpty
-                || machines.contains { library.creations[$0.path]?.isRunning == true })
+    /// Several machines: Start for the stopped ones, or Stop when none is
+    /// stopped and some are running, beside the batch menu.
+    private func selectionSummary(_ machines: [VPhoneLaunchpadMachine]) -> some View {
+        let stopped = machines.filter { library.state(of: $0.path) == .stopped }
+        let running = machines.filter { library.state(of: $0.path) == .running }
+        let actions = actions
+        return ContentUnavailableView {
+            Label("\(machines.count) Machines Selected", systemImage: "iphone")
+        } actions: {
+            HStack(spacing: DK.Space.s2) {
+                if stopped.isEmpty, !running.isEmpty {
+                    DKButton(DKButtonSpec(
+                        String(localized: "Stop"),
+                        glyph: .stop,
+                        help: String(localized: "Stop \(running.map(\.name).joined(separator: ", "))"),
+                    ) { actions.stop(running) })
+                } else {
+                    DKButton(DKButtonSpec(
+                        String(localized: "Start"),
+                        glyph: .play,
+                        variant: .primary,
+                        isEnabled: !stopped.isEmpty,
+                        help: String(localized: "Start the selected machine"),
+                    ) { actions.start(stopped) })
+                }
+                VPhoneLaunchpadMachineMoreButton(items: actions.items(for: machines))
+            }
+        }
     }
 
     // MARK: - Table
 
     private func table(selection: Binding<Set<MachinePath>>) -> some View {
         Table(rows, selection: selection, sortOrder: $sortOrder) {
-            TableColumn("Name", value: \.name)
-                .width(min: 90, ideal: 110)
+            TableColumn("Name", value: \.name) { machine in
+                VPhoneLaunchpadTableCell(.title(
+                    machine.name,
+                    subtitle: machine.restoreInfo?.device,
+                    leading: .glyph(machine.glyph),
+                ))
+            }
+            .width(min: 130, ideal: 170)
             if library.spansLibraries {
                 TableColumn("Location", value: \.libraryRoot) { machine in
-                    Text(verbatim: VPhoneLaunchpadMachineLocations.volumeName(machine.libraryRoot))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    VPhoneLaunchpadTableCell(.muted(VPhoneLaunchpadMachineLocations.volumeName(machine.libraryRoot)))
                         .help(VPhoneLaunchpadHostSetup.abbreviated(URL(fileURLWithPath: machine.libraryRoot, isDirectory: true)))
                 }
                 .width(min: 80, ideal: 110)
             }
-            // Standard comparison orders 18.10 after 18.9.
-            TableColumn("iOS", value: \.iosVersion) { machine in
-                Text(verbatim: machine.restoreInfo.map { "\($0.ios.version) (\($0.ios.build))" } ?? "—")
-            }
-            .width(min: 110, ideal: 120)
-            TableColumn("Core Bundle") { machine in
-                // Each cell is a hosting view of its own. When its row leaves
-                // the table, the cell is updated once more with an empty
-                // environment, where reading the model is a fatal error.
-                VPhoneLaunchpadMachineBundleLabel(machine: machine.path)
-                    .environment(model)
-            }
-            .width(min: 70, ideal: 90)
             TableColumn("State") { machine in
-                VPhoneLaunchpadMachineStateLabel(
-                    state: library.state(of: machine.path),
-                    progress: library.progress(of: machine.path),
-                )
+                VPhoneLaunchpadTableCell(VPhoneLaunchpadMachineStatus(machine.path, library: library).cell)
             }
-            .width(min: 150, ideal: 160)
-            TableColumn("CPU", value: \.cpuCount) { machine in
-                Text(verbatim: "\(machine.cpuCount)").monospacedDigit()
+            .width(min: 140, ideal: 170)
+            // Standard comparison orders 18.10 after 18.9.
+            TableColumn("Firmware", value: \.iosVersion) { machine in
+                VPhoneLaunchpadTableCell(firmwareCell(machine))
             }
-            .width(40)
-            TableColumn("Memory", value: \.memoryMB) { machine in
-                Text(Self.memory(machine.memoryMB)).monospacedDigit()
+            .width(min: 100, ideal: 130)
+            TableColumn("Core Bundle") { machine in
+                VPhoneLaunchpadTableCell(bundleCell(machine.path))
             }
-            .width(64)
-            TableColumn("Disk", value: \.diskSizeBytes) { machine in
-                Text(Self.disk(machine.diskSizeBytes)).monospacedDigit()
+            .width(min: 64, ideal: 84)
+            TableColumn("Resources", value: \.cpuCount) { machine in
+                VPhoneLaunchpadTableCell(.muted(machine.resourcesDescription))
             }
-            .width(64)
+            .width(min: 120, ideal: 150)
         }
         .contextMenu(forSelectionType: MachinePath.self) { paths in
-            machineActions(library.machines.filter { paths.contains($0.path) })
+            DKMenuContent(actions.items(for: library.machines.filter { paths.contains($0.path) }))
         } primaryAction: { paths in
-            start(library.machines.filter { paths.contains($0.path) && library.state(of: $0.path) == .stopped })
+            actions.start(library.machines.filter { paths.contains($0.path) && library.state(of: $0.path) == .stopped })
         }
         .focused($tableIsFocused)
         .onAppear {
             // The table comes back when a search matches again; the search
-            // field keeps the keyboard then.
-            if !(NSApp.keyWindow?.firstResponder is NSText) {
+            // field keeps the keyboard then. With no search typed, the field
+            // in the header, which the window may have focused first, gives
+            // it up.
+            if filter.isEmpty || !(NSApp.keyWindow?.firstResponder is NSText) {
                 tableIsFocused = true
             }
         }
+    }
+
+    /// The iOS version over its build, with a warning while the custom
+    /// firmware install is unfinished: such a machine cannot boot.
+    private func firmwareCell(_ machine: VPhoneLaunchpadMachine) -> DKTableCell {
+        guard let info = machine.restoreInfo else {
+            return .muted("—")
+        }
+        let cell = DKTableCell.title(
+            "\(machine.osName) \(info.ios.version)",
+            subtitle: info.ios.build,
+            subtitleMonospaced: true,
+            strong: false,
+        )
+        return cell.warning(machine.customFirmwareInstalled == false ? machine.firmwareName : nil)
+    }
+
+    /// The version a machine runs with, with a warning when that version is
+    /// gone or the guest environment came from another. Worked out here, not
+    /// in the cell: a row leaving the table updates its cell once more with
+    /// an empty environment, where reading the model is a fatal error.
+    private func bundleCell(_ machine: MachinePath) -> DKTableCell {
+        let version = library.bundleVersion(for: machine)
+        let warning: String? = if let version, !model.bundles.selectableVersions.contains(version) {
+            String(localized: "VPhone.bundle \(version) is not installed. Choose Change Core Bundle… to run this machine with another version.")
+        } else if let binding = library.bindings[machine], binding.hasMixedVersions, let guest = binding.guestEnvironment {
+            String(localized: "The guest environment is from \(guest).") + " " + VPhoneLaunchpadMachineInspector.mixedHelp
+        } else {
+            nil
+        }
+        return DKTableCell.mono(version ?? "—").warning(warning)
     }
 
     @ViewBuilder
@@ -492,6 +428,7 @@ struct VPhoneLaunchpadMachinesView: View {
             machine.name,
             machine.restoreInfo?.ios.version,
             machine.restoreInfo?.ios.build,
+            machine.restoreInfo?.device,
             machine.udid,
             VPhoneLaunchpadMachineLocations.volumeName(machine.libraryRoot),
         ]

@@ -1,4 +1,5 @@
 import SwiftUI
+import VPhoneDesignKit
 
 // MARK: - Change Core Bundle
 
@@ -30,33 +31,38 @@ struct VPhoneLaunchpadChangeBundleView: View {
 
     var body: some View {
         VPhoneLaunchpadSheet(title) {
-            Form {
-                Section("Current") {
-                    ForEach(machines) { machine in
-                        LabeledContent(machine.name) {
-                            Text(verbatim: library.bundleVersion(for: machine.path) ?? "—")
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                        }
-                    }
-                }
-                Section {
-                    Picker("Core Bundle", selection: $version) {
-                        ForEach(model.bundles.selectableVersions, id: \.self) { version in
-                            if version == model.bundles.defaultVersion {
-                                Text("\(version) (Default)").tag(version)
-                            } else {
-                                Text(verbatim: version).tag(version)
+            VStack(alignment: .leading, spacing: DK.Space.s4) {
+                DKSection(String(localized: "Current"), rows: machines.map { machine in
+                    DKKeyValue(
+                        machine.name,
+                        library.bundleVersion(for: machine.path) ?? "—",
+                        monospaced: true,
+                        id: machine.path.url.path,
+                    )
+                })
+                DKSection(
+                    footnote: String(localized: "Host programs change at the next start. The guest environment is updated now on stopped machines; running machines keep theirs until it is updated later. Guest patches follow each machine’s patch choice when its guest environment is updated. The boot chain stays as it was built."),
+                ) {
+                    DKFormRow(String(localized: "Core Bundle"), labelWidth: 170) {
+                        Picker("Core Bundle", selection: $version) {
+                            ForEach(model.bundles.selectableVersions, id: \.self) { version in
+                                if version == model.bundles.defaultVersion {
+                                    Text("\(version) (Default)").tag(version)
+                                } else {
+                                    Text(verbatim: version).tag(version)
+                                }
                             }
                         }
+                        .labelsHidden()
+                        .fixedSize()
                     }
-                    Toggle("Update guest environment", isOn: $updatesEnvironment)
-                } footer: {
-                    Text("Host programs change at the next start. The guest environment is updated now on stopped machines; running machines keep theirs until it is updated later. Guest patches follow each machine’s patch choice when its guest environment is updated. The boot chain stays as it was built.")
-                        .foregroundStyle(.secondary)
+                    DKFormRow(String(localized: "Update guest environment"), labelWidth: 170) {
+                        DKSwitch(String(localized: "Update guest environment"), isOn: $updatesEnvironment)
+                    }
                 }
             }
-            .formStyle(.grouped)
+            .padding(DK.Space.s4)
+            .dkCardFill(DK.Palette.window)
         } actions: {
             Button("Cancel") { dismiss() }
                 .keyboardShortcut(.cancelAction)
