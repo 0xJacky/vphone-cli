@@ -3,7 +3,7 @@ import VPhoneDesignKit
 
 struct VPhoneProcessesView: View {
     @Bindable var model: VPhoneProcessesModel
-    @FocusState private var searchFocused: Bool
+    @State private var searchFocused = false
     /// Which columns show. Bundle ID, PPID, Resident, Limit, Started and
     /// Executable start hidden: the detail bar shows them for the selection,
     /// and the table header's menu turns them on as columns.
@@ -80,11 +80,12 @@ struct VPhoneProcessesView: View {
                 isEnabled: model.canSignal,
                 help: VPhoneLocalization.text("Send SIGTERM to the selected processes (⌘⌫)"),
             ) { model.requestSignal(.term) })
-            VPhoneSystemMenuButton(
-                label: VPhoneLocalization.text("Signal"),
+            DKMenuButton(
+                VPhoneLocalization.text("Signal"),
                 glyph: .bolt,
                 isEnabled: model.canSignal,
                 help: VPhoneLocalization.text("Send another signal to the selected processes"),
+                showsIndicator: false,
             ) {
                 VPhoneProcessSignal.menuSignals.map { signal in
                     DKMenuItem(signal.menuTitle) { model.requestSignal(signal) }
@@ -97,11 +98,11 @@ struct VPhoneProcessesView: View {
                 isEnabled: !model.isBusy,
                 help: VPhoneLocalization.text("Reload the process list (⌘R)"),
             ) { Task { await model.refresh() } })
-            VPhoneSystemSearchField(
-                placeholder: VPhoneLocalization.text("Search Processes"),
+            DKSearchField(
+                VPhoneLocalization.text("Search Processes"),
                 text: $model.searchText,
+                isFocused: $searchFocused,
                 width: 170,
-                focus: $searchFocused,
             )
         }
     }

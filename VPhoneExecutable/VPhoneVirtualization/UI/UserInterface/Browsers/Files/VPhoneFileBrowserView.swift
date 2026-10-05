@@ -521,7 +521,7 @@ struct VPhoneFileBrowserView: View {
     }
 
     func formatBytes(_ bytes: Int64) -> String {
-        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        DKFormat.bytes(bytes)
     }
 }
 

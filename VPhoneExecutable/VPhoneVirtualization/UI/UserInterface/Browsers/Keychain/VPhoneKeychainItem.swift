@@ -1,4 +1,5 @@
 import Foundation
+import VPhoneDesignKit
 
 struct VPhoneKeychainItem: Identifiable, Hashable {
     let id: String
@@ -55,7 +56,7 @@ struct VPhoneKeychainItem: Identifiable, Hashable {
         if valueEncoding == "base64" {
             return VPhoneLocalization.format(
                 "Binary data (%@)",
-                ByteCountFormatter.string(fromByteCount: Int64(valueSize), countStyle: .file),
+                DKFormat.bytes(valueSize),
             )
         }
         return value

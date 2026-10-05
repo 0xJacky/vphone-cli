@@ -4,7 +4,7 @@ import VPhoneDesignKit
 
 struct VPhoneCrashLogsView: View {
     @Bindable var model: VPhoneCrashLogsModel
-    @FocusState private var searchFocused: Bool
+    @State private var searchFocused = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -67,11 +67,11 @@ struct VPhoneCrashLogsView: View {
                 isEnabled: !model.isBusy,
                 help: VPhoneLocalization.text("Reload the list of crash reports (⌘R)"),
             ) { Task { await model.refresh() } })
-            VPhoneSystemSearchField(
-                placeholder: VPhoneLocalization.text("Filter by process or name"),
+            DKSearchField(
+                VPhoneLocalization.text("Filter by process or name"),
                 text: $model.searchText,
+                isFocused: $searchFocused,
                 width: 200,
-                focus: $searchFocused,
             )
         }
     }

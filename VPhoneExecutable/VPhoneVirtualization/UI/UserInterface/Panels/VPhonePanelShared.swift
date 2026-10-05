@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import VPhoneDesignKit
 
 // MARK: - JSON Values
 
@@ -50,32 +51,29 @@ extension [String: Any] {
 // MARK: - Formatting
 
 enum VPhonePanelFormat {
+    /// Bytes in powers of 1024 at three significant digits (`DKFormat.bytes`).
     static func bytes(_ value: Int64?) -> String {
-        guard let value else { return "—" }
-        return ByteCountFormatter.string(fromByteCount: value, countStyle: .memory)
+        DKFormat.bytes(value)
     }
 
     static func bytes(_ value: Int?) -> String {
-        bytes(value.map(Int64.init))
+        DKFormat.bytes(value.map(Int64.init))
     }
 
-    /// A duration such as `2d 4h`, `3h 12m`, `41s`.
+    /// A duration in whole seconds, such as `41 s`, `3h 12m`, `2d 04h`.
     static func duration(_ seconds: Double?) -> String {
-        guard let seconds, seconds.isFinite, seconds >= 0 else { return "—" }
-        let formatter = DateComponentsFormatter()
-        formatter.unitsStyle = .abbreviated
-        formatter.maximumUnitCount = 2
-        formatter.allowedUnits = seconds < 60 ? [.second] : [.day, .hour, .minute, .second]
-        return formatter.string(from: seconds) ?? "—"
+        guard let seconds, seconds.isFinite, seconds >= 0 else { return DKFormat.placeholder }
+        // Whole seconds under a minute; from a minute up the two-unit form.
+        return seconds < 60
+            ? DKFormat.duration(wholeSeconds: Int64(seconds))
+            : DKFormat.duration(seconds: seconds)
     }
 
-    /// CPU time with sub-second precision for short-lived processes.
+    /// CPU time, with three significant digits under a minute for
+    /// short-lived processes (`3.30 s`).
     static func cpuTime(_ seconds: Double?) -> String {
-        guard let seconds, seconds.isFinite else { return "—" }
-        if seconds < 60 {
-            return String(format: "%.2fs", seconds)
-        }
-        return duration(seconds)
+        guard let seconds else { return DKFormat.placeholder }
+        return DKFormat.duration(seconds: seconds)
     }
 
     /// A date and time to the second, with today and yesterday named, as
@@ -91,8 +89,8 @@ enum VPhonePanelFormat {
     }
 
     static func percent(_ fraction: Double?) -> String {
-        guard let fraction, fraction.isFinite else { return "—" }
-        return fraction.formatted(.percent.precision(.fractionLength(0)))
+        guard let fraction, fraction.isFinite else { return DKFormat.placeholder }
+        return DKFormat.percent(fraction)
     }
 }
 

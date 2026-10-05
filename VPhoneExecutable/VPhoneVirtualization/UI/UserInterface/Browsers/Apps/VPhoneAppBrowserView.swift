@@ -4,7 +4,7 @@ import VPhoneDesignKit
 
 struct VPhoneAppBrowserView: View {
     @Bindable var model: VPhoneAppBrowserModel
-    @FocusState private var isSearchFocused: Bool
+    @State private var isSearchFocused = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -130,11 +130,11 @@ struct VPhoneAppBrowserView: View {
                 size: .icon,
                 help: VPhoneLocalization.text("Show or hide app info (⌘I)"),
             )
-            VPhoneSystemSearchField(
-                placeholder: VPhoneLocalization.text("Search Apps"),
+            DKSearchField(
+                VPhoneLocalization.text("Search Apps"),
                 text: $model.searchText,
+                isFocused: $isSearchFocused,
                 width: 160,
-                focus: $isSearchFocused,
             )
         }
     }

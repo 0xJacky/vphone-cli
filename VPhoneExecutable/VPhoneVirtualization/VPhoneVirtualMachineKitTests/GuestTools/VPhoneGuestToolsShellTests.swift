@@ -47,7 +47,23 @@ struct VPhoneGuestToolsShellTests {
     @Test
     func `every tool has a title`() {
         for tool in DKGuestTool.allCases {
-            #expect(!tool.localizedTitle.isEmpty, "\(tool)")
+            #expect(!tool.title(bundle: VPhoneLocalization.bundle).isEmpty, "\(tool)")
+        }
+    }
+
+    @Test
+    func `the sidebar dims the tools a connected agent does not serve, with the reason`() {
+        let unavailable = VPhoneGuestToolsShell.unavailableTools(isConnected: true, capabilities: ["device_info", "processes", "apps"])
+        #expect(Set(unavailable.keys) == [.controls, .services, .console, .crashLogs, .clipboard])
+        #expect(unavailable[.services]?.contains("services") == true)
+        #expect(VPhoneGuestToolsShell.unavailableTools(isConnected: false, capabilities: []).isEmpty)
+
+        let items = VPhoneGuestToolsSidebar.sections(unavailable: unavailable).flatMap(\.items)
+        #expect(items.map(\.id) == DKGuestToolSection.allCases.flatMap(\.tools))
+        for item in items {
+            #expect(item.isEnabled == (unavailable[item.id] == nil), "\(item.id)")
+            #expect(item.disabledReason == unavailable[item.id], "\(item.id)")
+            #expect(item.meta == nil, "\(item.id)")
         }
     }
 

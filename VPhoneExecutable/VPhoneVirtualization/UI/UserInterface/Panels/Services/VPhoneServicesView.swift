@@ -3,7 +3,7 @@ import VPhoneDesignKit
 
 struct VPhoneServicesView: View {
     @Bindable var model: VPhoneServicesModel
-    @FocusState private var searchFocused: Bool
+    @State private var searchFocused = false
     /// Which columns show. Domains starts hidden; the detail bar shows it.
     @AppStorage("vphone-services-columns") private var columnData = Data()
 
@@ -68,8 +68,8 @@ struct VPhoneServicesView: View {
                 isEnabled: model.canPerform(.restart, on: row),
                 help: VPhoneLocalization.text("Stop the selected service, then start it again"),
             ) { request(.restart) })
-            VPhoneSystemMenuButton(
-                label: VPhoneLocalization.text("More Actions"),
+            DKMenuButton(
+                VPhoneLocalization.text("More Actions"),
                 glyph: .ellipsis,
                 size: .icon,
                 isEnabled: row != nil && !model.isBusy && model.isConnected,
@@ -84,11 +84,11 @@ struct VPhoneServicesView: View {
                 isEnabled: !model.isBusy && model.isConnected,
                 help: VPhoneLocalization.text("Reload the service list (⌘R)"),
             ) { Task { await model.refresh() } })
-            VPhoneSystemSearchField(
-                placeholder: VPhoneLocalization.text("Label or Program"),
+            DKSearchField(
+                VPhoneLocalization.text("Label or Program"),
                 text: $model.searchText,
+                isFocused: $searchFocused,
                 width: 160,
-                focus: $searchFocused,
             )
         }
     }

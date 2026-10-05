@@ -56,74 +56,6 @@ struct VPhoneSystemPageBanner: View {
     }
 }
 
-// MARK: - Search Field
-
-/// The design's pill search field (`DKSearchField`) with a focus binding, so a
-/// page can focus it from a shortcut or the Find command and know when it is
-/// being edited.
-struct VPhoneSystemSearchField: View {
-    let placeholder: String
-    @Binding var text: String
-    var width: CGFloat = 180
-    var focus: FocusState<Bool>.Binding
-
-    var body: some View {
-        let shape = Capsule(style: .circular)
-        HStack(spacing: 6) {
-            DKIcon(.search, size: 14)
-                .foregroundStyle(DK.Palette.muted)
-            TextField(placeholder, text: $text, prompt: Text(placeholder).foregroundStyle(DK.Palette.muted))
-                .textFieldStyle(.plain)
-                .font(DK.Typeface.body)
-                .foregroundStyle(DK.Palette.ink)
-                .focused(focus)
-                .focusEffectDisabled()
-                .accessibilityLabel(placeholder)
-                .onExitCommand { text = "" }
-            if !text.isEmpty {
-                Button {
-                    text = ""
-                } label: {
-                    DKIcon(.xCircle, size: 13)
-                        .foregroundStyle(DK.Palette.inkDisabled)
-                }
-                .buttonStyle(.plain)
-                .help(VPhoneLocalization.text("Clear"))
-                .accessibilityLabel(VPhoneLocalization.text("Clear Search"))
-            }
-        }
-        .padding(.horizontal, 10)
-        .frame(width: width, height: DK.Metric.controlHeight)
-        .background(shape.fill(DK.Palette.window))
-        .overlay(shape.strokeBorder(focus.wrappedValue ? DK.Palette.accent : DK.Palette.lineStrong, lineWidth: DK.Metric.hairline))
-        .contentShape(shape)
-        .onTapGesture { focus.wrappedValue = true }
-    }
-}
-
-// MARK: - Menu Button
-
-/// A header button that opens a menu: Signal, More Actions. DesignKit has no
-/// menu button, so this is a `DKButton` that pops up the items as an
-/// `NSMenu` (`DKMenuItem.makeNSMenu`) at the pointer.
-struct VPhoneSystemMenuButton: View {
-    let label: String
-    let glyph: DKGlyph
-    var size: DKButtonSize = .regular
-    var isEnabled = true
-    var help: String?
-    /// The rows, built when the menu opens.
-    let items: () -> [DKMenuItem]
-
-    var body: some View {
-        DKButton(DKButtonSpec(label, glyph: glyph, size: size, isEnabled: isEnabled, help: help) {
-            items().makeNSMenu(title: label).popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
-        })
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint(Text(VPhoneLocalization.text("Opens a menu")))
-    }
-}
-
 // MARK: - Toggle Button
 
 /// A header button that stays pressed while its setting is on: Auto Refresh,
@@ -323,16 +255,13 @@ private final class VPhoneTableSelectionView: NSView {
     }
 }
 
-/// A table cell drawn by DesignKit. Should a table draw the system's
-/// emphasized selection, as before `systemPageTable()` has styled it, the
-/// cell's ink would sit on the accent fill, so text cells switch to the
-/// selection's own foreground there.
+/// A table cell drawn by DesignKit, aligned in its column and with an optional
+/// tooltip. On a selected row drawn with the system accent fill the cell
+/// switches to the on-accent ink by itself (`DKTableCellView`).
 struct VPhoneSystemCell: View {
     let cell: DKTableCell
     var alignment: Alignment = .leading
     var help: String?
-
-    @Environment(\.backgroundProminence) private var prominence
 
     init(_ cell: DKTableCell, alignment: Alignment = .leading, help: String? = nil) {
         self.cell = cell
@@ -341,31 +270,9 @@ struct VPhoneSystemCell: View {
     }
 
     var body: some View {
-        content
+        DKTableCellView(cell)
             .frame(maxWidth: .infinity, alignment: alignment)
             .help(help ?? "")
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        if prominence == .increased, let text = plainText {
-            Text(text.value)
-                .font(text.font)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .accessibilityLabel(cell.accessibilityText)
-        } else {
-            DKTableCellView(cell)
-        }
-    }
-
-    private var plainText: (value: String, font: Font)? {
-        switch cell {
-        case let .text(value), let .muted(value): (value, DK.Typeface.body)
-        case let .mono(value): (value, DK.Typeface.mono)
-        case let .strong(value): (value, DK.Typeface.bodyStrong)
-        default: nil
-        }
     }
 }
 

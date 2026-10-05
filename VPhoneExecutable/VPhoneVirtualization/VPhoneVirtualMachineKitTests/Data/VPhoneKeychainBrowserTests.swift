@@ -37,7 +37,7 @@ struct VPhoneKeychainBrowserTests {
     @Test
     func `values and protection read as the table shows them`() {
         let items = items()
-        #expect(items.map(\.displayValue) == ["Hidden", "hunter2", "Binary data (1 KB)", "Protected"])
+        #expect(items.map(\.displayValue) == ["Hidden", "hunter2", "Binary data (1.31 KB)", "Protected"])
         #expect(items.map(\.displayClass) == ["Password", "Internet", "Certificate", "Cryptographic Key"])
         #expect(items.map(\.protectionDescription) == [
             "When Unlocked", "After First Unlock", "Always", "When Passcode Set (This Device Only)",

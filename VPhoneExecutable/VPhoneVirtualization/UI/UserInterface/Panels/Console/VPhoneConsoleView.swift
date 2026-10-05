@@ -3,7 +3,7 @@ import VPhoneDesignKit
 
 struct VPhoneConsoleView: View {
     @Bindable var model: VPhoneConsoleModel
-    @FocusState private var searchFocused: Bool
+    @State private var searchFocused = false
     /// Which columns show. Category starts hidden; the detail bar shows it.
     @AppStorage("vphone-console-columns") private var columnData = Data()
 
@@ -92,11 +92,11 @@ struct VPhoneConsoleView: View {
                 isEnabled: !model.visibleEntries.isEmpty,
                 help: VPhoneLocalization.text("Save the shown entries as a plain-text log (⌘S)"),
             ) { model.save() })
-            VPhoneSystemSearchField(
-                placeholder: VPhoneLocalization.text("Search"),
+            DKSearchField(
+                VPhoneLocalization.text("Search"),
                 text: $model.searchText,
+                isFocused: $searchFocused,
                 width: 140,
-                focus: $searchFocused,
             )
         }
     }

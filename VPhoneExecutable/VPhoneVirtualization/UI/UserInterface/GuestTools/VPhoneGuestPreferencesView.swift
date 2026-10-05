@@ -16,11 +16,11 @@ struct VPhoneGuestPreferencesView: View {
             resultPane
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             detailBar
-                .guestDetailBarSizing()
             DKStatusBar(
                 isConnected: model.control.isConnected,
                 text: model.activity?.title ?? model.status?.message,
                 detail: resultCount,
+                textTone: model.activity == nil ? model.status?.tone : nil,
             )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -282,9 +282,10 @@ struct VPhoneGuestPreferencesView: View {
                 editor
             }
         } else {
-            DKDetailBar(layout: .row) {
-                VPhoneGuestDetailNote(String(localized: "Select a String, Boolean, Integer or Float key to change its value here, or switch to Write to set any key.", bundle: VPhoneLocalization.bundle))
-            }
+            DKDetailBar(
+                note: String(localized: "Select a String, Boolean, Integer or Float key to change its value here, or switch to Write to set any key.", bundle: VPhoneLocalization.bundle),
+                layout: .row,
+            )
         }
     }
 

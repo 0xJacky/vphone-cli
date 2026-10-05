@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import UniformTypeIdentifiers
+import VPhoneDesignKit
 
 /// Streams the guest unified log by running vphoned `logs.syslog` captures
 /// back to back while the window is open and not paused.
@@ -137,7 +138,7 @@ final class VPhoneConsoleModel {
             added.append(VPhoneConsoleEntry(
                 id: nextID,
                 date: date,
-                time: date.map { Self.timeFormatter.string(from: $0) } ?? "—",
+                time: date.map(DKFormat.timeMillis) ?? DKFormat.placeholder,
                 level: VPhoneConsoleLevel(guestValue: object.string("level")),
                 process: object.string("process") ?? "",
                 pid: object.int("pid") ?? 0,
@@ -170,13 +171,6 @@ final class VPhoneConsoleModel {
     private static let fractionalParser: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-
-    private static let timeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "HH:mm:ss.SSS"
         return formatter
     }()
 

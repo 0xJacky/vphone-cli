@@ -60,7 +60,7 @@ private struct VPhoneGuestToolPage: View {
 
 /// The guest sidebar: the machine with its connection, iOS version and
 /// address, then the tools. A tool the connected agent does not serve stays
-/// listed, marked Unavailable; its page says why.
+/// listed, dimmed, with the reason as its tooltip.
 struct VPhoneGuestToolsSidebar: View {
     @Bindable var shell: VPhoneGuestToolsShell
 
@@ -80,15 +80,18 @@ struct VPhoneGuestToolsSidebar: View {
     }
 
     private var sections: [DKSidebarSection<DKGuestTool>] {
-        let unavailable = String(localized: "Unavailable", bundle: VPhoneLocalization.bundle)
-        return DKGuestSidebar.sections().map { section in
+        Self.sections(unavailable: shell.unavailableTools)
+    }
+
+    /// `DKGuestSidebar`'s sections, titled from this app's string catalog.
+    static func sections(unavailable: [DKGuestTool: String]) -> [DKSidebarSection<DKGuestTool>] {
+        let bundle = VPhoneLocalization.bundle
+        return zip(DKGuestToolSection.allCases, DKGuestSidebar.sections(unavailable: unavailable)).map { group, section in
             var section = section
+            section.title = group.title(bundle: bundle)
             section.items = section.items.map { item in
                 var item = item
-                item.label = item.id.localizedTitle
-                if shell.availability(of: item.id) != .available {
-                    item.meta = unavailable
-                }
+                item.label = item.id.title(bundle: bundle)
                 return item
             }
             return section
@@ -121,16 +124,13 @@ struct VPhoneGuestToolUnavailableView: View {
     var body: some View {
         VStack(spacing: 0) {
             DKPageHeader(
-                tool.localizedTitle,
+                tool.title(bundle: VPhoneLocalization.bundle),
                 subtitle: String(localized: "Not available on this guest", bundle: VPhoneLocalization.bundle),
             )
             VPhoneGuestToolPlaceholder(
                 glyph: tool.glyph,
-                title: String(localized: "\(tool.localizedTitle) Unavailable", bundle: VPhoneLocalization.bundle),
-                message: String(
-                    localized: "The guest agent does not report the “\(capability)” capability. Update vphoned in the guest to use \(tool.localizedTitle).",
-                    bundle: VPhoneLocalization.bundle,
-                ),
+                title: String(localized: "\(tool.title(bundle: VPhoneLocalization.bundle)) Unavailable", bundle: VPhoneLocalization.bundle),
+                message: tool.unsupportedReason(capability: capability),
             )
             DKStatusBar(isConnected: true, detail: capability)
         }

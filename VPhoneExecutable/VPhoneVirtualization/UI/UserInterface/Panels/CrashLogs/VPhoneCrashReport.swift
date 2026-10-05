@@ -1,5 +1,6 @@
 import Foundation
 import VPhoneCoreKit
+import VPhoneDesignKit
 
 // MARK: - Report Row
 
@@ -57,21 +58,12 @@ struct VPhoneCrashReport: Identifiable, Hashable, Sendable {
     }
 
     private static func sizeText(_ bytes: Int) -> String {
-        let formatter = ByteCountFormatter()
-        formatter.countStyle = .file
-        formatter.allowedUnits = [.useKB, .useMB, .useGB]
-        formatter.allowsNonnumericFormatting = false
-        return formatter.string(fromByteCount: Int64(bytes))
+        DKFormat.bytes(bytes)
     }
 
     private static func dateText(_ epoch: Double) -> String {
-        guard epoch > 0 else { return "—" }
-        let style = Date.VerbatimFormatStyle(
-            format: "\(year: .defaultDigits)-\(month: .twoDigits)-\(day: .twoDigits) \(hour: .twoDigits(clock: .twentyFourHour, hourCycle: .zeroBased)):\(minute: .twoDigits):\(second: .twoDigits)",
-            timeZone: .current,
-            calendar: Calendar(identifier: .gregorian),
-        )
-        return Date(timeIntervalSince1970: epoch).formatted(style)
+        guard epoch > 0 else { return DKFormat.placeholder }
+        return DKFormat.dateTime(Date(timeIntervalSince1970: epoch))
     }
 }
 

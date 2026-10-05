@@ -48,54 +48,10 @@ struct VPhoneGuestToolModePicker: View {
 struct VPhoneGuestToolStatus {
     let message: String
     let isError: Bool
-}
 
-extension DKStatusBar {
-    /// A Guest Tools page's status bar: the connection, then what the page is
-    /// doing or last did, and `detail` (the guest method, a count) at the end.
-    init(isConnected: Bool, activity: String?, status: VPhoneGuestToolStatus?, detail: String? = nil) {
-        self.init(isConnected: isConnected, text: activity ?? status?.message, detail: detail)
-    }
-}
-
-/// The bottom bar shared by the guest windows: connection, activity, result.
-struct VPhoneGuestToolStatusBar: View {
-    let isConnected: Bool
-    let activity: String?
-    let status: VPhoneGuestToolStatus?
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Circle()
-                .fill(isConnected ? Color.green : Color.orange)
-                .frame(width: 8, height: 8)
-                .accessibilityLabel(isConnected ? String(localized: "Guest connected", bundle: VPhoneLocalization.bundle) : String(localized: "Guest disconnected", bundle: VPhoneLocalization.bundle))
-
-            if let activity {
-                ProgressView()
-                    .controlSize(.small)
-                Text(activity)
-                    .foregroundStyle(.secondary)
-            } else if let status {
-                Image(systemName: status.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(status.isError ? .orange : .green)
-                Text(status.message)
-                    .foregroundStyle(status.isError ? .primary : .secondary)
-                    .textSelection(.enabled)
-            } else {
-                Text(isConnected ? String(localized: "Connected", bundle: VPhoneLocalization.bundle) : String(localized: "Guest not connected", bundle: VPhoneLocalization.bundle))
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .font(.system(size: 11, design: .monospaced))
-        .lineLimit(1)
-        .padding(.horizontal, 8)
-        .frame(height: 24)
-        .background(.bar)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.updatesFrequently)
+    /// The status bar text tone: a failure in the danger ink.
+    var tone: DKTone? {
+        isError ? .danger : nil
     }
 }
 
@@ -127,24 +83,3 @@ extension View {
     }
 }
 
-// MARK: - Metadata
-
-/// A small caption label above a value.
-struct VPhoneGuestToolsField: View {
-    let title: LocalizedStringKey
-    let value: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title, bundle: VPhoneLocalization.bundle)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.system(.body, design: .monospaced))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
-                .help(value)
-        }
-    }
-}

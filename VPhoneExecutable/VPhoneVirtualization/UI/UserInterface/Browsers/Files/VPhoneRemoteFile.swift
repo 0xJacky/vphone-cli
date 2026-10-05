@@ -36,7 +36,7 @@ struct VPhoneRemoteFile: Identifiable, Hashable {
         if isDirectory || isSymbolicLink {
             return "—"
         }
-        return ByteCountFormatter.string(fromByteCount: Int64(clamping: size), countStyle: .file)
+        return DKFormat.bytes(Int64(clamping: size))
     }
 
     var displayDate: String {

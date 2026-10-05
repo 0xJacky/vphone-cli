@@ -18,7 +18,11 @@ struct VPhoneControlsView: View {
                 }
             }
             .disabled(!model.isConnected)
-            DKStatusBar(isConnected: model.isConnected, activity: model.activity?.title, status: model.status)
+            DKStatusBar(
+                isConnected: model.isConnected,
+                text: model.activity?.title ?? model.status?.message,
+                textTone: model.activity == nil ? model.status?.tone : nil,
+            )
         }
         .guestToolShortcuts([
             VPhoneGuestToolShortcut(key: "r", isEnabled: !model.isBusy) {

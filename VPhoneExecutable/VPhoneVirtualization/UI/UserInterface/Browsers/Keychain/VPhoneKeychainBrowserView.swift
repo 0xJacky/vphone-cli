@@ -16,7 +16,6 @@ struct VPhoneKeychainBrowserView: View {
                 diagnosticsPanel
             }
             detailBar
-                .guestDetailBarSizing()
             DKStatusBar(
                 isConnected: model.control.isConnected,
                 text: model.isLoading ? VPhoneLocalization.text("Loading keychain items…") : nil,
@@ -93,12 +92,10 @@ struct VPhoneKeychainBrowserView: View {
             ) {
                 Task { await model.reveal(ids: model.selection) }
             })
-            DKButton(DKButtonSpec(
-                VPhoneLocalization.text("Actions"),
-                glyph: .ellipsis,
-                size: .icon,
-                action: showActionsMenu,
-            ))
+            DKMenuButton(
+                DKButtonSpec(VPhoneLocalization.text("Actions"), glyph: .ellipsis, size: .icon),
+                items: actionsMenu,
+            )
             DKButton(DKButtonSpec(
                 VPhoneLocalization.text("Refresh"),
                 glyph: .refresh,
@@ -109,7 +106,7 @@ struct VPhoneKeychainBrowserView: View {
                 Task { await model.refresh() }
             })
             .keyboardShortcut("r", modifiers: .command)
-            VPhoneKeychainSearchField(placeholder: VPhoneLocalization.text("Search Keychain"), text: $model.searchText)
+            DKSearchField(VPhoneLocalization.text("Search Keychain"), text: $model.searchText, width: 160)
         }
     }
 
@@ -139,12 +136,6 @@ struct VPhoneKeychainBrowserView: View {
                 Task { await model.removeTestItem() }
             },
         ]
-    }
-
-    /// Opens the actions menu under the pointer, where the Actions button was clicked.
-    private func showActionsMenu() {
-        let menu = actionsMenu.makeNSMenu(title: VPhoneLocalization.text("Keychain Actions"))
-        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 
     // MARK: - Table
@@ -258,9 +249,7 @@ struct VPhoneKeychainBrowserView: View {
                     layout: .row,
                 )
             } else if selected.isEmpty {
-                DKDetailBar(actions: actions, layout: .row) {
-                    VPhoneGuestDetailNote(VPhoneLocalization.text("Select an item to copy, reveal, edit or delete it."))
-                }
+                DKDetailBar(note: VPhoneLocalization.text("Select an item to copy, reveal, edit or delete it."), actions: actions, layout: .row)
             } else {
                 DKDetailBar(
                     VPhoneLocalization.format("%@ items selected", String(selected.count)),

@@ -251,7 +251,7 @@ struct VPhoneFileInspectorView: View {
                     .reduce(Int64(0)) { $0 + Int64(clamping: $1.size) }
                 facts = files == 0 ? [] : [DKKeyValue(
                     VPhoneLocalization.text("Size of Files"),
-                    ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file),
+                    DKFormat.bytes(bytes),
                 )]
             } else {
                 let name = (model.currentPath as NSString).lastPathComponent

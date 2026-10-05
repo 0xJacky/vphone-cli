@@ -38,6 +38,7 @@ struct VPhoneGuestClipboardView: View {
             DKStatusBar(
                 isConnected: model.control.isConnected,
                 text: model.activity?.title ?? model.status?.message,
+                textTone: model.activity == nil ? model.status?.tone : nil,
             )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

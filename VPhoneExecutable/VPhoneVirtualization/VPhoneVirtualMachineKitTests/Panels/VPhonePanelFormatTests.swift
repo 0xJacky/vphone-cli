@@ -19,11 +19,22 @@ struct VPhonePanelFormatTests {
     }
 
     @Test
-    func `CPU time keeps hundredths under a minute`() {
-        #expect(VPhonePanelFormat.cpuTime(3.3) == "3.30s")
+    func `CPU time keeps three significant digits under a minute`() {
+        #expect(VPhonePanelFormat.cpuTime(3.3) == "3.30 s")
+        #expect(VPhonePanelFormat.cpuTime(12.4) == "12.4 s")
         #expect(VPhonePanelFormat.cpuTime(nil) == "—")
         #expect(VPhonePanelFormat.cpuTime(.nan) == "—")
         #expect(VPhonePanelFormat.cpuTime(301.7) == VPhonePanelFormat.duration(301.7))
+    }
+
+    @Test
+    func `sizes, durations and percentages follow DKFormat`() {
+        #expect(VPhonePanelFormat.bytes(8_589_934_592) == "8.00 GB")
+        #expect(VPhonePanelFormat.bytes(182_000_000) == "174 MB")
+        #expect(VPhonePanelFormat.duration(20) == "20 s")
+        #expect(VPhonePanelFormat.duration(20.9) == "20 s")
+        #expect(VPhonePanelFormat.duration(3 * 3600 + 12 * 60) == "3h 12m")
+        #expect(VPhonePanelFormat.percent(0.48) == "48%")
     }
 
     @Test

@@ -1,4 +1,5 @@
 import Foundation
+import VPhoneDesignKit
 
 // MARK: - Value Type
 
@@ -138,7 +139,7 @@ struct VPhoneGuestPreferenceEntry: Identifiable {
             children = nil
         case let data as Data:
             kind = .data
-            summary = ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .binary)
+            summary = DKFormat.bytes(data.count)
             children = nil
         case let array as [Any]:
             kind = .array

@@ -165,6 +165,22 @@ final class VPhoneGuestToolsShell: NSObject, NSWindowDelegate {
         return capabilities.contains(capability) ? .available : .unsupported(capability: capability)
     }
 
+    /// The tools the connected agent does not serve, each with the reason the
+    /// sidebar shows for it.
+    var unavailableTools: [DKGuestTool: String] {
+        Self.unavailableTools(isConnected: control.isConnected, capabilities: control.guestCapabilities)
+    }
+
+    static func unavailableTools(isConnected: Bool, capabilities: [String]) -> [DKGuestTool: String] {
+        var tools: [DKGuestTool: String] = [:]
+        for tool in DKGuestTool.allCases {
+            if case let .unsupported(capability) = availability(of: tool, isConnected: isConnected, capabilities: capabilities) {
+                tools[tool] = tool.unsupportedReason(capability: capability)
+            }
+        }
+        return tools
+    }
+
     // MARK: Window
 
     private func makeWindow() -> NSWindow {
@@ -258,20 +274,12 @@ extension DKGuestTool {
         }
     }
 
-    /// The title in the user's language.
-    var localizedTitle: String {
-        switch self {
-        case .deviceInfo: String(localized: "Device Info", bundle: VPhoneLocalization.bundle)
-        case .controls: String(localized: "Controls", bundle: VPhoneLocalization.bundle)
-        case .apps: String(localized: "Apps", bundle: VPhoneLocalization.bundle)
-        case .processes: String(localized: "Processes", bundle: VPhoneLocalization.bundle)
-        case .services: String(localized: "Services", bundle: VPhoneLocalization.bundle)
-        case .files: String(localized: "Files", bundle: VPhoneLocalization.bundle)
-        case .keychain: String(localized: "Keychain", bundle: VPhoneLocalization.bundle)
-        case .preferences: String(localized: "Preferences", bundle: VPhoneLocalization.bundle)
-        case .clipboard: String(localized: "Clipboard", bundle: VPhoneLocalization.bundle)
-        case .console: String(localized: "Console", bundle: VPhoneLocalization.bundle)
-        case .crashLogs: String(localized: "Crash Logs", bundle: VPhoneLocalization.bundle)
-        }
+    /// Why the tool cannot be used: the agent does not report `capability`.
+    func unsupportedReason(capability: String) -> String {
+        let name = title(bundle: VPhoneLocalization.bundle)
+        return String(
+            localized: "The guest agent does not report the “\(capability)” capability. Update vphoned in the guest to use \(name).",
+            bundle: VPhoneLocalization.bundle,
+        )
     }
 }

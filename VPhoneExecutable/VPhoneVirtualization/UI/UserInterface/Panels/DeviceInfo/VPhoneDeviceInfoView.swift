@@ -11,11 +11,9 @@ struct VPhoneDeviceInfoView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             DKStatusBar(
                 isConnected: model.control.isConnected,
-                activity: model.isLoading && !model.hasInfo
-                    ? String(localized: "Reading device information…", bundle: VPhoneLocalization.bundle)
-                    : nil,
-                status: model.status,
+                text: activity ?? model.status?.message,
                 detail: "device.info",
+                textTone: activity == nil ? model.status?.tone : nil,
             )
         }
         .guestToolShortcuts([
@@ -38,6 +36,12 @@ struct VPhoneDeviceInfoView: View {
                 await model.refresh(polling: model.hasInfo)
             }
         }
+    }
+
+    private var activity: String? {
+        model.isLoading && !model.hasInfo
+            ? String(localized: "Reading device information…", bundle: VPhoneLocalization.bundle)
+            : nil
     }
 
     // MARK: - Header

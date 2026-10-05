@@ -1,5 +1,6 @@
 import AppKit
 import UniformTypeIdentifiers
+import VPhoneDesignKit
 
 // MARK: - Bootstrap Installation and Removal
 
@@ -409,8 +410,8 @@ extension VPhoneMenuController {
                 indicator.minValue = 0
                 indicator.maxValue = Double(total)
                 indicator.doubleValue = Double(received)
-                let current = ByteCountFormatter.string(fromByteCount: received, countStyle: .file)
-                let expected = ByteCountFormatter.string(fromByteCount: total, countStyle: .file)
+                let current = DKFormat.bytes(received)
+                let expected = DKFormat.bytes(total)
                 label.stringValue = VPhoneLocalization.format("Downloading Irisin: %@ of %@", current, expected)
             } else {
                 label.stringValue = VPhoneLocalization.text("Downloading Irisin…")
