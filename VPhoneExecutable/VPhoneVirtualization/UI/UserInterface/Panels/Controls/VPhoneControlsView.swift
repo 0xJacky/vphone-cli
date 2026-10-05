@@ -127,17 +127,7 @@ struct VPhoneControlsView: View {
     }
 
     private var activeSession: String {
-        if let error = model.audioStateError {
-            return error
-        }
-        guard let category = model.activeAudioCategory else { return "—" }
-        let name = category.isEmpty ? String(localized: "None", bundle: VPhoneLocalization.bundle) : category
-        guard model.activeAudioVolume != nil || model.activeAudioMuted != nil else { return name }
-        let level = VPhonePanelFormat.percent(model.activeAudioVolume)
-        if model.activeAudioMuted == true {
-            return String(localized: "\(name), \(level), muted", bundle: VPhoneLocalization.bundle)
-        }
-        return String(localized: "\(name), \(level)", bundle: VPhoneLocalization.bundle)
+        model.activeSessionText
     }
 
     // MARK: - Hardware Buttons
@@ -273,7 +263,7 @@ struct VPhoneControlsView: View {
                     TextField(
                         String(localized: "Name", bundle: VPhoneLocalization.bundle),
                         text: $model.notificationName,
-                        prompt: Text(verbatim: "com.apple.springboard.lockcomplete"),
+                        prompt: Text(verbatim: "com.apple.springboard.lockcomplete").foregroundStyle(DK.Palette.muted),
                     )
                     .textFieldStyle(.dkFieldMono)
                     .labelsHidden()
@@ -285,7 +275,7 @@ struct VPhoneControlsView: View {
                     TextField(
                         String(localized: "State", bundle: VPhoneLocalization.bundle),
                         text: $model.notificationState,
-                        prompt: Text("None", bundle: VPhoneLocalization.bundle),
+                        prompt: Text("None", bundle: VPhoneLocalization.bundle).foregroundStyle(DK.Palette.muted),
                     )
                     .textFieldStyle(.dkFieldMono)
                     .labelsHidden()

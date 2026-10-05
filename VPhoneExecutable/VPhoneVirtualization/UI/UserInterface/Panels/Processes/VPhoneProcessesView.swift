@@ -204,6 +204,7 @@ struct VPhoneProcessesView: View {
             VPhoneSystemCell(.mono(String(row.pid)), alignment: .trailing)
         }
         .width(min: 44, ideal: 52, max: 80)
+        .alignment(.numeric)
         .customizationID("pid")
 
         TableColumn("Name", value: \VPhoneProcessRow.nameSortKey) { row in
@@ -232,6 +233,7 @@ struct VPhoneProcessesView: View {
             VPhoneSystemCell(.mono(row.ppidTitle), alignment: .trailing)
         }
         .width(min: 36, ideal: 48, max: 80)
+        .alignment(.numeric)
         .customizationID("ppid")
         .defaultVisibility(.hidden)
 
@@ -239,6 +241,7 @@ struct VPhoneProcessesView: View {
             VPhoneSystemCell(.mono(row.footprintTitle), alignment: .trailing)
         }
         .width(min: 60, ideal: 80, max: 120)
+        .alignment(.numeric)
         .customizationID("memory")
     }
 
@@ -248,6 +251,7 @@ struct VPhoneProcessesView: View {
             VPhoneSystemCell(.mono(row.residentTitle), alignment: .trailing)
         }
         .width(min: 52, ideal: 70, max: 120)
+        .alignment(.numeric)
         .customizationID("resident")
         .defaultVisibility(.hidden)
 
@@ -255,18 +259,21 @@ struct VPhoneProcessesView: View {
             VPhoneSystemCell(.mono(row.cpuTitle), alignment: .trailing)
         }
         .width(min: 60, ideal: 80, max: 120)
+        .alignment(.numeric)
         .customizationID("cpu")
 
         TableColumn("Jetsam Priority", value: \VPhoneProcessRow.jetsamPrioritySortKey) { row in
             VPhoneSystemCell(.mono(row.jetsamPriorityTitle), alignment: .trailing)
         }
         .width(min: 60, ideal: 110, max: 130)
+        .alignment(.numeric)
         .customizationID("jetsam-priority")
 
         TableColumn("Limit", value: \VPhoneProcessRow.jetsamLimitSortKey) { row in
             VPhoneSystemCell(.mono(row.jetsamLimitTitle), alignment: .trailing)
         }
         .width(min: 44, ideal: 70, max: 110)
+        .alignment(.numeric)
         .customizationID("limit")
         .defaultVisibility(.hidden)
 

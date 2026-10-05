@@ -22,7 +22,8 @@ final class VPhoneGuestToolsShell: NSObject, NSWindowDelegate {
     let control: VPhoneGuestControl
     /// The VM's name, for the sidebar header and the window subtitle.
     let machineName: String
-    /// The tool the window shows.
+    /// The tool the window shows, kept while the window is closed so Guest
+    /// Tools reopens on it. Device Info until another tool has been shown.
     var selection: DKGuestTool = .deviceInfo
 
     /// Called when Apps asks to show a path in the File Browser. When nil the
@@ -92,6 +93,12 @@ final class VPhoneGuestToolsShell: NSObject, NSWindowDelegate {
         window.makeKeyAndOrderFront(nil)
     }
 
+    /// Brings the window forward on the tool it showed last: Window > Guest
+    /// Tools and the display window's title bar button.
+    func showLastTool() {
+        show(selection)
+    }
+
     /// Shows Files at a guest directory, such as an app's data container.
     func showFiles(at path: String) {
         let isShowingFiles = window?.isVisible == true && selection == .files
@@ -146,8 +153,16 @@ final class VPhoneGuestToolsShell: NSObject, NSWindowDelegate {
     /// connected every tool is available, and its page says the guest is not
     /// connected.
     func availability(of tool: DKGuestTool) -> VPhoneGuestToolAvailability {
-        guard control.isConnected, let capability = tool.requiredCapability else { return .available }
-        return control.guestCapabilities.contains(capability) ? .available : .unsupported(capability: capability)
+        Self.availability(of: tool, isConnected: control.isConnected, capabilities: control.guestCapabilities)
+    }
+
+    static func availability(
+        of tool: DKGuestTool,
+        isConnected: Bool,
+        capabilities: [String],
+    ) -> VPhoneGuestToolAvailability {
+        guard isConnected, let capability = tool.requiredCapability else { return .available }
+        return capabilities.contains(capability) ? .available : .unsupported(capability: capability)
     }
 
     // MARK: Window

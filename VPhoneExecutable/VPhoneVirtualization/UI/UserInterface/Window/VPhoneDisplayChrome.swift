@@ -85,7 +85,6 @@ struct VPhoneDisplayTitleBar: View {
                 DKButtonSpec(
                     VPhoneLocalization.text("Guest Tools"),
                     glyph: .sidebar,
-                    variant: .ghost,
                     size: .icon,
                     isEnabled: model.canOpenGuestTools,
                     id: "guest-tools",
@@ -135,7 +134,6 @@ struct VPhoneDisplayControlBar: View {
                 DKButtonSpec(
                     VPhoneLocalization.text("Rotate Left"),
                     glyph: .restart,
-                    variant: .ghost,
                     size: .icon,
                     isEnabled: model.canRotate,
                     id: "rotate-left",
@@ -144,7 +142,6 @@ struct VPhoneDisplayControlBar: View {
                 DKButtonSpec(
                     VPhoneLocalization.text("Copy Screenshot"),
                     glyph: .camera,
-                    variant: .ghost,
                     size: .icon,
                     isEnabled: model.canTakeScreenshot,
                     id: "copy-screenshot",
@@ -155,7 +152,6 @@ struct VPhoneDisplayControlBar: View {
                 DKButtonSpec(
                     VPhoneLocalization.text("Home"),
                     glyph: .home,
-                    variant: .ghost,
                     size: .largeIcon,
                     isEnabled: model.canPressHome,
                     help: VPhoneLocalization.text("Home Button"),
@@ -183,7 +179,6 @@ struct VPhoneDisplayControlBar: View {
             DKButton(DKButtonSpec(
                 VPhoneLocalization.text("Start Recording"),
                 glyph: .record,
-                variant: .ghost,
                 size: .icon,
                 id: "recording",
                 action: { model.onToggleRecording() },

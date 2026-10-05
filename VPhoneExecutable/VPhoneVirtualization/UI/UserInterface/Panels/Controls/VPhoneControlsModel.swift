@@ -210,6 +210,24 @@ final class VPhoneControlsModel {
         audioStateError = nil
     }
 
+    /// The Active Session row: the session's category with its level, such
+    /// as "Audio/Video, 60%" or "Ringtone, 40%, muted"; "None" while no
+    /// session is active, whose level would describe nothing; "—" before the
+    /// first read; the read's error when it failed.
+    var activeSessionText: String {
+        if let audioStateError {
+            return audioStateError
+        }
+        guard let category = activeAudioCategory else { return "—" }
+        guard !category.isEmpty else { return String(localized: "None", bundle: VPhoneLocalization.bundle) }
+        guard activeAudioVolume != nil || activeAudioMuted != nil else { return category }
+        let level = VPhonePanelFormat.percent(activeAudioVolume)
+        if activeAudioMuted == true {
+            return String(localized: "\(category), \(level), muted", bundle: VPhoneLocalization.bundle)
+        }
+        return String(localized: "\(category), \(level)", bundle: VPhoneLocalization.bundle)
+    }
+
     /// `power.low_power_mode` → `{enabled, method}` (plus `changed` after a set).
     func apply(lowPowerModeResult result: [String: Any]) {
         lowPowerMode = result.bool("enabled")

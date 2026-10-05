@@ -175,6 +175,7 @@ struct VPhoneServicesView: View {
                 VPhoneSystemCell(.mono(row.pidText), alignment: .trailing)
             }
             .width(min: 44, ideal: 52, max: 72)
+            .alignment(.numeric)
             .customizationID("pid")
 
             TableColumn("Last Exit", value: \.lastExitValue) { row in

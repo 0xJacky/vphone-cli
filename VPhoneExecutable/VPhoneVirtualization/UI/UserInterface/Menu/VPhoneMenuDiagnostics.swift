@@ -72,21 +72,24 @@ extension VPhoneMenuController {
     }
 
     /// Window > Guest Tools, which the display window's title bar button
-    /// presses. It opens Guest Tools on Device Info and is available with it.
+    /// presses. It opens Guest Tools on the tool it showed last, Device Info
+    /// the first time, and is available while the guest agent is connected.
     /// The Window menu enables its items itself, so this one validates.
     func makeGuestToolsItem() -> NSMenuItem {
         makeValidatedItem(
             "Guest Tools",
             symbol: "sidebar.trailing",
-            isEnabled: { [weak self] in self?.panelMenuItems[.deviceInfo]?.isEnabled == true },
-            action: { [weak self] in self?.guestPanelsWindowController.show(.deviceInfo) },
+            isEnabled: { [weak self] in self?.guestToolsAvailable == true },
+            action: { [weak self] in self?.guestPanelsWindowController.shell.showLastTool() },
         )
         .command(.guestTools)
     }
 
-    /// Enables the panels the connected agent can serve. An empty list, as on
-    /// disconnect, disables them all.
+    /// Enables the panels the connected agent can serve, and Guest Tools while
+    /// it reports any capability. An empty list, as on disconnect, disables
+    /// them all.
     func updatePanelAvailability(capabilities: [String]) {
+        guestToolsAvailable = !capabilities.isEmpty
         for (panel, item) in panelMenuItems {
             item.isEnabled = capabilities.contains(panel.capability)
         }

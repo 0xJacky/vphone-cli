@@ -78,9 +78,16 @@ enum VPhonePanelFormat {
         return duration(seconds)
     }
 
-    static func date(_ epoch: Double?) -> String {
+    /// A date and time to the second, with today and yesterday named, as
+    /// "Today at 09:41:02".
+    static func date(_ epoch: Double?, locale: Locale = .current) -> String {
         guard let epoch, epoch > 0 else { return "—" }
-        return Date(timeIntervalSince1970: epoch).formatted(date: .abbreviated, time: .standard)
+        let formatter = DateFormatter()
+        formatter.locale = locale
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .medium
+        formatter.doesRelativeDateFormatting = true
+        return formatter.string(from: Date(timeIntervalSince1970: epoch))
     }
 
     static func percent(_ fraction: Double?) -> String {

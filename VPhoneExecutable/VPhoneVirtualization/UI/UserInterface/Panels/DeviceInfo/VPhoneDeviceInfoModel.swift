@@ -184,9 +184,9 @@ final class VPhoneDeviceInfoModel {
         return VPhoneDeviceInfoSection(kind: .hardware, title: Self.text("Hardware"), rows: rows)
     }
 
-    /// `kern.memorystatus_vm_pressure_level` uses the kernel's
-    /// kVMPressure values; `kern.memorystatus_level` is the percentage of
-    /// memory available.
+    /// `kern.memorystatus_vm_pressure_level` reports dispatch memory pressure
+    /// levels (1 normal, 2 warning, 4 critical), as Processes reads them;
+    /// `kern.memorystatus_level` is the percentage of memory available.
     private func memoryPressureRow() -> VPhoneDeviceInfoRow {
         let label = Self.text("Memory Pressure")
         guard let memory = jetsamMemory, let level = memory.int("memorystatus_vm_pressure_level") else {
@@ -197,8 +197,7 @@ final class VPhoneDeviceInfoModel {
         switch level {
         case 0, 1: (name, tone) = (Self.text("Normal"), .success)
         case 2: (name, tone) = (Self.text("Warning"), .warning)
-        case 4: (name, tone) = (Self.text("Urgent"), .danger)
-        case 8: (name, tone) = (Self.text("Critical"), .danger)
+        case 4: (name, tone) = (Self.text("Critical"), .danger)
         default: (name, tone) = ("\(Self.text("Unknown")) (\(level))", .warning)
         }
         guard let available = memory.double("memorystatus_level") else {

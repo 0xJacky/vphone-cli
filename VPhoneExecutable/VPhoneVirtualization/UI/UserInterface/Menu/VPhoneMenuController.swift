@@ -90,6 +90,9 @@ class VPhoneMenuController {
     /// Whether the agent serves the guest clipboard. The Edit menu enables its
     /// items itself, so its Guest Clipboard items read this when validated.
     var clipboardAvailable = false
+    /// Whether a guest agent is connected, for Window > Guest Tools, which
+    /// validates itself.
+    var guestToolsAvailable = false
     /// Targets of the items in menus that enable their items themselves.
     var menuItemValidators: [VPhoneMenuItemValidator] = []
 
@@ -241,7 +244,7 @@ class VPhoneMenuController {
         menuItemValidators.append(validator)
         let item = NSMenuItem(
             title: title,
-            action: #selector(VPhoneMenuItemValidator.perform(_:)),
+            action: #selector(VPhoneMenuItemValidator.runAction(_:)),
             keyEquivalent: keyEquivalent,
         )
         item.keyEquivalentModifierMask = modifiers
@@ -276,7 +279,10 @@ final class VPhoneMenuItemValidator: NSObject, NSMenuItemValidation {
         self.action = action
     }
 
-    @objc func perform(_: Any?) {
+    /// Not `perform(_:)`: `#selector` would resolve that to NSObject's
+    /// `performSelector:`, which AppKit would call with the menu item as the
+    /// selector.
+    @objc func runAction(_: Any?) {
         action()
     }
 
