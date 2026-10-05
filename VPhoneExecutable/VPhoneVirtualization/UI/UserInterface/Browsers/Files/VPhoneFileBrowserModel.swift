@@ -38,17 +38,6 @@ class VPhoneFileBrowserModel {
 
     // MARK: - Computed
 
-    var breadcrumbs: [(name: String, path: String)] {
-        var result = [("/", "/")]
-        let components = currentPath.split(separator: "/", omittingEmptySubsequences: true)
-        var running = ""
-        for c in components {
-            running += "/\(c)"
-            result.append((String(c), running))
-        }
-        return result
-    }
-
     var filteredFiles: [VPhoneRemoteFile] {
         let list: [VPhoneRemoteFile]
         if searchText.isEmpty {
@@ -60,14 +49,27 @@ class VPhoneFileBrowserModel {
         return list.sorted(using: sortOrder)
     }
 
+    /// The selected rows, in display order.
+    var selectedFiles: [VPhoneRemoteFile] {
+        filteredFiles.filter { selection.contains($0.id) }
+    }
+
+    /// Folder and file counts for the status bar: "5 folders · 6 files · 1 selected".
     var statusText: String {
-        let count = filteredFiles.count
+        let shown = filteredFiles
+        let folders = shown.filter(\.isDirectoryLike).count
+        let files = shown.count - folders
+        var parts = [
+            folders == 1 ? VPhoneLocalization.text("1 folder") : VPhoneLocalization.format("%@ folders", String(folders)),
+            files == 1 ? VPhoneLocalization.text("1 file") : VPhoneLocalization.format("%@ files", String(files)),
+        ]
         if !searchText.isEmpty {
-            return VPhoneLocalization.format("%@ items (filtered)", String(count))
+            parts.append(VPhoneLocalization.format("%@ of %@ shown", String(shown.count), String(self.files.count)))
         }
-        return count == 1
-            ? VPhoneLocalization.text("1 item")
-            : VPhoneLocalization.format("%@ items", String(count))
+        if !selection.isEmpty {
+            parts.append(VPhoneLocalization.format("%@ selected", String(selection.count)))
+        }
+        return parts.joined(separator: " · ")
     }
 
     // MARK: - Navigation
@@ -99,7 +101,7 @@ class VPhoneFileBrowserModel {
         Task { await refresh() }
     }
 
-    func goToBreadcrumb(_ path: String) {
+    func goToPath(_ path: String) {
         guard path != currentPath else { return }
         navigate(to: path)
     }
@@ -112,9 +114,12 @@ class VPhoneFileBrowserModel {
         !forwardHistory.isEmpty
     }
 
+    /// Opens a folder in place; a file opens in Quick Look.
     func openItem(_ file: VPhoneRemoteFile) {
         if file.isDirectoryLike {
             navigate(to: file.path)
+        } else {
+            quickLook(file)
         }
     }
 
@@ -122,10 +127,13 @@ class VPhoneFileBrowserModel {
 
     func quickLookSelected() {
         guard let id = selection.first,
-              let file = filteredFiles.first(where: { $0.id == id }),
-              !file.isDirectoryLike
+              let file = filteredFiles.first(where: { $0.id == id })
         else { return }
+        quickLook(file)
+    }
 
+    func quickLook(_ file: VPhoneRemoteFile) {
+        guard !file.isDirectoryLike else { return }
         quickLookTask?.cancel()
 
         quickLookTask = Task { @MainActor in

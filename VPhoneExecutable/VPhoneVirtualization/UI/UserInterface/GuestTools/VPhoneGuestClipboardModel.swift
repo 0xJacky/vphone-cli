@@ -7,23 +7,65 @@ final class VPhoneGuestClipboardModel {
     enum Activity {
         case reading
         case sending
+        case typing
 
         var title: String {
             switch self {
             case .reading: String(localized: "Reading guest clipboard…", bundle: VPhoneLocalization.bundle)
             case .sending: String(localized: "Sending text to guest…", bundle: VPhoneLocalization.bundle)
+            case .typing: String(localized: "Typing text into the guest…", bundle: VPhoneLocalization.bundle)
             }
         }
     }
 
+    /// How Send to the Guest delivers the text.
+    enum SendMode: String, CaseIterable, Identifiable {
+        /// Replaces the guest clipboard; the user pastes it in the guest.
+        case setClipboard
+        /// Types the text into the focused field, one key at a time.
+        case typeKeystrokes
+
+        var id: Self {
+            self
+        }
+
+        var title: String {
+            switch self {
+            case .setClipboard: String(localized: "Set Clipboard", bundle: VPhoneLocalization.bundle)
+            case .typeKeystrokes: String(localized: "Type as Keystrokes", bundle: VPhoneLocalization.bundle)
+            }
+        }
+    }
+
+    /// One clipboard read, send or typed text, kept while the VM window is open.
+    struct HistoryEntry: Identifiable {
+        enum Kind {
+            case fromGuest
+            case sent
+            case typed
+        }
+
+        let id = UUID()
+        let kind: Kind
+        let text: String?
+        let imageData: Data?
+        let types: [String]
+        let date: Date
+    }
+
     let control: VPhoneGuestControl
+    /// The part of the page the Data menu opened it for: reading the guest
+    /// clipboard, or writing to it (which focuses the compose editor).
     var mode: VPhoneGuestToolMode = .read
     /// Set to move focus to the compose editor the next time the view updates.
     var focusComposeRequested = false
+    var sendMode: SendMode = .setClipboard
     private(set) var activity: Activity?
     private(set) var status: VPhoneGuestToolStatus?
     private(set) var clipboard: VPhoneGuestControl.ClipboardContent?
     private(set) var readDate: Date?
+    /// Newest first. Lives as long as this model, which the VM window owns.
+    private(set) var history: [HistoryEntry] = []
     var composeText = ""
 
     var isBusy: Bool {
@@ -49,36 +91,76 @@ final class VPhoneGuestClipboardModel {
     // MARK: - Read
 
     func refresh() async {
+        await read(recording: true)
+    }
+
+    private func read(recording: Bool) async {
         guard activity == nil else { return }
         activity = .reading
         defer { activity = nil }
         do {
-            clipboard = try await control.clipboardGet()
+            let content = try await control.clipboardGet()
+            clipboard = content
             readDate = .now
             status = nil
+            if recording {
+                record(content)
+            }
         } catch {
             fail(String(localized: "Unable to read the guest clipboard. Check the connection, then try again.", bundle: VPhoneLocalization.bundle))
         }
     }
 
+    /// Adds a guest read to the history, unless it is the same content as the
+    /// last read there.
+    private func record(_ content: VPhoneGuestControl.ClipboardContent) {
+        guard content.text != nil || content.imageData != nil else { return }
+        if let last = history.first(where: { $0.kind == .fromGuest }),
+           last.text == content.text, last.imageData == content.imageData
+        {
+            return
+        }
+        history.insert(
+            HistoryEntry(kind: .fromGuest, text: content.text, imageData: content.imageData, types: content.types, date: .now),
+            at: 0,
+        )
+    }
+
     func copyTextToMac() {
         guard let text = clipboard?.text else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        writeToMac(text: text)
         succeed(String(localized: "Copied guest text to the Mac clipboard.", bundle: VPhoneLocalization.bundle))
     }
 
     func copyImageToMac() {
-        guard let data = clipboard?.imageData, let image = NSImage(data: data) else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.writeObjects([image])
+        guard let data = clipboard?.imageData, writeToMac(imageData: data) else { return }
         succeed(String(localized: "Copied guest image to the Mac clipboard.", bundle: VPhoneLocalization.bundle))
+    }
+
+    /// Copies what the guest holds: its text, or its image when it has no text.
+    func copyToMac() {
+        if canCopyText {
+            copyTextToMac()
+        } else {
+            copyImageToMac()
+        }
     }
 
     // MARK: - Write
 
+    /// Delivers the compose text the way `sendMode` says.
+    func submit() async {
+        switch sendMode {
+        case .setClipboard: await send()
+        case .typeKeystrokes: typeAsKeystrokes()
+        }
+    }
+
     func send() async {
-        let text = composeText
+        await send(composeText)
+    }
+
+    private func send(_ text: String) async {
         guard !text.isEmpty, activity == nil else { return }
         activity = .sending
         do {
@@ -89,14 +171,51 @@ final class VPhoneGuestClipboardModel {
             return
         }
         activity = nil
+        history.insert(HistoryEntry(kind: .sent, text: text, imageData: nil, types: [], date: .now), at: 0)
 
-        // Read it back so Read mode shows what the guest now holds.
-        await refresh()
+        // Read it back so On the Guest shows what the guest now holds.
+        await read(recording: false)
         succeed(
             text.count == 1
                 ? String(localized: "Sent 1 character to the guest clipboard.", bundle: VPhoneLocalization.bundle)
                 : String(localized: "Sent \(text.count) characters to the guest clipboard.", bundle: VPhoneLocalization.bundle),
         )
+    }
+
+    func typeAsKeystrokes() {
+        type(composeText)
+    }
+
+    /// Types `text` into the guest's focused field as key presses queued
+    /// through vphoned. Characters a US keyboard cannot type are skipped.
+    private func type(_ text: String) {
+        guard !text.isEmpty, activity == nil else { return }
+        guard control.isConnected else {
+            fail(String(localized: "The guest agent is not connected. Wait for it to connect, then try again.", bundle: VPhoneLocalization.bundle))
+            return
+        }
+        guard control.guestCapabilities.contains("hid") else {
+            fail(String(localized: "Update the guest agent to type text into the guest.", bundle: VPhoneLocalization.bundle))
+            return
+        }
+        let plan = VPhoneGuestKeystrokes(text: text)
+        guard !plan.keys.isEmpty else {
+            fail(String(localized: "Nothing to type. Only ASCII characters can be typed.", bundle: VPhoneLocalization.bundle))
+            return
+        }
+        plan.send(through: control)
+        history.insert(HistoryEntry(kind: .typed, text: text, imageData: nil, types: [], date: .now), at: 0)
+
+        let typed = plan.keys.count
+        if plan.skipped == 0 {
+            succeed(
+                typed == 1
+                    ? String(localized: "Typed 1 character into the guest.", bundle: VPhoneLocalization.bundle)
+                    : String(localized: "Typed \(typed) characters into the guest.", bundle: VPhoneLocalization.bundle),
+            )
+        } else {
+            succeed(String(localized: "Typed \(typed) characters into the guest. Skipped \(plan.skipped) that are not ASCII.", bundle: VPhoneLocalization.bundle))
+        }
     }
 
     func pasteFromMac() {
@@ -106,6 +225,47 @@ final class VPhoneGuestClipboardModel {
         }
         composeText = text
         status = nil
+    }
+
+    // MARK: - History
+
+    /// Copies a history item to the Mac clipboard: its text, or its image.
+    func copyToMac(_ entry: HistoryEntry) {
+        if let text = entry.text {
+            writeToMac(text: text)
+        } else if let data = entry.imageData, writeToMac(imageData: data) {
+            // Written.
+        } else {
+            return
+        }
+        succeed(String(localized: "Copied a history item to the Mac clipboard.", bundle: VPhoneLocalization.bundle))
+    }
+
+    /// Sends or types a history item's text again, the way it went the first time.
+    func sendAgain(_ entry: HistoryEntry) async {
+        guard let text = entry.text else { return }
+        switch entry.kind {
+        case .typed: type(text)
+        case .sent, .fromGuest: await send(text)
+        }
+    }
+
+    func clearHistory() {
+        history.removeAll()
+    }
+
+    // MARK: - Mac Clipboard
+
+    private func writeToMac(text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    private func writeToMac(imageData data: Data) -> Bool {
+        guard let image = NSImage(data: data) else { return false }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects([image])
+        return true
     }
 
     // MARK: - Status

@@ -1,5 +1,6 @@
 import Foundation
 import VPhoneCoreKit
+import VPhoneDesignKit
 
 struct VPhoneRemoteFile: Identifiable, Hashable {
     let dir: String
@@ -33,7 +34,7 @@ struct VPhoneRemoteFile: Identifiable, Hashable {
 
     var displaySize: String {
         if isDirectory || isSymbolicLink {
-            return "-"
+            return "—"
         }
         return ByteCountFormatter.string(fromByteCount: Int64(clamping: size), countStyle: .file)
     }
@@ -42,12 +43,29 @@ struct VPhoneRemoteFile: Identifiable, Hashable {
         Self.dateFormatter.string(from: modified)
     }
 
-    var icon: String {
-        switch type {
-        case .directory: "folder.fill"
-        case .symbolicLink: "link"
-        case .file: fileIcon(for: name)
+    /// The design's icon and type description for this entry.
+    var kind: DKFileKind {
+        DKFileKind(name: name, isDirectory: isDirectory || symlinkTargetsDirectory, isSymlink: isSymbolicLink)
+    }
+
+    /// The type description the inspector shows: "Folder", "Python Script".
+    var kindDescription: String {
+        VPhoneLocalization.text(kind.typeDescription)
+    }
+
+    /// `ls -l` style mode, "drwxr-xr-x", from the octal permissions vphoned reports.
+    var symbolicPermissions: String {
+        guard let mode = Int(permissions, radix: 8) else { return permissions }
+        let typeLetter = switch type {
+        case .directory: "d"
+        case .symbolicLink: "l"
+        case .file: "-"
         }
+        let letters = Array("rwxrwxrwx")
+        let bits = (0 ..< 9).map { index in
+            mode & (1 << (8 - index)) != 0 ? String(letters[index]) : "-"
+        }
+        return typeLetter + bits.joined()
     }
 
     enum FileType: String, Hashable {
@@ -62,26 +80,6 @@ struct VPhoneRemoteFile: Identifiable, Hashable {
         f.timeStyle = .short
         return f
     }()
-
-    private func fileIcon(for name: String) -> String {
-        let ext = (name as NSString).pathExtension.lowercased()
-        switch ext {
-        case "png", "jpg", "jpeg", "gif", "bmp", "tiff", "heic":
-            return "photo"
-        case "mov", "mp4", "m4v":
-            return "film"
-        case "txt", "md", "log":
-            return "doc.text"
-        case "plist", "json", "xml", "yaml":
-            return "doc.badge.gearshape"
-        case "dylib", "framework":
-            return "shippingbox"
-        case "app":
-            return "app.dashed"
-        default:
-            return "doc"
-        }
-    }
 }
 
 extension VPhoneRemoteFile {

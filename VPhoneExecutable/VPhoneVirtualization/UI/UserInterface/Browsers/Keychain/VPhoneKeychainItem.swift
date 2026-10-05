@@ -42,17 +42,6 @@ struct VPhoneKeychainItem: Identifiable, Hashable {
         }
     }
 
-    var classIcon: String {
-        switch itemClass {
-        case "genp": "key.fill"
-        case "inet": "globe"
-        case "cert": "checkmark.seal.fill"
-        case "keys": "lock.fill"
-        case "idnt": "person.badge.key.fill"
-        default: "questionmark.circle"
-        }
-    }
-
     var displayValue: String {
         if valueEncoding == "protected" {
             return VPhoneLocalization.text("Protected")
