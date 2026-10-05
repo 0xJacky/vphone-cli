@@ -102,15 +102,9 @@ struct VPhoneLaunchpadMachinesView: View {
         .inspector(isPresented: $model.showsInspector) {
             inspector
                 .inspectorColumnWidth(min: 300, ideal: 380, max: 520)
-                // The toggle belongs to the inspector's own toolbar section.
-                // Put in the content's toolbar, the section and its background
-                // were set up at launch but not again after the inspector was
-                // hidden and shown.
-                .toolbar {
-                    ToolbarItem(placement: .automatic) {
-                        inspectorToggle
-                    }
-                }
+                // No toolbar toggle: the design's window has no toolbar, and an
+                // item here would bring one back above the page header. View ›
+                // Hide Inspector (⌥⌘I) shows and hides it.
         }
         #if DEBUG
         .onReceive(NotificationCenter.default.publisher(for: VPhoneLaunchpadPreview.sheetNotification)) { note in
@@ -198,15 +192,6 @@ struct VPhoneLaunchpadMachinesView: View {
             ) { actions.chooseImport() })
             DKSearchField(String(localized: "Name, iOS, UDID"), text: $filter, width: 180)
         }
-    }
-
-    private var inspectorToggle: some View {
-        Button {
-            model.showsInspector.toggle()
-        } label: {
-            Label("Inspector", systemImage: "sidebar.trailing")
-        }
-        .help(model.showsInspector ? "Hide the inspector" : "Show the inspector")
     }
 
     // MARK: - Inspector
