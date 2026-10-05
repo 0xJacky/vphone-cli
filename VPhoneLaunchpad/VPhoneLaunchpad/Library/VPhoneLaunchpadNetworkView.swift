@@ -26,6 +26,12 @@ struct VPhoneLaunchpadNetworkView: View {
         )
         .navigationTitle("Network")
         .task {
+            #if DEBUG
+                if VPhoneLaunchpadPreview.isActive {
+                    sharedNAT = VPhoneLaunchpadPreview.sharedNAT
+                    return
+                }
+            #endif
             sharedNAT = await Self.readSharedNAT()
             await model.leases.refresh()
         }
@@ -162,33 +168,16 @@ struct VPhoneLaunchpadNetworkView: View {
     private var leaseSummary: VPhoneLaunchpadLeaseSummary {
         let leases = model.leases
         let count = leases.orphans.count
-        let title: String
-        var detail: String?
-        if leases.isReleasing {
-            title = String(localized: "Releasing…")
-            detail = String(localized: "Waiting for administrator approval…")
+        let state: VPhoneLaunchpadLeaseSummary.State = if leases.isReleasing {
+            .releasing
         } else {
             switch leases.state {
-            case .unknown, .checking:
-                title = String(localized: "Checking…")
-            case let .unavailable(reason):
-                title = String(localized: "Not checked")
-                detail = reason
-            case let .failed(reason):
-                title = String(localized: "Unable to list leases")
-                detail = reason
-            case .listed:
-                title = count == 0 ? String(localized: "None") : count == 1 ? String(localized: "1 address") : String(localized: "\(count) addresses")
-                if count > 0 {
-                    detail = leases.orphans.compactMap(\.address).joined(separator: ", ")
-                }
+            case .unknown, .checking: .checking
+            case let .unavailable(reason): .unavailable(reason)
+            case let .failed(reason): .failed(reason)
+            case .listed: .listed(count)
             }
         }
-        return VPhoneLaunchpadLeaseSummary(
-            title: title,
-            detail: detail,
-            detailIsAddresses: leases.state == .listed && !leases.isReleasing,
-            canRelease: count > 0 && !leases.isReleasing && model.canReleaseLeases,
-        )
+        return VPhoneLaunchpadLeaseSummary(state, canRelease: count > 0 && !leases.isReleasing && model.canReleaseLeases)
     }
 }

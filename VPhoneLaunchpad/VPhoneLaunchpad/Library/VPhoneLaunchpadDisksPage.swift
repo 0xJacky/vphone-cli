@@ -35,7 +35,6 @@ struct VPhoneLaunchpadDiskSummary: Hashable {
     /// Restore files that can go, by machine: "ios27-hooks (13.9 GB)".
     var removableRestoreFiles: [String]
     var ipswCount: Int
-    var cachePath: String
 
     var used: Int64 {
         machineDisks + restoreFiles + otherMachineFiles + ipswCache
@@ -53,7 +52,8 @@ struct VPhoneLaunchpadDisksPage: View {
     let summary: VPhoneLaunchpadDiskSummary?
     let rows: [VPhoneLaunchpadDiskRow]
     var onShowLibrary: (() -> Void)?
-    var onShowCache: (() -> Void)?
+    /// Opens the Firmwares page, where restore files and IPSWs are removed.
+    var onOpenFirmwares: (() -> Void)?
 
     private static let columns = [
         DKTableColumn(String(localized: "Machine"), width: .flexible(min: 150, weight: 1.4)),
@@ -72,7 +72,7 @@ struct VPhoneLaunchpadDisksPage: View {
             if let summary {
                 usage(summary)
                 ForEach(summary.volumes.filter(\.isLow), id: \.self) { volume in
-                    DKBanner(lowSpaceText(volume, summary: summary))
+                    banner(volume, summary: summary)
                 }
             } else {
                 DKSection {
@@ -92,12 +92,12 @@ struct VPhoneLaunchpadDisksPage: View {
         DKCard(.padded) {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .bottom, spacing: DK.Space.s6) {
-                    VPhoneLaunchpadUsageFigure(caption: summary.usedCaption, value: VPhoneLaunchpadLibraryFormat.size(summary.used))
+                    VPhoneLaunchpadUsageFigure(caption: summary.usedCaption, value: VPhoneLaunchpadLibraryFormat.compactSize(summary.used))
                     Spacer(minLength: 0)
                     ForEach(summary.volumes, id: \.self) { volume in
                         VPhoneLaunchpadUsageFigure(
                             caption: String(localized: "Free on \(volume.name)"),
-                            value: volume.available.map(VPhoneLaunchpadLibraryFormat.size) ?? String(localized: "Unknown"),
+                            value: volume.available.map(VPhoneLaunchpadLibraryFormat.compactSize) ?? String(localized: "Unknown"),
                             alignment: .trailing,
                             tone: volume.isLow ? .warning : nil,
                         )
@@ -114,13 +114,23 @@ struct VPhoneLaunchpadDisksPage: View {
         }
     }
 
-    private func lowSpaceText(_ volume: VPhoneLaunchpadDiskSummary.Volume, summary: VPhoneLaunchpadDiskSummary) -> String {
-        let free = volume.available.map(VPhoneLaunchpadLibraryFormat.size) ?? "?"
-        var text = String(localized: "\(free) free on \(volume.name). Host Setup recommends 100 GB; a new machine with a 64 GB disk needs about 84 GB while it is created.")
-        if !summary.removableRestoreFiles.isEmpty {
-            text += " " + String(localized: "Restore files kept for \(summary.removableRestoreFiles.joined(separator: ", ")) can be removed in Firmwares.")
+    private func banner(_ volume: VPhoneLaunchpadDiskSummary.Volume, summary: VPhoneLaunchpadDiskSummary) -> DKBanner {
+        let text = Self.lowSpaceText(volume, summary: summary)
+        guard let onOpenFirmwares else {
+            return DKBanner(text)
         }
-        return text
+        return DKBanner(text, actionLabel: String(localized: "Open Firmwares"), action: onOpenFirmwares)
+    }
+
+    /// The low-space banner: how much is free, and what can go to make room.
+    static func lowSpaceText(_ volume: VPhoneLaunchpadDiskSummary.Volume, summary: VPhoneLaunchpadDiskSummary) -> String {
+        let free = volume.available.map(VPhoneLaunchpadLibraryFormat.compactSize) ?? "?"
+        let fits = String(localized: "\(free) free on \(volume.name). A new machine’s 64 GB disk may not fit.")
+        guard !summary.removableRestoreFiles.isEmpty else {
+            return fits + " " + String(localized: "Unused IPSWs can be removed in Firmwares.")
+        }
+        let kept = summary.removableRestoreFiles.formatted(.list(type: .and))
+        return fits + " " + String(localized: "Restore files kept for \(kept) and unused IPSWs can be removed in Firmwares.")
     }
 
     // MARK: Machines
@@ -169,24 +179,25 @@ struct VPhoneLaunchpadDisksPage: View {
     // MARK: Shared
 
     private func shared(_ summary: VPhoneLaunchpadDiskSummary) -> some View {
-        let count = summary.ipswCount == 1
-            ? String(localized: "1 downloaded image.")
-            : String(localized: "\(summary.ipswCount) downloaded images.")
         var actions: [DKButtonSpec] = []
-        if let onShowCache {
-            actions.append(DKButtonSpec(String(localized: "Show in Finder"), action: onShowCache))
+        if let onOpenFirmwares {
+            actions.append(DKButtonSpec(String(localized: "Manage in Firmwares"), action: onOpenFirmwares))
         }
         return DKSection(String(localized: "Shared by All Machines"), items: [
             DKListItem(
                 String(localized: "IPSW cache"),
-                glyph: .image,
-                lines: [
-                    DKListItem.Line(count + " " + String(localized: "A second machine from the same image downloads nothing. Firmwares lists them.")),
-                    DKListItem.Line(summary.cachePath, monospaced: true),
-                ],
+                lines: [DKListItem.Line(Self.cacheLine(ipswCount: summary.ipswCount))],
                 value: VPhoneLaunchpadLibraryFormat.size(summary.ipswCache),
                 actions: actions,
             ),
         ])
+    }
+
+    /// "4 downloaded images. A second machine from the same image downloads nothing."
+    static func cacheLine(ipswCount: Int) -> String {
+        let count = ipswCount == 1
+            ? String(localized: "1 downloaded image.")
+            : String(localized: "\(ipswCount) downloaded images.")
+        return count + " " + String(localized: "A second machine from the same image downloads nothing.")
     }
 }

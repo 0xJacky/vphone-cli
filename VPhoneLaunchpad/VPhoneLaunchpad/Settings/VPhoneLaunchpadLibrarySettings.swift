@@ -50,22 +50,18 @@ struct VPhoneLaunchpadLibrarySettings: View {
 
     private func item(for root: String) -> DKListItem {
         let isDefault = root == library.libraryRoot
-        let count = library.machines.count(where: { $0.libraryRoot == root })
-        var detail: [String] = []
-        if VPhoneLaunchpadMachineLocations.isAvailable(root) || isDefault {
-            detail.append(String(localized: "\(count) machines"))
-            if let free = Self.freeSpace(root) {
-                detail.append(String(localized: "\(free) free"))
-            }
-        } else {
-            detail.append(String(localized: "Not available"))
-        }
+        let isAvailable = VPhoneLaunchpadMachineLocations.isAvailable(root)
+        let detail = VPhoneLaunchpadLibrarySettingsText.folderDetail(
+            isDefault: isDefault,
+            isAvailable: isAvailable,
+            machines: library.machines.count(where: { $0.libraryRoot == root }),
+            freeBytes: isAvailable || isDefault ? Self.freeSpace(root) : nil,
+        )
         return DKListItem(
             Self.shown(root),
-            glyph: .folder,
             monospacedTitle: true,
             badges: isDefault ? [DKListItem.Badge(String(localized: "Default"))] : [],
-            lines: [DKListItem.Line(detail.joined(separator: " · "))],
+            lines: [DKListItem.Line(detail)],
             id: root,
         )
     }
@@ -93,14 +89,14 @@ struct VPhoneLaunchpadLibrarySettings: View {
         VPhoneLaunchpadHostSetup.abbreviated(URL(fileURLWithPath: root, isDirectory: true))
     }
 
-    /// Free space on the volume holding `root`, as the Finder writes it.
-    private static func freeSpace(_ root: String) -> String? {
+    /// Free space on the volume holding `root`.
+    private static func freeSpace(_ root: String) -> Int64? {
         let url = VPhoneLaunchpadHostSetup.existingAncestor(of: URL(fileURLWithPath: root, isDirectory: true))
         guard let bytes = (try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
             .volumeAvailableCapacityForImportantUsage
         else {
             return nil
         }
-        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+        return bytes
     }
 }

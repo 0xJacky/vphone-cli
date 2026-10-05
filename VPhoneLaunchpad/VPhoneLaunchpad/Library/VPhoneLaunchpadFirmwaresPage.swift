@@ -9,7 +9,6 @@ struct VPhoneLaunchpadFirmwaresPage: View {
     /// True until the first scan answers.
     let isLoading: Bool
     @Binding var filter: VPhoneLaunchpadFirmwareFilter
-    var onShowCache: (() -> Void)?
     var onRemove: (VPhoneLaunchpadRestoreFilesItem) -> Void = { _ in }
 
     private static let columns = [
@@ -20,14 +19,13 @@ struct VPhoneLaunchpadFirmwaresPage: View {
         DKTableColumn(String(localized: "Status"), width: .flexible(min: 130, weight: 1)),
     ]
 
-    private var complete: [VPhoneLaunchpadFirmwareRow] {
-        rows.filter { !$0.isDownloading }
+    private var subtitle: String? {
+        isLoading ? nil : Self.subtitle(rows)
     }
 
-    private var subtitle: String? {
-        guard !isLoading else {
-            return nil
-        }
+    /// "4 IPSWs · 38.1 GB": the finished downloads and what they take.
+    static func subtitle(_ rows: [VPhoneLaunchpadFirmwareRow]) -> String {
+        let complete = rows.filter { !$0.isDownloading }
         let count = complete.count
         let total = complete.reduce(Int64(0)) { $0 + $1.size }
         let files = count == 1 ? String(localized: "1 IPSW") : String(localized: "\(count) IPSWs")
@@ -37,9 +35,6 @@ struct VPhoneLaunchpadFirmwaresPage: View {
     var body: some View {
         VPhoneLaunchpadLibraryPage(String(localized: "Firmwares"), subtitle: subtitle, roomy: true) {
             DKSegmented(String(localized: "Kind"), selection: $filter, options: filterOptions)
-            if let onShowCache {
-                DKButton(String(localized: "Show in Finder"), glyph: .folder, action: onShowCache)
-            }
         } content: {
             downloaded
             prepared

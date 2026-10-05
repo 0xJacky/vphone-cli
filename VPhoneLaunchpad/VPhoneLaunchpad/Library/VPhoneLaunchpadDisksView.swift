@@ -18,7 +18,7 @@ struct VPhoneLaunchpadDisksView: View {
             summary: scan.map(summary),
             rows: scan.map(rows) ?? [],
             onShowLibrary: showLibrary,
-            onShowCache: scan.map { scan in { reveal(scan.cacheDirectories.first ?? VPhoneLaunchpadLibraryScanner.ipswCacheDirectory) } },
+            onOpenFirmwares: { model.show(.firmwares) },
         )
         .navigationTitle("Disks")
         .task(id: VPhoneLaunchpadLibraryScanKey.key(library)) { await rescan() }
@@ -39,6 +39,12 @@ struct VPhoneLaunchpadDisksView: View {
     }
 
     private func rescan() async {
+        #if DEBUG
+            if VPhoneLaunchpadPreview.isActive {
+                scan = VPhoneLaunchpadPreview.libraryScan
+                return
+            }
+        #endif
         guard library.hasListed else {
             return
         }
@@ -97,7 +103,6 @@ struct VPhoneLaunchpadDisksView: View {
             },
             removableRestoreFiles: removable.map { "\($0.name) (\(VPhoneLaunchpadLibraryFormat.size($0.restoreAllocated)))" },
             ipswCount: scan.completeIPSWs.count,
-            cachePath: VPhoneLaunchpadLibraryFormat.abbreviated((scan.cacheDirectories.first ?? VPhoneLaunchpadLibraryScanner.ipswCacheDirectory).path),
         )
     }
 

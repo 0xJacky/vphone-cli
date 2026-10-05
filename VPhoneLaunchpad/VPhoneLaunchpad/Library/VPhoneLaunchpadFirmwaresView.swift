@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 import VPhoneDesignKit
 
@@ -24,7 +23,6 @@ struct VPhoneLaunchpadFirmwaresView: View {
             restoreItems: restoreItems,
             isLoading: scan == nil,
             filter: $filter,
-            onShowCache: showCache,
             onRemove: { removal = $0 },
         )
         .navigationTitle("Firmwares")
@@ -66,12 +64,20 @@ struct VPhoneLaunchpadFirmwaresView: View {
     }
 
     private func rescan() async {
+        #if DEBUG
+            if VPhoneLaunchpadPreview.isActive {
+                scan = VPhoneLaunchpadPreview.libraryScan
+                return
+            }
+        #endif
         // `vm list` has to answer first, or every machine looks missing.
         guard library.hasListed else {
             return
         }
         do {
-            scan = try await VPhoneLaunchpadLibraryScanner.scan(libraryRoots: library.roots, machines: machineFolders)
+            let scan = try await VPhoneLaunchpadLibraryScanner.scan(libraryRoots: library.roots, machines: machineFolders)
+            self.scan = scan
+            model.firmwareCount = scan.completeIPSWs.count
         } catch {
             // Cancelled: the page went away or the machines changed again.
         }
@@ -149,6 +155,12 @@ struct VPhoneLaunchpadFirmwaresView: View {
     private static var catalogs: [String: VPhoneLaunchpadFirmwareCatalogIndex] = [:]
 
     private func loadCatalog() async {
+        #if DEBUG
+            if VPhoneLaunchpadPreview.isActive {
+                catalog = VPhoneLaunchpadPreview.catalog.map(Self.index)
+                return
+            }
+        #endif
         guard let version = model.bundles.defaultVersion,
               let commandLine = model.bundles.commandLine(version: version)
         else {
@@ -164,6 +176,13 @@ struct VPhoneLaunchpadFirmwaresView: View {
         else {
             return
         }
+        let index = Self.index(report)
+        Self.catalogs[version] = index
+        catalog = index
+    }
+
+    /// Every iOS, iPadOS and cloudOS image the catalog names, by URL.
+    static func index(_ report: VPhoneLaunchpadFirmwareCatalog) -> VPhoneLaunchpadFirmwareCatalogIndex {
         let entries = report.guests.flatMap { device in
             device.pairings.flatMap { pairing in
                 [
@@ -172,20 +191,10 @@ struct VPhoneLaunchpadFirmwaresView: View {
                 ]
             }
         }
-        let index = VPhoneLaunchpadFirmwareCatalogIndex(entries: entries)
-        Self.catalogs[version] = index
-        catalog = index
+        return VPhoneLaunchpadFirmwareCatalogIndex(entries: entries)
     }
 
     // MARK: - Actions
-
-    private func showCache() {
-        let directory = scan?.cacheDirectories.first ?? VPhoneLaunchpadLibraryScanner.ipswCacheDirectory
-        let shown = VPhoneLaunchpadLibraryScanner.isDirectory(directory)
-            ? directory
-            : VPhoneLaunchpadLibraryScanner.existingAncestor(of: directory)
-        NSWorkspace.shared.activateFileViewerSelecting([shown])
-    }
 
     /// Checks the machine again at the moment of removal: the list the
     /// dialog was opened from may be seconds old.

@@ -68,11 +68,38 @@ struct VPhoneLaunchpadNetworkDetail: Hashable {
 
 /// The orphaned NAT leases, as the release action reports them.
 struct VPhoneLaunchpadLeaseSummary: Hashable {
+    enum State: Hashable {
+        case checking
+        case releasing
+        case unavailable(String)
+        case failed(String)
+        /// The addresses no machine uses.
+        case listed(Int)
+    }
+
     var title: String
+    /// Why the addresses are not known, or what the release waits for.
     var detail: String?
-    /// Set the detail in monospace: it lists addresses.
-    var detailIsAddresses = false
     var canRelease: Bool
+
+    init(_ state: State, canRelease: Bool) {
+        self.canRelease = canRelease
+        switch state {
+        case .checking:
+            title = String(localized: "Checking…")
+        case .releasing:
+            title = String(localized: "Releasing…")
+            detail = String(localized: "Waiting for administrator approval…")
+        case let .unavailable(reason):
+            title = String(localized: "Not checked")
+            detail = reason
+        case let .failed(reason):
+            title = String(localized: "Unable to list leases")
+            detail = reason
+        case let .listed(count):
+            title = count == 0 ? String(localized: "None") : count == 1 ? String(localized: "1 address") : String(localized: "\(count) addresses")
+        }
+    }
 }
 
 // MARK: - Page
@@ -88,20 +115,22 @@ struct VPhoneLaunchpadNetworkPage: View {
     var onRelease: () -> Void = {}
 
     private static let columns = [
-        DKTableColumn(String(localized: "Machine"), width: .flexible(min: 140, weight: 1.2)),
+        DKTableColumn(String(localized: "Machine"), width: .flexible(min: 130, weight: 1)),
         DKTableColumn(String(localized: "Mode"), width: .fixed(96)),
-        DKTableColumn(String(localized: "IPv4 Address"), width: .flexible(min: 150, weight: 1.2)),
+        DKTableColumn(String(localized: "IPv4 Address"), width: .flexible(min: 130, weight: 1)),
         DKTableColumn(String(localized: "MAC Address"), width: .flexible(min: 140, weight: 1.1)),
         DKTableColumn(String(localized: "mDNS Name"), width: .flexible(min: 130, weight: 1.1)),
-        DKTableColumn(String(localized: "Port Forwards"), width: .flexible(min: 130, weight: 1.1)),
+        DKTableColumn(String(localized: "Port Forwards"), width: .flexible(min: 150, weight: 1.5)),
     ]
 
     private var subtitle: String? {
-        guard !isLoading else {
-            return nil
-        }
-        let count = rows.count
-        return count == 1 ? String(localized: "1 machine") : String(localized: "\(count) machines")
+        isLoading ? nil : Self.subtitle(machines: rows.count)
+    }
+
+    /// "4 machines · NAT, Tunnel, Bridged or None for each".
+    static func subtitle(machines count: Int) -> String {
+        let machines = count == 1 ? String(localized: "1 machine") : String(localized: "\(count) machines")
+        return machines + " · " + String(localized: "NAT, Tunnel, Bridged or None for each")
     }
 
     var body: some View {
@@ -121,7 +150,7 @@ struct VPhoneLaunchpadNetworkPage: View {
                     DKListItem(
                         leases.title,
                         lines: [DKListItem.Line(String(localized: "The Mac keeps an address for every guest MAC it has seen. Release frees the ones no machine uses any more. It needs an administrator."))]
-                            + (leases.detail.map { [DKListItem.Line($0, monospaced: leases.detailIsAddresses)] } ?? []),
+                            + (leases.detail.map { [DKListItem.Line($0)] } ?? []),
                         actions: [DKButtonSpec(String(localized: "Release…"), isEnabled: leases.canRelease, action: onRelease)],
                     ),
                 ])

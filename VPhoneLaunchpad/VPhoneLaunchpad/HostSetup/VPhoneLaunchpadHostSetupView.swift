@@ -1,13 +1,12 @@
 import SwiftUI
 import VPhoneDesignKit
 
-/// The Host Setup page: a summary of whether this Mac can run machines, the
-/// required and advisory checks with their fixes, and the DHCP addresses old
-/// guests still hold.
+/// The Host Setup page: a summary of whether this Mac can run machines, and
+/// the required and advisory checks with their fixes. The DHCP addresses old
+/// guests still hold are on the Network page.
 struct VPhoneLaunchpadHostSetupView: View {
     @Environment(VPhoneLaunchpadModel.self) private var model
     @State private var showsSkillInstall = false
-    @State private var confirmsRelease = false
 
     /// Opens the Disks page from the low disk space banner. Without it the
     /// banner has no button.
@@ -23,7 +22,6 @@ struct VPhoneLaunchpadHostSetupView: View {
 
     var body: some View {
         @Bindable var host = host
-        @Bindable var leases = model.leases
         VStack(spacing: 0) {
             header
             ScrollView {
@@ -36,7 +34,6 @@ struct VPhoneLaunchpadHostSetupView: View {
                     if let banner = diskBanner {
                         banner
                     }
-                    leasesSection
                 }
                 .padding(DK.Space.s5)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -48,18 +45,6 @@ struct VPhoneLaunchpadHostSetupView: View {
             VPhoneLaunchpadSkillInstallView()
         }
         .errorAlert($host.actionError)
-        .errorAlert($leases.actionError)
-        .task { await model.leases.refresh() }
-        .confirmationDialog(
-            "Release \(model.leases.orphans.count) Addresses?",
-            isPresented: $confirmsRelease,
-        ) {
-            Button("Release") {
-                Task { await model.leases.releaseFromUI() }
-            }
-        } message: {
-            Text("Their leases have run out and no machine in your libraries has their MAC. A guest that comes back with one of these MACs gets a new address.")
-        }
     }
 
     // MARK: - Header
@@ -91,14 +76,11 @@ struct VPhoneLaunchpadHostSetupView: View {
 
     /// Checks that passed or were skipped, and the advisory ones that warn.
     private var subtitle: String {
-        let passed = String(localized: "\(host.passedRequiredCount) of \(host.required.count) required passed")
-        let warnings = advisoryWarnings.count
-        guard warnings > 0 else {
-            return passed
-        }
-        return warnings == 1
-            ? String(localized: "\(passed) · 1 advisory warning")
-            : String(localized: "\(passed) · \(warnings) advisory warnings")
+        VPhoneLaunchpadHostSetupText.subtitle(
+            passed: host.passedRequiredCount,
+            required: host.required.count,
+            advisoryWarnings: advisoryWarnings.count,
+        )
     }
 
     private var advisoryWarnings: [VPhoneLaunchpadHostCheck] {
@@ -109,7 +91,6 @@ struct VPhoneLaunchpadHostSetupView: View {
 
     private var summary: DKListItem {
         let failing = host.required.filter { !host.isSatisfied($0) }
-        let warnings = advisoryWarnings.map { $0.title.localizedLowercase }
         if host.isChecking, !failing.isEmpty {
             return DKListItem(
                 String(localized: "Checking this Mac…"),
@@ -119,19 +100,15 @@ struct VPhoneLaunchpadHostSetupView: View {
             )
         }
         if failing.isEmpty {
-            var line = String(localized: "Every required check passed.")
-            if !warnings.isEmpty {
-                line += " " + String(localized: "Advisory checks that need a look: \(warnings.formatted(.list(type: .and))).")
-            }
             return DKListItem(
                 String(localized: "This Mac can run machines."),
                 glyph: .check,
                 glyphTone: .success,
-                lines: [.init(line)],
+                lines: [.init(VPhoneLaunchpadHostSetupText.passedLine(advisoryWarnings: advisoryWarnings.map(\.title)))],
             )
         }
         var lines: [DKListItem.Line] = [
-            .init(String(localized: "Needs a look: \(failing.map { $0.title }.formatted(.list(type: .and))).")),
+            .init(VPhoneLaunchpadHostSetupText.failingLine(failing.map(\.title))),
         ]
         if failing.contains(where: { $0.kind == .developerTools }) {
             lines.append(.init(String(localized: "Allow vphone-launchpad in Privacy & Security → Developer Tools, then come back to Launchpad.")))
@@ -148,10 +125,7 @@ struct VPhoneLaunchpadHostSetupView: View {
     // MARK: - Checks
 
     private var requiredSection: some View {
-        DKSection(
-            String(localized: "Required"),
-            note: String(localized: "\(host.passedRequiredCount) of \(host.required.count) passed"),
-        ) {
+        DKSection(String(localized: "Required")) {
             ForEach(host.required) { check in
                 checkRow(check)
             }
@@ -225,54 +199,11 @@ struct VPhoneLaunchpadHostSetupView: View {
         else {
             return nil
         }
-        let text = String(localized: "Low disk space on the library volume: \(check.detail). A new machine’s disk may not fit once the guest fills it.")
+        let text = VPhoneLaunchpadHostSetupText.lowDiskText(check.detail)
         guard let onReviewDisks else {
             return DKBanner(text)
         }
         return DKBanner(text, actionLabel: String(localized: "Review Disks"), action: onReviewDisks)
-    }
-
-    // MARK: - NAT leases
-
-    private var leasesSection: some View {
-        let leases = model.leases
-        let (status, detail) = leasesStatus
-        return DKSection(
-            String(localized: "NAT Network"),
-            footnote: String(localized: "The Mac’s DHCP server keeps an address for every guest MAC it has seen, even after the lease runs out. Release frees the addresses of iOS guests no machine uses any more, such as deleted machines. It needs an administrator."),
-        ) {
-            VPhoneLaunchpadHostCheckRow(
-                title: String(localized: "Addresses held by old guests"),
-                value: detail,
-                status: status,
-                action: leases.orphans.isEmpty ? nil : DKButtonSpec(
-                    String(localized: "Release…"),
-                    isEnabled: !leases.isReleasing && model.canReleaseLeases,
-                ) {
-                    confirmsRelease = true
-                },
-            )
-        }
-    }
-
-    private var leasesStatus: (VPhoneLaunchpadStatus, String) {
-        let leases = model.leases
-        if leases.isReleasing {
-            return (.running, String(localized: "Waiting for administrator approval…"))
-        }
-        switch leases.state {
-        case .unknown, .checking:
-            return (.running, String(localized: "Checking…"))
-        case let .unavailable(reason):
-            return (.pending, reason)
-        case let .failed(reason):
-            return (.warning, reason)
-        case .listed:
-            let count = leases.orphans.count
-            return count == 0
-                ? (.passed, String(localized: "None"))
-                : (.warning, String(localized: "\(count) addresses no machine uses"))
-        }
     }
 }
 

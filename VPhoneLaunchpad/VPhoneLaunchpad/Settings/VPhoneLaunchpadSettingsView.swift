@@ -28,7 +28,7 @@ struct VPhoneLaunchpadSettingsView: View {
                 .tabItem { Label("Advanced", systemImage: "slider.horizontal.3") }
                 .tag(Tab.advanced)
         }
-        .frame(width: 620)
+        .frame(width: 672)
         #if DEBUG
             .onReceive(NotificationCenter.default.publisher(for: VPhoneLaunchpadPreview.settingsNotification)) { note in
                 if let next = note.object as? Tab {
@@ -71,6 +71,28 @@ extension VPhoneLaunchpadStatus {
     }
 }
 
+// MARK: - Help
+
+/// The muted note under a setting, inside its card, without a divider above.
+struct VPhoneLaunchpadSettingsHelp: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(text)
+            .font(DK.Typeface.caption)
+            .lineSpacing(3)
+            .foregroundStyle(DK.Palette.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.bottom, DK.Space.s3)
+    }
+}
+
 // MARK: - General
 
 struct VPhoneLaunchpadGeneralSettings: View {
@@ -78,12 +100,12 @@ struct VPhoneLaunchpadGeneralSettings: View {
 
     var body: some View {
         VPhoneLaunchpadSettingsPage {
-            DKSection(
-                String(localized: "Menu Bar"),
-                footnote: String(localized: "Closing the window keeps Launchpad in the menu bar, where you can start and stop machines. The Dock icon appears only while a window or the menu is open."),
-            ) {
-                DKFormRow(String(localized: "Keep in Menu Bar"), labelWidth: 200) {
-                    DKSwitch(String(localized: "Keep in Menu Bar"), isOn: $showsInMenuBar)
+            DKSection(String(localized: "Menu Bar")) {
+                VStack(spacing: 0) {
+                    DKFormRow(String(localized: "Keep in Menu Bar"), labelWidth: 200) {
+                        DKSwitch(String(localized: "Keep in Menu Bar"), isOn: $showsInMenuBar)
+                    }
+                    VPhoneLaunchpadSettingsHelp(String(localized: "Closing the window keeps Launchpad in the menu bar, where you can start and stop machines. The Dock icon appears only while a window or the menu is open."))
                 }
             }
         }

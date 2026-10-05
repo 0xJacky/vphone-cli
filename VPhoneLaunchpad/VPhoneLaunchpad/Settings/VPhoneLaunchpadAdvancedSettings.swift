@@ -6,7 +6,6 @@ import VPhoneDesignKit
 /// command-line client lives.
 struct VPhoneLaunchpadAdvancedSettings: View {
     @Environment(VPhoneLaunchpadModel.self) private var model
-    @Environment(\.openWindow) private var openWindow
 
     private var host: VPhoneLaunchpadHostSetup {
         model.host
@@ -25,9 +24,6 @@ struct VPhoneLaunchpadAdvancedSettings: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                     Spacer(minLength: 0)
-                    DKButton(String(localized: "Host Setup…"), size: .small) {
-                        showHostSetup()
-                    }
                 }
             }
             skippedChecks
@@ -37,9 +33,8 @@ struct VPhoneLaunchpadAdvancedSettings: View {
             ) {
                 DKListRow(DKListItem(
                     "vphone-launchpad-cli",
-                    glyph: .terminal,
                     monospacedTitle: true,
-                    lines: [DKListItem.Line(Self.cliPath, monospaced: true)],
+                    lines: [DKListItem.Line(Self.cliPath)],
                     actions: [DKButtonSpec(String(localized: "Copy Path"), glyph: .copy) {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(Self.cliPath, forType: .string)
@@ -60,7 +55,7 @@ struct VPhoneLaunchpadAdvancedSettings: View {
     private var skippedChecks: some View {
         let skipped = host.checks.filter { host.skipped.contains($0.kind) }
         DKSection(
-            String(localized: "Skipped Host Checks"),
+            String(localized: "Host Checks"),
             footnote: String(localized: "A skipped check does not hold up setup; the Core Bundle still runs its own checks. Check Again counts it again."),
         ) {
             if skipped.isEmpty {
@@ -103,14 +98,6 @@ struct VPhoneLaunchpadAdvancedSettings: View {
         case .unconfigured:
             (String(localized: "Not available in this build"), .danger)
         }
-    }
-
-    /// Brings the Launchpad window forward on Host Setup.
-    private func showHostSetup() {
-        model.show(.hostSetup)
-        NSApp.setActivationPolicy(.regular)
-        openWindow(id: "main")
-        NSApp.activate()
     }
 
     /// The client is a tool beside the app's own executable.

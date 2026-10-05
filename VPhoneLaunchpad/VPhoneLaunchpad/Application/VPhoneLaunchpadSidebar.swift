@@ -1,38 +1,6 @@
 import SwiftUI
 import VPhoneDesignKit
 
-// MARK: - Pages
-
-extension DKLaunchpadDestination {
-    /// The page's name in the sidebar, the View menu and the window title.
-    /// The kit's own `title` is not localized.
-    var localizedTitle: String {
-        switch self {
-        case .machines: String(localized: "Machines")
-        case .firmwares: String(localized: "Firmwares")
-        case .disks: String(localized: "Disks")
-        case .bundles: String(localized: "Bundles")
-        case .network: String(localized: "Network")
-        case .hostSetup: String(localized: "Host Setup")
-        }
-    }
-
-    /// ⌘1 to ⌘6, in sidebar order.
-    var shortcut: DKShortcut {
-        let index = Self.allCases.firstIndex(of: self) ?? 0
-        return DKShortcut(Character("\(index + 1)"), .command)
-    }
-}
-
-extension DKLaunchpadSection {
-    var localizedTitle: String {
-        switch self {
-        case .library: String(localized: "Library")
-        case .system: String(localized: "System")
-        }
-    }
-}
-
 // MARK: - Sidebar
 
 /// The window's sidebar: Library (Machines, Firmwares, Disks) and System
@@ -49,6 +17,8 @@ struct VPhoneLaunchpadSidebar: View {
             footer: { DKSidebarFooter(footer) },
         )
         .accessibilityLabel(Text("Launchpad"))
+        // The Firmwares count, read again when a download may have finished.
+        .task(id: VPhoneLaunchpadLibraryScanKey.key(model.machines)) { await countFirmwares() }
     }
 
     private var sections: [DKSidebarSection<DKLaunchpadDestination>] {
@@ -64,25 +34,47 @@ struct VPhoneLaunchpadSidebar: View {
             glyph: destination.glyph,
             warningLabel: String(localized: "Needs attention"),
         )
+        let meta: VPhoneLaunchpadSidebarMeta.Meta?
         switch destination {
         case .machines:
             let library = model.machines
-            // Nothing until `vm list` answers, so it does not read 0/0 first.
-            if library.hasListed {
-                let running = library.runningCount
-                item.meta = "\(running)/\(library.machines.count)"
-                item.metaTone = running > 0 ? .success : .idle
-            }
+            meta = VPhoneLaunchpadSidebarMeta.machines(
+                listed: library.hasListed,
+                running: library.runningCount,
+                total: library.machines.count,
+            )
+        case .firmwares:
+            meta = VPhoneLaunchpadSidebarMeta.firmwares(count: model.firmwareCount)
         case .bundles:
-            item.meta = model.bundles.defaultVersion
-            item.isMetaMonospaced = true
+            meta = VPhoneLaunchpadSidebarMeta.bundles(defaultVersion: model.bundles.defaultVersion)
             item.isWarning = model.bundleNeedsAttention
         case .hostSetup:
+            meta = nil
             item.isWarning = model.hostNeedsAttention
-        case .firmwares, .disks, .network:
-            break
+        case .disks, .network:
+            meta = nil
+        }
+        if let meta {
+            item.meta = meta.text
+            item.metaTone = meta.tone
+            item.isMetaMonospaced = meta.isMonospaced
         }
         return item
+    }
+
+    /// Lists the IPSW cache without measuring any machine.
+    private func countFirmwares() async {
+        #if DEBUG
+            if VPhoneLaunchpadPreview.isActive {
+                model.firmwareCount = VPhoneLaunchpadPreview.libraryScan.completeIPSWs.count
+                return
+            }
+        #endif
+        let roots = model.machines.roots
+        guard let scan = try? await VPhoneLaunchpadLibraryScanner.scan(libraryRoots: roots, machines: [], includeMachines: false) else {
+            return
+        }
+        model.firmwareCount = scan.completeIPSWs.count
     }
 
     private var footer: [DKSidebarFooterLine] {

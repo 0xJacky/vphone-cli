@@ -9,25 +9,7 @@ import VPhoneDesignKit
 @MainActor
 @Observable
 final class VPhoneLaunchpadModel {
-    /// What `present(_:)` asks for. Host Setup and Core Bundle are pages of
-    /// the window; only a bundle install is a sheet.
-    enum Panel: String, Identifiable {
-        case hostSetup
-        case coreBundle
-        case bundleInstall
-
-        var id: Self {
-            self
-        }
-
-        var title: String {
-            switch self {
-            case .hostSetup: String(localized: "Host Setup")
-            case .coreBundle: String(localized: "Core Bundle")
-            case .bundleInstall: String(localized: "Core Bundle Install")
-            }
-        }
-    }
+    typealias Panel = VPhoneLaunchpadPanel
 
     let history = VPhoneLaunchpadCommandHistory()
     let helper = VPhoneLaunchpadHelperClient()
@@ -57,10 +39,10 @@ final class VPhoneLaunchpadModel {
     /// Opens `next`: Host Setup and Core Bundle select their page, a bundle
     /// install opens its sheet.
     func present(_ next: Panel) {
-        switch next {
-        case .hostSetup: show(.hostSetup)
-        case .coreBundle: show(.bundles)
-        case .bundleInstall: panel = .bundleInstall
+        if let destination = next.destination {
+            show(destination)
+        } else {
+            panel = next
         }
     }
 
@@ -75,13 +57,26 @@ final class VPhoneLaunchpadModel {
 
     // MARK: - Attention
 
+    /// A required check fails, or an advisory one warns.
     var hostNeedsAttention: Bool {
-        !host.isChecking && !host.requiredPassed
+        VPhoneLaunchpadSidebarMeta.hostWarning(
+            isChecking: host.isChecking,
+            requiredPassed: host.requiredPassed,
+            advisoryWarnings: host.advisory.count { $0.status == .warning || $0.status == .failed },
+        )
     }
 
     var bundleNeedsAttention: Bool {
-        host.requiredPassed && !bundles.isReady && !bundles.isInstalling && bundles.progress?.canSkip != true
+        VPhoneLaunchpadSidebarMeta.bundleWarning(
+            requiredPassed: host.requiredPassed,
+            isReady: bundles.isReady,
+            isInstalling: bundles.isInstalling,
+            canSkip: bundles.progress?.canSkip == true,
+        )
     }
+
+    /// The IPSWs in the cache, for the sidebar. Nil until the cache is read.
+    var firmwareCount: Int?
 
     /// Installing a bundle needs the helper (root-owned store) and Developer
     /// Tools access (the execution policy exception).
@@ -131,14 +126,14 @@ final class VPhoneLaunchpadModel {
         await listed
         // An unfinished install reopens its own sheet instead.
         if panel == nil {
-            if bundles.progress == nil || bundles.progress?.isFinished == true {
-                if !host.requiredPassed {
-                    destination = .hostSetup
-                } else if !bundles.isReady {
-                    destination = .bundles
-                }
-            } else {
-                panel = .bundleInstall
+            switch VPhoneLaunchpadLaunchRoute.after(
+                requiredPassed: host.requiredPassed,
+                bundlesReady: bundles.isReady,
+                installUnfinished: bundles.progress.map { !$0.isFinished } ?? false,
+            ) {
+            case .stay: break
+            case let .page(page): destination = page
+            case .installSheet: panel = .bundleInstall
             }
         }
         await bundles.fetchReleases()

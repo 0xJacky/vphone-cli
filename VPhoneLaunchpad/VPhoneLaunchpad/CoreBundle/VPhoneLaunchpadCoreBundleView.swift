@@ -139,8 +139,22 @@ struct VPhoneLaunchpadCoreBundleView: View {
             footnote: String(localized: "Stored in \(VPhoneLaunchpadBundleStore.root.path) and managed by the helper."),
         ) {
             ForEach(bundles.installed) { bundle in
-                DKListRow(installedItem(bundle))
+                installedRow(bundle)
                     .contextMenu { installedMenu(bundle) }
+            }
+        }
+    }
+
+    /// A row with the actions the design shows, Show in Finder and Remove…,
+    /// and the ⋯ menu that held every action in Launchpad 2.6.0 for the rest.
+    private func installedRow(_ bundle: VPhoneLaunchpadCoreBundle.Installed) -> some View {
+        let more = moreItems(bundle)
+        return HStack(spacing: 0) {
+            DKListRow(installedItem(bundle))
+            if more.contains(where: \.isEnabled) {
+                VPhoneLaunchpadBundleMoreButton(items: more)
+                    .padding(.leading, -8)
+                    .padding(.trailing, 14)
             }
         }
     }
@@ -155,38 +169,27 @@ struct VPhoneLaunchpadCoreBundleView: View {
         if isDefault {
             badges.append(.init(String(localized: "Default"), tone: .accent))
         }
-        badges.append(checkBadge(bundle, isCompatible: isCompatible))
+        badges.append(VPhoneLaunchpadBundleText.checkBadge(
+            version: bundle.version,
+            status: status,
+            policyPassed: bundle.policy == .passed,
+        ))
 
-        var lines: [DKListItem.Line] = [.init(provenance(bundle)), .init(usersText(users))]
+        var lines: [DKListItem.Line] = [
+            .init(VPhoneLaunchpadBundleText.provenance(
+                VPhoneLaunchpadBundleText.Origin(version: bundle.version),
+                installedAt: bundle.receipt.installedAt,
+                sha256: bundle.receipt.sha256,
+            )),
+            .init(VPhoneLaunchpadBundleText.users(users)),
+        ]
         if isCompatible, status == .failed || status == .warning, let detail = failureDetail(bundle) {
             lines.append(.init(detail, tone: status == .failed ? .danger : .warning))
         }
 
-        var actions: [DKButtonSpec] = []
-        if !isDefault, isCompatible {
-            actions.append(DKButtonSpec(String(localized: "Set as Default"), id: "default") {
-                Task { await bundles.setDefault(bundle.version) }
-            })
-        }
-        if isCompatible {
-            if bundles.isAccepted(bundle.version) {
-                actions.append(DKButtonSpec(String(localized: "Require Preflight"), id: "require") {
-                    bundles.setAccepted(bundle.version, false)
-                })
-            } else if status == .failed || status == .pending {
-                actions.append(DKButtonSpec(String(localized: "Run Preflight Again"), id: "verify") {
-                    Task { await bundles.verify(bundle.version) }
-                })
-                if bundle.preflight == .failed {
-                    actions.append(DKButtonSpec(String(localized: "Use Without Preflight"), id: "accept") {
-                        bundles.setAccepted(bundle.version, true)
-                    })
-                }
-            }
-        }
-        actions.append(DKButtonSpec(String(localized: "Show in Finder"), id: "finder") {
+        var actions = [DKButtonSpec(String(localized: "Show in Finder"), id: "finder") {
             Self.showInFinder(bundle.version)
-        })
+        }]
         // A bound version stays: the store refuses to remove it, and the
         // context menu says why.
         if users.isEmpty {
@@ -211,21 +214,35 @@ struct VPhoneLaunchpadCoreBundleView: View {
         )
     }
 
+    /// The default and preflight actions, as Launchpad 2.6.0's ⋯ menu had them.
+    private func moreItems(_ bundle: VPhoneLaunchpadCoreBundle.Installed) -> [DKMenuItem] {
+        let isDefault = bundle.version == bundles.defaultVersion
+        let isCompatible = VPhoneLaunchpadNames.isCompatibleBundleVersion(bundle.version)
+        var items = [
+            DKMenuItem(String(localized: "Set as Default"), isEnabled: !isDefault && isCompatible) {
+                Task { await bundles.setDefault(bundle.version) }
+            },
+            DKMenuItem(String(localized: "Run Preflight Again"), isEnabled: isCompatible) {
+                Task { await bundles.verify(bundle.version) }
+            },
+        ]
+        if bundles.isAccepted(bundle.version) {
+            items.append(DKMenuItem(String(localized: "Require Preflight")) {
+                bundles.setAccepted(bundle.version, false)
+            })
+        } else if bundle.preflight == .failed, isCompatible {
+            items.append(DKMenuItem(String(localized: "Use Without Preflight")) {
+                bundles.setAccepted(bundle.version, true)
+            })
+        }
+        return items
+    }
+
     /// Every action of a row, including those the row leaves out.
     @ViewBuilder
     private func installedMenu(_ bundle: VPhoneLaunchpadCoreBundle.Installed) -> some View {
-        let isDefault = bundle.version == bundles.defaultVersion
-        let isCompatible = VPhoneLaunchpadNames.isCompatibleBundleVersion(bundle.version)
         let users = model.machines.machineNames(boundTo: bundle.version)
-        Button("Set as Default") { Task { await bundles.setDefault(bundle.version) } }
-            .disabled(isDefault || !isCompatible)
-        Button("Run Preflight Again") { Task { await bundles.verify(bundle.version) } }
-            .disabled(!isCompatible)
-        if bundles.isAccepted(bundle.version) {
-            Button("Require Preflight") { bundles.setAccepted(bundle.version, false) }
-        } else if bundle.preflight == .failed, isCompatible {
-            Button("Use Without Preflight") { bundles.setAccepted(bundle.version, true) }
-        }
+        DKMenuContent(moreItems(bundle))
         Button("Show in Finder") { Self.showInFinder(bundle.version) }
         Divider()
         Button("Remove…", role: .destructive) { removal = bundle.version }
@@ -237,81 +254,12 @@ struct VPhoneLaunchpadCoreBundleView: View {
         NSWorkspace.shared.activateFileViewerSelecting([VPhoneLaunchpadBundleStore.bundle(version: version)])
     }
 
-    /// Where the bundle came from, when it was installed, and its digest.
-    private func provenance(_ bundle: VPhoneLaunchpadCoreBundle.Installed) -> String {
-        let digest = Self.shortDigest(bundle.receipt.sha256)
-        let installedAt = bundle.receipt.installedAt
-        if VPhoneLaunchpadLocalBundle.isLocal(version: bundle.version) {
-            let date = installedAt.formatted(date: .abbreviated, time: .shortened)
-            if let build = Self.localBuild(bundle.version) {
-                return String(localized: "Local build \(build) · Installed \(date) · SHA-256 \(digest)")
-            }
-            return String(localized: "Local build · Installed \(date) · SHA-256 \(digest)")
-        }
-        if bundle.version != VPhoneLaunchpadNames.bundleVersion(of: bundle.version) {
-            let date = installedAt.formatted(date: .abbreviated, time: .shortened)
-            return String(localized: "GitHub Actions build · Installed \(date) · SHA-256 \(digest)")
-        }
-        let date = installedAt.formatted(date: .abbreviated, time: .omitted)
-        return String(localized: "Release · Installed \(date) · SHA-256 \(digest)")
-    }
-
-    /// Names a few machines; past that, a count.
-    private func usersText(_ users: [String]) -> String {
-        if users.isEmpty {
-            return String(localized: "Not used by any machine")
-        }
-        if users.count <= 4 {
-            return String(localized: "Used by \(users.formatted(.list(type: .and)))")
-        }
-        return String(localized: "Used by \(users.count) machines")
-    }
-
-    /// The build identifier of a `-local.<build>` version; nil for the bare
-    /// `-local` an older Launchpad used.
-    static func localBuild(_ version: String) -> String? {
-        guard VPhoneLaunchpadLocalBundle.isLocal(version: version),
-              let marker = version.range(of: "\(VPhoneLaunchpadLocalBundle.versionSuffix).", options: .backwards)
-        else { return nil }
-        return String(version[marker.upperBound...])
-    }
-
-    /// Policy exception and preflight folded into one status: the worst of
-    /// the two, with a skipped preflight shown as a warning.
     private func checkStatus(_ bundle: VPhoneLaunchpadCoreBundle.Installed) -> VPhoneLaunchpadStatus {
-        if bundle.policy == .running || bundle.preflight == .running {
-            return .running
-        }
-        if bundle.policy == .passed, bundle.preflight == .passed {
-            return .passed
-        }
-        if bundles.isAccepted(bundle.version) {
-            return .warning
-        }
-        return bundle.policy == .pending && bundle.preflight == .pending ? .pending : .failed
-    }
-
-    /// A bundle of an older series runs only with that series' Launchpad, so
-    /// it is never checked here and its badge names the series instead.
-    private func checkBadge(_ bundle: VPhoneLaunchpadCoreBundle.Installed, isCompatible: Bool) -> DKListItem.Badge {
-        guard isCompatible else {
-            let parts = VPhoneLaunchpadNames.bundleVersion(of: bundle.version).split(separator: ".")
-            guard parts.count >= 2 else {
-                return .init(String(localized: "Not supported"), tone: .neutral)
-            }
-            let series = "\(parts[0]).\(parts[1])"
-            return .init(String(localized: "Needs Launchpad \(series)"), tone: .neutral)
-        }
-        switch checkStatus(bundle) {
-        case .running: return .init(String(localized: "Checking…"), tone: .info)
-        case .passed: return .init(String(localized: "Preflight passed"), tone: .success)
-        case .warning: return .init(String(localized: "Preflight skipped"), tone: .warning)
-        case .pending: return .init(String(localized: "Not checked"), tone: .neutral)
-        case .failed:
-            return bundle.policy != .passed
-                ? .init(String(localized: "Not allowed to run"), tone: .danger)
-                : .init(String(localized: "Preflight failed"), tone: .danger)
-        }
+        VPhoneLaunchpadBundleText.checkStatus(
+            policy: bundle.policy,
+            preflight: bundle.preflight,
+            isAccepted: bundles.isAccepted(bundle.version),
+        )
     }
 
     /// The first lines of what the failed check said.
@@ -536,6 +484,27 @@ struct VPhoneLaunchpadCoreBundleView: View {
     }
 
     static func shortDigest(_ digest: String) -> String {
-        "\(digest.prefix(8))…"
+        VPhoneLaunchpadBundleText.shortDigest(digest)
+    }
+}
+
+// MARK: - More button
+
+/// The ⋯ button of an installed bundle, drawn as a DesignKit icon button.
+struct VPhoneLaunchpadBundleMoreButton: View {
+    let items: [DKMenuItem]
+
+    var body: some View {
+        Menu {
+            DKMenuContent(items)
+        } label: {
+            DKIcon(.ellipsis, size: 15)
+        }
+        .menuStyle(.button)
+        .buttonStyle(DKButtonStyle(variant: .secondary, size: .icon))
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(String(localized: "More"))
+        .accessibilityLabel(Text("More"))
     }
 }

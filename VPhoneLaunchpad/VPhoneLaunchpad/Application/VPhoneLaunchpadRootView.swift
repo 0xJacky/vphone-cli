@@ -4,8 +4,14 @@ import VPhoneDesignKit
 /// The main window: the sidebar's pages beside the page picked in it. Host
 /// Setup and Bundles are pages like the others; a bundle install is the one
 /// sheet over all of them.
+///
+/// The window has no toolbar. Each page's header sits in the title bar
+/// beside the sidebar, which holds the window buttons; View › Hide Sidebar
+/// (⌃⌘S) and Hide Inspector (⌥⌘I) replace the toolbar's toggles. With the
+/// sidebar hidden the header steps below the window buttons.
 struct VPhoneLaunchpadRootView: View {
     @Environment(VPhoneLaunchpadModel.self) private var model
+    @State private var columns = NavigationSplitViewVisibility.all
     #if DEBUG
         @Environment(\.openSettings) private var openSettings
     #endif
@@ -13,13 +19,16 @@ struct VPhoneLaunchpadRootView: View {
     var body: some View {
         @Bindable var host = model.host
         @Bindable var bundles = model.bundles
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columns) {
             VPhoneLaunchpadSidebar()
                 .navigationSplitViewColumnWidth(DK.Metric.sidebarWidth)
+                .toolbar(removing: .sidebarToggle)
         } detail: {
             page
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea(.container, edges: columns == .detailOnly ? [] : .top)
         }
+        .toolbar(.hidden, for: .windowToolbar)
         .navigationTitle(model.destination.localizedTitle)
         .task { await model.start() }
         // Coming back from System Settings, with or without Host Setup open.

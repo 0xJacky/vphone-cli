@@ -381,7 +381,8 @@
             let json = """
             [
               {"name":"research-01","cpuCount":8,"memoryMB":8192,"diskSizeBytes":64000000000,
-               "network":{"mode":"nat","macAddress":"5a:94:ef:12:30:01"},
+               "network":{"mode":"nat","macAddress":"5a:94:ef:12:30:01","localHostName":"research-01",
+                 "portForwards":[{"protocol":"tcp","hostPort":2222,"guestPort":22},{"protocol":"tcp","hostPort":8080,"guestPort":80}]},
                "restoreInfo":{"ios":{"version":"26.4.2","build":"23E261"},"cloudOS":{"version":"26.4","build":"23E224"},"variant":"jb","device":"iPhone99,11"},
                "udid":"00008140-001A2B3C4D5E6F70",
                "unlocksAtStartup":true},
@@ -409,6 +410,83 @@
 
         /// A machine in a second library, on an external volume.
         static let labMachine = VPhoneLaunchpadMachinePath(libraryRoot: "/Volumes/Lab/machines", name: "frida-lab")
+
+        // MARK: - Library fixtures
+
+        /// What the Firmwares, Disks and Network pages read from disk, so
+        /// snapshot mode draws the same IPSWs, folders and volumes on every Mac
+        /// instead of the real `~/.vphone`.
+        static let libraryScan: VPhoneLaunchpadLibraryScan = {
+            let cache = VPhoneLaunchpadLibraryScanner.ipswCacheDirectory
+            func ipsw(_ source: String, _ size: Int64, _ facts: VPhoneLaunchpadIPSW) -> VPhoneLaunchpadLibraryScan.IPSWFile {
+                let name = URL(string: source).map(VPhoneLaunchpadIPSW.cacheName) ?? source
+                return VPhoneLaunchpadLibraryScan.IPSWFile(
+                    url: cache.appendingPathComponent(name),
+                    name: name,
+                    size: size,
+                    allocatedSize: size,
+                    facts: facts,
+                    isDownloading: false,
+                )
+            }
+            func iOS(_ version: String, _ build: String, _ products: [String]) -> VPhoneLaunchpadIPSW {
+                VPhoneLaunchpadIPSW(version: version, build: build, productTypes: products, deviceClasses: [], fromManifest: true)
+            }
+            let base = "https://updates.cdn-apple.com/example"
+            let ipad = ["iPad16,1", "iPad16,2"]
+            var scan = VPhoneLaunchpadLibraryScan()
+            scan.cacheDirectories = [cache]
+            scan.ipsws = [
+                ipsw("\(base)/iPhone17,3_26.4.2_23E261_Restore.ipsw", 9_400_000_000, iOS("26.4.2", "23E261", ["iPhone17,3"])),
+                ipsw("\(base)/iPhone17,3_26.6.2_23G90_Restore.ipsw", 9_600_000_000, iOS("26.6.2", "23G90", ["iPhone17,3"])),
+                ipsw(creationOptions.iphoneSource, 9_800_000_000, iOS("27.0", "24A435", ["iPhone17,3"])),
+                ipsw("\(base)/iPad16,1,iPad16,2_27.0.1_24A446_Restore.ipsw", 10_300_000_000, iOS("27.0.1", "24A446", ipad)),
+                ipsw(creationOptions.cloudOSSource, 8_600_000_000, VPhoneLaunchpadIPSW(
+                    version: "26.4",
+                    build: "23E224",
+                    productTypes: [],
+                    deviceClasses: [VPhoneLaunchpadIPSW.cloudOSDeviceClass, VPhoneLaunchpadIPSW.guestDeviceClass],
+                    fromManifest: true,
+                )),
+            ]
+            func machine(
+                _ path: VPhoneLaunchpadMachinePath,
+                disk: Int64,
+                written: Int64,
+                trees: [String] = [],
+                restore: Int64 = 0,
+            ) -> VPhoneLaunchpadLibraryScan.Machine {
+                VPhoneLaunchpadLibraryScan.Machine(
+                    folder: URL(fileURLWithPath: path.libraryRoot, isDirectory: true).appendingPathComponent(path.name, isDirectory: true),
+                    libraryRoot: path.libraryRoot,
+                    name: path.name,
+                    productType: "iPhone17,3",
+                    diskImageSize: disk,
+                    diskImageAllocated: written,
+                    restoreTrees: trees,
+                    restoreAllocated: restore,
+                    totalAllocated: written + restore + 40_000_000,
+                )
+            }
+            scan.machines = [
+                machine(path("research-01"), disk: 64_000_000_000, written: 31_000_000_000),
+                machine(path("ios27-rc"), disk: 128_000_000_000, written: 2_100_000_000, trees: ["iPhone17,3_27.0_24A435_Restore"], restore: 14_200_000_000),
+                machine(labMachine, disk: 64_000_000_000, written: 29_000_000_000, trees: ["iPhone17,3_26.6.2_23G90_Restore"], restore: 13_900_000_000),
+            ]
+            scan.volumes = [
+                VPhoneLaunchpadLibraryScan.Volume(
+                    name: "Macintosh HD",
+                    available: 41_000_000_000,
+                    paths: [VPhoneLaunchpadMachineLocations.defaultRoot, cache.path],
+                ),
+                VPhoneLaunchpadLibraryScan.Volume(name: "Lab", available: 812_000_000_000, paths: [labMachine.libraryRoot]),
+            ]
+            return scan
+        }()
+
+        /// vmnet's default shared network, which the real page reads from a
+        /// root-only preferences file.
+        static let sharedNAT = VPhoneLaunchpadSharedNAT.make(address: "192.168.64.1", mask: "255.255.255.0", isDefault: true)
 
         static let catalog: VPhoneLaunchpadFirmwareCatalog? = {
             let base = "https://updates.cdn-apple.com/example"
