@@ -97,6 +97,15 @@ struct VPhoneLaunchpadMachineActions {
         items(Plan.entries(for: machines.map(fact), placement: .contextMenu), machines: machines, shortcuts: false)
     }
 
+    /// The ⋯ button that opens that menu.
+    func moreButton(for machines: [VPhoneLaunchpadMachine]) -> DKMenuButton {
+        let items = items(for: machines)
+        return DKMenuButton(
+            DKButtonSpec(String(localized: "Actions"), glyph: .ellipsis, size: .icon, isEnabled: !items.isEmpty),
+            items: items,
+        )
+    }
+
     /// The menu bar's Machine menu: the same plan for the selection, with
     /// shortcuts. It acts only while the Machines page shows the selection
     /// and no sheet of the window is open: a shortcut typed into a sheet's
@@ -254,28 +263,6 @@ struct VPhoneLaunchpadMachineActions {
     }
 }
 
-// MARK: - More button
-
-/// The ⋯ button that opens the machine menu, drawn as a DesignKit icon button.
-struct VPhoneLaunchpadMachineMoreButton: View {
-    let items: [DKMenuItem]
-
-    var body: some View {
-        Menu {
-            DKMenuContent(items)
-        } label: {
-            DKIcon(.ellipsis, size: 15)
-        }
-        .menuStyle(.button)
-        .buttonStyle(DKButtonStyle(variant: .secondary, size: .icon))
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .disabled(items.isEmpty)
-        .help("Actions")
-        .accessibilityLabel(Text("Actions"))
-    }
-}
-
 // MARK: - Presentation
 
 extension VPhoneLaunchpadMachine {
@@ -335,30 +322,5 @@ struct VPhoneLaunchpadMachineStatus {
 
     var cell: DKTableCell {
         .status(tone, text, progress: progress)
-    }
-}
-
-// MARK: - Table cell
-
-/// A DesignKit cell inside a system `Table` row. The kit's cells draw in
-/// fixed colors, which are unreadable on the accent fill of a selected row;
-/// with the row's increased prominence the cell draws in the dark
-/// appearance, whose ink is light.
-struct VPhoneLaunchpadTableCell: View {
-    let cell: DKTableCell
-    /// Room above and below, for the two-line rows of the machine list.
-    var verticalPadding: CGFloat = 3
-    @Environment(\.backgroundProminence) private var prominence
-    @Environment(\.colorScheme) private var colorScheme
-
-    init(_ cell: DKTableCell, verticalPadding: CGFloat = 3) {
-        self.cell = cell
-        self.verticalPadding = verticalPadding
-    }
-
-    var body: some View {
-        DKTableCellView(cell)
-            .environment(\.colorScheme, prominence == .increased ? .dark : colorScheme)
-            .padding(.vertical, verticalPadding)
     }
 }

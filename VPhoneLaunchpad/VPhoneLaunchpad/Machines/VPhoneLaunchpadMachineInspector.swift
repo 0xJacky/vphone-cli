@@ -193,7 +193,7 @@ struct VPhoneLaunchpadMachineInspector: View {
                     openConsole(path)
                 })
             }
-            VPhoneLaunchpadMachineMoreButton(items: actions.items(for: [machine]))
+            actions.moreButton(for: [machine])
         }
         .fixedSize()
     }
@@ -345,30 +345,7 @@ struct VPhoneLaunchpadMachineInspector: View {
         if library.creations[machine.path]?.isRunning != true {
             VStack(alignment: .leading, spacing: DK.Space.s2) {
                 if let catalog = patchCatalog, patchCatalogMachine == machine.path {
-                    DKSection(String(localized: "Patches")) {
-                        DKKeyValueRow(DKKeyValue(
-                            String(localized: "Preset"),
-                            catalog.preset(catalog.activePreset)?.displayTitle ?? catalog.activePreset,
-                        ))
-                        DKKeyValueRow(DKKeyValue(
-                            String(localized: "Overrides"),
-                            catalog.overrideCount == 0 ? String(localized: "None") : String(catalog.overrideCount),
-                        ))
-                        .help(overridesHelp(catalog))
-                        if catalog.installed == true, let pending = catalog.pendingPatches {
-                            DKKeyValueRow(DKKeyValue(
-                                String(localized: "Not Applied"),
-                                pending == 0 ? String(localized: "None") : String(pending),
-                                tone: pending == 0 ? .success : .warning,
-                            ))
-                            .help(pendingHelp(catalog, pending: pending))
-                        }
-                    }
-                    // The kernelcache has its own button below; only the
-                    // restore-only patches need this spelled-out dead-end.
-                    if catalog.installed == true, catalog.pendingPatches != nil, catalog.pendingRestorePatches > 0 {
-                        footnote(Text("Boot chain: ^[\(catalog.pendingRestorePatches) patch](inflect: true) (TXM, device tree, LLB) not applied; only a restore applies them, which erases the data. Run `vphone-cli fw patches \(machine.name)` for each."))
-                    }
+                    DKSection(String(localized: "Patches"), attributedFootnote: restoreOnlyFootnote(catalog), rows: patchRows(catalog))
                     patchActions(catalog)
                 } else if let patchCatalogError {
                     DKSection(String(localized: "Patches")) {
@@ -460,6 +437,40 @@ struct VPhoneLaunchpadMachineInspector: View {
             })
         }
         .fixedSize()
+    }
+
+    /// The preset, how many switches differ from it, and, when the bundle
+    /// reports it, how many patches have not reached the guest.
+    private func patchRows(_ catalog: VPhoneLaunchpadPatchCatalog) -> [DKKeyValue] {
+        var rows = [
+            DKKeyValue(
+                String(localized: "Preset"),
+                catalog.preset(catalog.activePreset)?.displayTitle ?? catalog.activePreset,
+            ),
+            DKKeyValue(
+                String(localized: "Overrides"),
+                catalog.overrideCount == 0 ? String(localized: "None") : String(catalog.overrideCount),
+                help: overridesHelp(catalog),
+            ),
+        ]
+        if catalog.installed == true, let pending = catalog.pendingPatches {
+            rows.append(DKKeyValue(
+                String(localized: "Not Applied"),
+                pending == 0 ? String(localized: "None") : String(pending),
+                tone: pending == 0 ? .success : .warning,
+                help: pendingHelp(catalog, pending: pending),
+            ))
+        }
+        return rows
+    }
+
+    /// The kernelcache has its own button below; only the restore-only
+    /// patches need this spelled-out dead-end.
+    private func restoreOnlyFootnote(_ catalog: VPhoneLaunchpadPatchCatalog) -> AttributedString? {
+        guard catalog.installed == true, catalog.pendingPatches != nil, catalog.pendingRestorePatches > 0 else {
+            return nil
+        }
+        return AttributedString(localized: "Boot chain: ^[\(catalog.pendingRestorePatches) patch](inflect: true) (TXM, device tree, LLB) not applied; only a restore applies them, which erases the data. Run `vphone-cli fw patches \(machine.name)` for each.")
     }
 
     private func pendingHelp(_ catalog: VPhoneLaunchpadPatchCatalog, pending: Int) -> String {
@@ -591,16 +602,19 @@ struct VPhoneLaunchpadMachineInspector: View {
     }
 
     private func facts(_ title: String, _ rows: [DKKeyValue]) -> some View {
-        DKSection(title) {
-            ForEach(rows) { factRow($0) }
-        }
+        DKSection(title, rows: rows.map(Self.fact))
     }
 
     /// A key-value row whose full value is its help tag, since long values
     /// truncate.
+    private static func fact(_ row: DKKeyValue) -> DKKeyValue {
+        var row = row
+        row.help = row.help ?? row.value
+        return row
+    }
+
     private func factRow(_ row: DKKeyValue) -> some View {
-        DKKeyValueRow(row)
-            .help(row.value)
+        DKKeyValueRow(Self.fact(row))
     }
 
     // MARK: - Console

@@ -37,10 +37,10 @@ struct ShellTests {
             expectEqual(destination.shortcut, DKShortcut(Character("\(index + 1)"), .command))
         }
         expectEqual(Set(all.map(\.shortcut)).count, all.count)
-        expectEqual(all.map(\.localizedTitle), ["Machines", "Firmwares", "Disks", "Bundles", "Network", "Host Setup"])
+        expectEqual(all.map(\.title), ["Machines", "Firmwares", "Disks", "Bundles", "Network", "Host Setup"])
         // The two sections split the pages between them, in order.
         expectEqual(DKLaunchpadSection.allCases.flatMap(\.destinations), all)
-        expectEqual(DKLaunchpadSection.allCases.map(\.localizedTitle), ["Library", "System"])
+        expectEqual(DKLaunchpadSection.allCases.map(\.title), ["Library", "System"])
     }
 
     static func routing() {
@@ -61,17 +61,55 @@ struct ShellTests {
 
     static func sidebar() {
         typealias Meta = VPhoneLaunchpadSidebarMeta
-        expectEqual(Meta.machines(listed: false, running: 0, total: 3), nil)
-        expectEqual(Meta.machines(listed: true, running: 0, total: 0), Meta.Meta(text: "0/0", tone: .idle))
-        expectEqual(Meta.machines(listed: true, running: 1, total: 4), Meta.Meta(text: "1/4", tone: .success))
+        func row(
+            _ destination: DKLaunchpadDestination,
+            listed: Bool = true,
+            running: Int = 0,
+            total: Int = 0,
+            firmwares: Int? = nil,
+            bundle: String? = nil,
+            hostWarning: Bool = false,
+            bundleWarning: Bool = false,
+        ) -> DKSidebarItem<DKLaunchpadDestination> {
+            let sections = Meta.sections(
+                listed: listed,
+                running: running,
+                total: total,
+                firmwareCount: firmwares,
+                bundleVersion: bundle,
+                hostWarning: hostWarning,
+                bundleWarning: bundleWarning,
+            )
+            return sections.allSidebarItems().first { $0.id == destination }!
+        }
+        // The kit's rows, sections and order.
+        let sections = Meta.sections(listed: true, running: 0, total: 0, firmwareCount: nil, bundleVersion: nil, hostWarning: false, bundleWarning: false)
+        expectEqual(sections.map(\.title), ["Library", "System"])
+        expectEqual(sections.allSidebarItems().map(\.id), DKLaunchpadDestination.allCases)
 
-        expectEqual(Meta.firmwares(count: nil), nil)
-        expectEqual(Meta.firmwares(count: 0), nil)
-        expectEqual(Meta.firmwares(count: 4), Meta.Meta(text: "4"))
+        // Machines: nothing until `vm list` has answered, then running/total with a dot.
+        expectEqual(row(.machines, listed: false, running: 0, total: 3).trailingText, nil)
+        expectEqual(row(.machines, running: 0, total: 0).trailingText, "0/0")
+        expectEqual(row(.machines, running: 0, total: 0).metaTone, .idle)
+        expectEqual(row(.machines, running: 1, total: 4).trailingText, "1/4")
+        expectEqual(row(.machines, running: 1, total: 4).metaTone, .success)
 
-        expectEqual(Meta.bundles(defaultVersion: nil), nil)
-        expectEqual(Meta.bundles(defaultVersion: ""), nil)
-        expectEqual(Meta.bundles(defaultVersion: "2.6.0"), Meta.Meta(text: "2.6.0", isMonospaced: true))
+        // Firmwares: nothing before the cache is read or when it holds none.
+        expectEqual(row(.firmwares, firmwares: nil).trailingText, nil)
+        expectEqual(row(.firmwares, firmwares: 0).trailingText, nil)
+        expectEqual(row(.firmwares, firmwares: 4).trailingText, "4")
+
+        // Bundles: the default version, in monospace.
+        expectEqual(row(.bundles, bundle: nil).trailingText, nil)
+        expectEqual(row(.bundles, bundle: "").trailingText, nil)
+        expectEqual(row(.bundles, bundle: "2.6.0").trailingText, "2.6.0")
+        expect(row(.bundles, bundle: "2.6.0").isMetaMonospaced, "bundle version monospaced")
+
+        // The warning glyphs, read out from the app's catalog.
+        expect(!row(.bundles).isWarning && !row(.hostSetup).isWarning, "no warnings")
+        expect(row(.bundles, bundleWarning: true).isWarning, "bundles warning")
+        expect(row(.hostSetup, hostWarning: true).isWarning, "host warning")
+        expectEqual(row(.hostSetup, hostWarning: true).warningLabel, "Needs attention")
 
         // Host Setup: quiet while checking, then a failed required check or an advisory warning.
         expect(!Meta.hostWarning(isChecking: true, requiredPassed: false, advisoryWarnings: 1), "checking")

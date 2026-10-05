@@ -4,7 +4,7 @@ import VPhoneDesignKit
 
 // Rows the machine sheets share, built from DesignKit parts: a stepper laid
 // out as the design draws it, a switch row whose label takes the width, and a
-// section head with a control beside the title.
+// section whose footnote may be any view.
 
 // MARK: - Stepper row
 
@@ -114,8 +114,8 @@ struct VPhoneLaunchpadCardLoading: View {
 
 // MARK: - Section
 
-/// A `DKSection` whose head carries a control beside the title, as the
-/// Firmware section's source switch, and whose footnote may be any view.
+/// A `DKSection`, with a control beside the title as the Firmware section's
+/// source switch, whose footnote may be any view: a warning with its glyph.
 struct VPhoneLaunchpadSheetSection<Content: View, Trailing: View, Footnote: View>: View {
     let title: String
     @ViewBuilder let trailing: Trailing
@@ -136,17 +136,10 @@ struct VPhoneLaunchpadSheetSection<Content: View, Trailing: View, Footnote: View
 
     var body: some View {
         VStack(alignment: .leading, spacing: DK.Space.s2) {
-            HStack(spacing: DK.Space.s3) {
-                Text(verbatim: title)
-                    .font(DK.Typeface.sectionTitle)
-                    .foregroundStyle(DK.Palette.muted)
-                    .accessibilityAddTraits(.isHeader)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                trailing
-            }
-            .padding(.horizontal, DK.Space.s1)
-            DKCard {
+            DKSection(title) {
                 content
+            } headAccessory: {
+                trailing
             }
             VStack(alignment: .leading, spacing: DK.Space.s1) {
                 footnote

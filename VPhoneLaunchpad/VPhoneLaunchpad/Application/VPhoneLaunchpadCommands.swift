@@ -48,7 +48,7 @@ struct VPhoneLaunchpadCommands: Commands {
     /// the window back when it was closed to the menu bar.
     static func pageItems(_ model: VPhoneLaunchpadModel, open: @escaping @MainActor () -> Void) -> [DKMenuItem] {
         DKLaunchpadDestination.allCases.map { destination in
-            DKMenuItem(destination.localizedTitle, shortcut: destination.shortcut) {
+            DKMenuItem(destination.title, shortcut: destination.shortcut) {
                 model.show(destination)
                 open()
             }

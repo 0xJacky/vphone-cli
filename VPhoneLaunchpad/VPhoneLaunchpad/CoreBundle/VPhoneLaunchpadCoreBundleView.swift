@@ -152,7 +152,7 @@ struct VPhoneLaunchpadCoreBundleView: View {
         return HStack(spacing: 0) {
             DKListRow(installedItem(bundle))
             if more.contains(where: \.isEnabled) {
-                VPhoneLaunchpadBundleMoreButton(items: more)
+                DKMenuButton(DKButtonSpec(String(localized: "More"), glyph: .ellipsis, size: .icon), items: more)
                     .padding(.leading, -8)
                     .padding(.trailing, 14)
             }
@@ -280,28 +280,20 @@ struct VPhoneLaunchpadCoreBundleView: View {
 
     // MARK: - Available
 
-    /// A section whose head carries the source switch; `DKSection` takes only
-    /// a button there.
+    /// A section whose head carries the source switch.
     private var availableSection: some View {
-        VStack(alignment: .leading, spacing: DK.Space.s2) {
-            HStack(spacing: DK.Space.s3) {
-                Text("Available")
-                    .font(DK.Typeface.sectionTitle)
-                    .foregroundStyle(DK.Palette.muted)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer(minLength: 0)
-                DKSegmented(String(localized: "Source"), selection: $source, options: [
-                    DKSegmentOption(String(localized: "Releases"), value: .releases),
-                    DKSegmentOption(String(localized: "GitHub Actions"), value: .actions),
-                ])
-            }
-            .padding(.horizontal, DK.Space.s1)
+        DKSection(String(localized: "Available")) {
             switch source {
             case .releases:
-                DKCard { releaseRows }
+                releaseRows
             case .actions:
-                DKCard { actionRows }
+                actionRows
             }
+        } headAccessory: {
+            DKSegmented(String(localized: "Source"), selection: $source, options: [
+                DKSegmentOption(String(localized: "Releases"), value: .releases),
+                DKSegmentOption(String(localized: "GitHub Actions"), value: .actions),
+            ])
         }
     }
 
@@ -485,26 +477,5 @@ struct VPhoneLaunchpadCoreBundleView: View {
 
     static func shortDigest(_ digest: String) -> String {
         VPhoneLaunchpadBundleText.shortDigest(digest)
-    }
-}
-
-// MARK: - More button
-
-/// The ⋯ button of an installed bundle, drawn as a DesignKit icon button.
-struct VPhoneLaunchpadBundleMoreButton: View {
-    let items: [DKMenuItem]
-
-    var body: some View {
-        Menu {
-            DKMenuContent(items)
-        } label: {
-            DKIcon(.ellipsis, size: 15)
-        }
-        .menuStyle(.button)
-        .buttonStyle(DKButtonStyle(variant: .secondary, size: .icon))
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help(String(localized: "More"))
-        .accessibilityLabel(Text("More"))
     }
 }

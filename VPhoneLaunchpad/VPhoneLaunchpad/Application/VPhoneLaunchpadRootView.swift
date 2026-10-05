@@ -29,7 +29,7 @@ struct VPhoneLaunchpadRootView: View {
                 .ignoresSafeArea(.container, edges: columns == .detailOnly ? [] : .top)
         }
         .toolbar(.hidden, for: .windowToolbar)
-        .navigationTitle(model.destination.localizedTitle)
+        .navigationTitle(model.destination.title)
         .task { await model.start() }
         // Coming back from System Settings, with or without Host Setup open.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in

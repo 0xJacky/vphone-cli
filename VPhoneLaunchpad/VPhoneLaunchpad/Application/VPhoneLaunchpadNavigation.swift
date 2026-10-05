@@ -4,32 +4,10 @@ import VPhoneDesignKit
 // MARK: - Pages
 
 extension DKLaunchpadDestination {
-    /// The page's name in the sidebar, the View menu and the window title.
-    /// The kit's own `title` is not localized.
-    var localizedTitle: String {
-        switch self {
-        case .machines: String(localized: "Machines")
-        case .firmwares: String(localized: "Firmwares")
-        case .disks: String(localized: "Disks")
-        case .bundles: String(localized: "Bundles")
-        case .network: String(localized: "Network")
-        case .hostSetup: String(localized: "Host Setup")
-        }
-    }
-
     /// ⌘1 to ⌘6, in sidebar order.
     var shortcut: DKShortcut {
         let index = Self.allCases.firstIndex(of: self) ?? 0
         return DKShortcut(Character("\(index + 1)"), .command)
-    }
-}
-
-extension DKLaunchpadSection {
-    var localizedTitle: String {
-        switch self {
-        case .library: String(localized: "Library")
-        case .system: String(localized: "System")
-        }
     }
 }
 
@@ -88,38 +66,38 @@ enum VPhoneLaunchpadLaunchRoute: Equatable {
 
 // MARK: - Sidebar
 
-/// The trailing text and warnings of the sidebar rows.
+/// The sidebar's rows and their warnings.
 enum VPhoneLaunchpadSidebarMeta {
-    struct Meta: Equatable {
-        var text: String
-        var tone: DKTone?
-        var isMonospaced = false
-    }
-
-    /// "1/4" with a green dot while one runs. Nothing until `vm list` has
-    /// answered, so it does not read 0/0 first.
-    static func machines(listed: Bool, running: Int, total: Int) -> Meta? {
-        guard listed else {
-            return nil
+    /// The rows `DKLaunchpadSidebar` draws, from what Launchpad knows so far.
+    /// Machines reads "1/4" with a green dot while one runs, and nothing
+    /// until `vm list` has answered, so it does not read 0/0 first.
+    /// Firmwares counts the downloaded IPSWs, and shows nothing before the
+    /// cache was read or when it holds none. Bundles shows the default Core
+    /// Bundle's version. The warning glyph is read out in the user's language.
+    static func sections(
+        listed: Bool,
+        running: Int,
+        total: Int,
+        firmwareCount: Int?,
+        bundleVersion: String?,
+        hostWarning: Bool,
+        bundleWarning: Bool,
+    ) -> [DKSidebarSection<DKLaunchpadDestination>] {
+        let warningLabel = String(localized: "Needs attention")
+        return DKLaunchpadSidebar.sections(
+            runningMachines: listed ? running : nil,
+            machineCount: listed ? total : nil,
+            firmwareCount: firmwareCount.flatMap { $0 > 0 ? $0 : nil },
+            bundleVersion: bundleVersion,
+            hostSetupNeedsAttention: hostWarning,
+            bundlesNeedAttention: bundleWarning,
+        ).map { section in
+            var section = section
+            for index in section.items.indices {
+                section.items[index].warningLabel = warningLabel
+            }
+            return section
         }
-        return Meta(text: "\(running)/\(total)", tone: running > 0 ? .success : .idle)
-    }
-
-    /// The downloaded IPSWs; nothing before the cache was read or when it
-    /// holds none.
-    static func firmwares(count: Int?) -> Meta? {
-        guard let count, count > 0 else {
-            return nil
-        }
-        return Meta(text: "\(count)")
-    }
-
-    /// The default Core Bundle's version.
-    static func bundles(defaultVersion: String?) -> Meta? {
-        guard let defaultVersion, !defaultVersion.isEmpty else {
-            return nil
-        }
-        return Meta(text: defaultVersion, isMonospaced: true)
     }
 
     /// Host Setup warns when a required check fails or an advisory one warns,

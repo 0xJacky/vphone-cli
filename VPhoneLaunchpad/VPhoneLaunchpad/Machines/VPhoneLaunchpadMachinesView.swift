@@ -232,7 +232,7 @@ struct VPhoneLaunchpadMachinesView: View {
                         help: String(localized: "Start the selected machine"),
                     ) { actions.start(stopped) })
                 }
-                VPhoneLaunchpadMachineMoreButton(items: actions.items(for: machines))
+                actions.moreButton(for: machines)
             }
         }
     }
@@ -242,7 +242,7 @@ struct VPhoneLaunchpadMachinesView: View {
     private func table(selection: Binding<Set<MachinePath>>) -> some View {
         Table(rows, selection: selection, sortOrder: $sortOrder) {
             TableColumn("Name", value: \.name) { machine in
-                VPhoneLaunchpadTableCell(.title(
+                Self.tableCell(.title(
                     machine.name,
                     subtitle: machine.restoreInfo?.device,
                     leading: .glyph(machine.glyph),
@@ -251,26 +251,26 @@ struct VPhoneLaunchpadMachinesView: View {
             .width(min: 130, ideal: 170)
             if library.spansLibraries {
                 TableColumn("Location", value: \.libraryRoot) { machine in
-                    VPhoneLaunchpadTableCell(.muted(VPhoneLaunchpadMachineLocations.volumeName(machine.libraryRoot)))
+                    Self.tableCell(.muted(VPhoneLaunchpadMachineLocations.volumeName(machine.libraryRoot)))
                         .help(VPhoneLaunchpadHostSetup.abbreviated(URL(fileURLWithPath: machine.libraryRoot, isDirectory: true)))
                 }
                 .width(min: 80, ideal: 110)
             }
             TableColumn("State") { machine in
-                VPhoneLaunchpadTableCell(VPhoneLaunchpadMachineStatus(machine.path, library: library).cell)
+                Self.tableCell(VPhoneLaunchpadMachineStatus(machine.path, library: library).cell)
             }
             .width(min: 140, ideal: 170)
             // Standard comparison orders 18.10 after 18.9.
             TableColumn("Firmware", value: \.iosVersion) { machine in
-                VPhoneLaunchpadTableCell(firmwareCell(machine))
+                Self.tableCell(firmwareCell(machine))
             }
             .width(min: 100, ideal: 130)
             TableColumn("Bundle") { machine in
-                VPhoneLaunchpadTableCell(bundleCell(machine.path))
+                Self.tableCell(bundleCell(machine.path))
             }
             .width(min: 64, ideal: 76)
             TableColumn("Resources", value: \.cpuCount) { machine in
-                VPhoneLaunchpadTableCell(.muted(machine.resourcesDescription))
+                Self.tableCell(.muted(machine.resourcesDescription))
             }
             .width(min: 120, ideal: 150)
         }
@@ -291,6 +291,13 @@ struct VPhoneLaunchpadMachinesView: View {
                 tableIsFocused = true
             }
         }
+    }
+
+    /// A cell with room above and below for the two-line rows. On the
+    /// selected row of the focused table it draws in the on-accent ink.
+    private static func tableCell(_ cell: DKTableCell) -> some View {
+        DKTableCellView(cell)
+            .padding(.vertical, 3)
     }
 
     /// The iOS version over its build, with a warning while the custom

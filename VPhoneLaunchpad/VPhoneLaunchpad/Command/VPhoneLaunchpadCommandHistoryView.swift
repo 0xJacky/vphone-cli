@@ -38,11 +38,11 @@ struct VPhoneLaunchpadCommandHistoryView: View {
             }
             .width(16)
             TableColumn("Started") { entry in
-                VPhoneLaunchpadTableCell(.muted(entry.date.formatted(date: .omitted, time: .standard)), verticalPadding: 0)
+                DKTableCellView(.muted(entry.date.formatted(date: .omitted, time: .standard)))
             }
             .width(64)
             TableColumn("Command") { entry in
-                VPhoneLaunchpadTableCell(.mono(entry.text), verticalPadding: 0)
+                DKTableCellView(.mono(entry.text))
                     .help(entry.text)
             }
         }
@@ -62,12 +62,12 @@ struct VPhoneLaunchpadCommandHistoryView: View {
     private func statusIcon(_ entry: VPhoneLaunchpadCommandHistory.Entry) -> some View {
         switch entry.status {
         case nil:
-            VPhoneLaunchpadSpinner()
+            DKSpinner(size: 13, label: String(localized: "In progress"))
                 .frame(width: 15, height: 15)
         case let status? where status == 0:
-            VPhoneLaunchpadTableCell(.icon(.check, tone: .success, label: String(localized: "Exit status \(status)")), verticalPadding: 0)
+            DKTableCellView(.icon(.check, tone: .success, label: String(localized: "Exit status \(status)")))
         case let status?:
-            VPhoneLaunchpadTableCell(.icon(.xCircle, tone: .danger, label: String(localized: "Exit status \(status)")), verticalPadding: 0)
+            DKTableCellView(.icon(.xCircle, tone: .danger, label: String(localized: "Exit status \(status)")))
         }
     }
 

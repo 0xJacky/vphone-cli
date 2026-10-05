@@ -792,7 +792,7 @@ struct VPhoneLaunchpadCreationView: View {
     @ViewBuilder
     private func mark(_ status: DKStepStatus) -> some View {
         if status == .active {
-            VPhoneLaunchpadSpinner()
+            DKSpinner(size: 16, label: status.accessibilityText)
         } else {
             DKIcon(status.glyph, size: 18)
                 .foregroundStyle(Self.markColor(status))

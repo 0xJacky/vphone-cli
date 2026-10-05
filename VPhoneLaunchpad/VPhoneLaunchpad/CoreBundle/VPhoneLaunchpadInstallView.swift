@@ -114,8 +114,8 @@ struct VPhoneLaunchpadInstallView: View {
 
     // MARK: - Steps
 
-    /// A skipped step reads as done with "Skipped" under it; the kit's steps
-    /// have no skipped state.
+    /// A check the user skipped (`.warning`) draws as a skipped step, with
+    /// "Skipped" under it.
     private func steps(_ progress: VPhoneLaunchpadCoreBundle.InstallProgress) -> [DKStep] {
         progress.plan.map { step in
             let status = progress.status(step)
@@ -141,7 +141,8 @@ struct VPhoneLaunchpadInstallView: View {
 
     static func stepStatus(_ status: VPhoneLaunchpadStatus) -> DKStepStatus {
         switch status {
-        case .passed, .warning: .done
+        case .passed: .done
+        case .warning: .skipped
         case .running: .active
         case .failed: .failed
         case .pending: .pending

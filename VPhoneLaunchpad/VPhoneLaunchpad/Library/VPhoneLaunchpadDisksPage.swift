@@ -103,15 +103,21 @@ struct VPhoneLaunchpadDisksPage: View {
                         )
                     }
                 }
-                VPhoneLaunchpadUsageBar(parts: [
-                    VPhoneLaunchpadUsagePart(label: String(localized: "Machine disks"), bytes: summary.machineDisks, color: DK.Palette.accent),
-                    VPhoneLaunchpadUsagePart(label: String(localized: "Restore files"), bytes: summary.restoreFiles, color: DK.Palette.accentSoft),
-                    VPhoneLaunchpadUsagePart(label: String(localized: "Other machine files"), bytes: summary.otherMachineFiles, color: DK.Palette.muted),
-                    VPhoneLaunchpadUsagePart(label: String(localized: "IPSW cache"), bytes: summary.ipswCache, color: DK.Palette.inkDisabled),
-                ])
+                DKUsageBar([
+                    Self.segment(String(localized: "Machine disks"), summary.machineDisks, DK.Palette.accent),
+                    Self.segment(String(localized: "Restore files"), summary.restoreFiles, DK.Palette.accentSoft),
+                    Self.segment(String(localized: "Other machine files"), summary.otherMachineFiles, DK.Palette.muted),
+                    Self.segment(String(localized: "IPSW cache"), summary.ipswCache, DK.Palette.inkDisabled),
+                ], label: summary.usedCaption)
             }
             .padding(6)
         }
+    }
+
+    /// A share of the usage bar, its size written as the rest of the page
+    /// writes sizes: in decimal units, as the Finder does.
+    private static func segment(_ label: String, _ bytes: Int64, _ color: Color) -> DKUsageSegment {
+        DKUsageSegment(label, value: Double(max(bytes, 0)), valueText: VPhoneLaunchpadLibraryFormat.size(bytes), color: color)
     }
 
     private func banner(_ volume: VPhoneLaunchpadDiskSummary.Volume, summary: VPhoneLaunchpadDiskSummary) -> DKBanner {

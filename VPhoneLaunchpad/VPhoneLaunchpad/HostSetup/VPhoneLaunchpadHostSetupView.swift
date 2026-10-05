@@ -210,8 +210,9 @@ struct VPhoneLaunchpadHostSetupView: View {
 // MARK: - Check row
 
 /// A key-value row (`DKKeyValueRow`) with a status dot and an optional small
-/// button after the value, for checks that offer a fix. The kit's row takes no
-/// action, so this draws the same row with one.
+/// button after the value, for checks that offer a fix. The kit's row takes the
+/// button but has no in-progress state: a check that is still running shows a
+/// spinner in place of the dot, and the row reads out its state.
 struct VPhoneLaunchpadHostCheckRow: View {
     let title: String
     let value: String

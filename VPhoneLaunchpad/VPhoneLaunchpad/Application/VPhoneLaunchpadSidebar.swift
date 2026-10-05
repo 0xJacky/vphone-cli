@@ -5,8 +5,8 @@ import VPhoneDesignKit
 
 /// The window's sidebar: Library (Machines, Firmwares, Disks) and System
 /// (Bundles, Network, Host Setup), with the helper's state and the default
-/// library in the footer. Built from the kit's rows rather than
-/// `DKLaunchpadSidebar`, which has no warning for Bundles and English titles.
+/// library in the footer. The rows are `DKLaunchpadSidebar`'s; they are
+/// drawn here so the warning glyph is read out in the user's language.
 struct VPhoneLaunchpadSidebar: View {
     @Environment(VPhoneLaunchpadModel.self) private var model
 
@@ -22,44 +22,16 @@ struct VPhoneLaunchpadSidebar: View {
     }
 
     private var sections: [DKSidebarSection<DKLaunchpadDestination>] {
-        DKLaunchpadSection.allCases.map { section in
-            DKSidebarSection(section.localizedTitle, id: section.rawValue, items: section.destinations.map(item))
-        }
-    }
-
-    private func item(_ destination: DKLaunchpadDestination) -> DKSidebarItem<DKLaunchpadDestination> {
-        var item = DKSidebarItem(
-            id: destination,
-            label: destination.localizedTitle,
-            glyph: destination.glyph,
-            warningLabel: String(localized: "Needs attention"),
+        let library = model.machines
+        return VPhoneLaunchpadSidebarMeta.sections(
+            listed: library.hasListed,
+            running: library.runningCount,
+            total: library.machines.count,
+            firmwareCount: model.firmwareCount,
+            bundleVersion: model.bundles.defaultVersion,
+            hostWarning: model.hostNeedsAttention,
+            bundleWarning: model.bundleNeedsAttention,
         )
-        let meta: VPhoneLaunchpadSidebarMeta.Meta?
-        switch destination {
-        case .machines:
-            let library = model.machines
-            meta = VPhoneLaunchpadSidebarMeta.machines(
-                listed: library.hasListed,
-                running: library.runningCount,
-                total: library.machines.count,
-            )
-        case .firmwares:
-            meta = VPhoneLaunchpadSidebarMeta.firmwares(count: model.firmwareCount)
-        case .bundles:
-            meta = VPhoneLaunchpadSidebarMeta.bundles(defaultVersion: model.bundles.defaultVersion)
-            item.isWarning = model.bundleNeedsAttention
-        case .hostSetup:
-            meta = nil
-            item.isWarning = model.hostNeedsAttention
-        case .disks, .network:
-            meta = nil
-        }
-        if let meta {
-            item.meta = meta.text
-            item.metaTone = meta.tone
-            item.isMetaMonospaced = meta.isMonospaced
-        }
-        return item
     }
 
     /// Lists the IPSW cache without measuring any machine.

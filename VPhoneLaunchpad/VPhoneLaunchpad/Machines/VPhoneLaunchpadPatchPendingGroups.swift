@@ -49,8 +49,7 @@ struct VPhoneLaunchpadPatchPendingGroups: View {
 
     private func group(_ delivery: Delivery, identifiers: [String]) -> some View {
         let tone = identifiers.isEmpty ? DKTone.neutral : delivery.tone
-        let shape = RoundedRectangle(cornerRadius: DK.Radius.card, style: .continuous)
-        return DKCard(fillsHeight: true) {
+        return DKCard(fillsHeight: true, tone: tone) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: DK.Space.s2) {
                     DKIcon(delivery.glyph, size: 16)
@@ -72,7 +71,7 @@ struct VPhoneLaunchpadPatchPendingGroups: View {
                         .font(DK.Typeface.caption)
                         .foregroundStyle(DK.Palette.muted)
                 } else {
-                    VPhoneLaunchpadPatchChipFlow(spacing: DK.Space.s1) {
+                    DKFlowLayout(horizontalSpacing: DK.Space.s1, verticalSpacing: DK.Space.s1) {
                         ForEach(identifiers.prefix(Self.shownIdentifiers), id: \.self) { identifier in
                             chip(identifier)
                         }
@@ -93,7 +92,6 @@ struct VPhoneLaunchpadPatchPendingGroups: View {
                 .padding(.vertical, 7)
                 .padding(.horizontal, DK.Space.s3)
         }
-        .overlay(shape.strokeBorder(identifiers.isEmpty ? DK.Palette.line : delivery.tone.line, lineWidth: DK.Metric.hairline))
         .frame(maxWidth: .infinity)
         .accessibilityElement(children: .combine)
     }
@@ -169,50 +167,5 @@ extension VPhoneLaunchpadPatchCatalog.Delivery {
         case .firmwarePatch: String(localized: "Takes effect at the next boot")
         case .restore: String(localized: "Erases the data")
         }
-    }
-}
-
-// MARK: - Chip flow
-
-/// Lays identifier chips out left to right, wrapping onto further lines. A
-/// chip wider than the line is narrowed to it, so it truncates.
-struct VPhoneLaunchpadPatchChipFlow: Layout {
-    var spacing: CGFloat
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
-        let width = proposal.width ?? .infinity
-        let frames = arrange(subviews, in: width)
-        let used = frames.map(\.maxX).max() ?? 0
-        return CGSize(width: proposal.width ?? used, height: frames.map(\.maxY).max() ?? 0)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
-        let frames = arrange(subviews, in: bounds.width)
-        for (subview, frame) in zip(subviews, frames) {
-            subview.place(
-                at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
-                proposal: ProposedViewSize(frame.size),
-            )
-        }
-    }
-
-    private func arrange(_ subviews: Subviews, in width: CGFloat) -> [CGRect] {
-        var frames: [CGRect] = []
-        var x: CGFloat = 0
-        var y: CGFloat = 0
-        var lineHeight: CGFloat = 0
-        for subview in subviews {
-            var size = subview.sizeThatFits(.unspecified)
-            size.width = min(size.width, width)
-            if x > 0, x + size.width > width {
-                x = 0
-                y += lineHeight + spacing
-                lineHeight = 0
-            }
-            frames.append(CGRect(origin: CGPoint(x: x, y: y), size: size))
-            x += size.width + spacing
-            lineHeight = max(lineHeight, size.height)
-        }
-        return frames
     }
 }
