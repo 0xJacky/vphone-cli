@@ -49,7 +49,7 @@ class VPhoneKeychainBrowserModel {
         let count = filteredItems.count
         let total = items.count
         if count != total {
-            return VPhoneLocalization.format("%@/%@ items", String(count), String(total))
+            return VPhoneLocalization.format("%@ of %@ items", String(count), String(total))
         }
         if count == 0, !diagnostics.isEmpty {
             return VPhoneLocalization.text("No items")
@@ -68,14 +68,29 @@ class VPhoneKeychainBrowserModel {
     ]
 
     func copyRows(ids: Set<VPhoneKeychainItem.ID>) {
+        guard let text = rowsTSV(ids: ids) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    /// The shown rows among `ids` as tab-separated values under a header
+    /// line, in table order; nil when none of them is shown.
+    func rowsTSV(ids: Set<VPhoneKeychainItem.ID>) -> String? {
         let selected = filteredItems.filter { ids.contains($0.id) }
-        guard !selected.isEmpty else { return }
+        guard !selected.isEmpty else { return nil }
         let header = "Class\tAccount\tService\tAccess Group\tProtection\tValue"
         let rows = selected.map { item in
-            "\(item.displayClass)\t\(item.account)\t\(item.service)\t\(item.accessGroup)\t\(item.protection)\t\(item.displayValue)"
+            [item.displayClass, item.account, item.service, item.accessGroup, item.protection, item.displayValue]
+                .map(Self.tsvField)
+                .joined(separator: "\t")
         }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(([header] + rows).joined(separator: "\n"), forType: .string)
+        return ([header] + rows).joined(separator: "\n")
+    }
+
+    /// A tab or line break inside a guest value would split its row, so each
+    /// becomes a space.
+    static func tsvField(_ value: String) -> String {
+        String(value.map { $0 == "\t" || $0.isNewline ? " " : $0 })
     }
 
     // MARK: - Editing

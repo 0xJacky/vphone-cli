@@ -78,7 +78,11 @@ struct VPhoneFileBrowserView: View {
         if model.isLoading {
             return VPhoneLocalization.text("Loading…")
         }
-        return VPhoneLocalization.text("Drop files anywhere in this window to upload them here")
+        return [
+            VPhoneLocalization.text("Connected"),
+            model.currentPath,
+            VPhoneLocalization.text("Drop files anywhere to upload here"),
+        ].joined(separator: " · ")
     }
 
     // MARK: - Header

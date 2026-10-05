@@ -107,19 +107,23 @@ final class VPhoneGuestPreferencesModel {
         defer { activity = nil }
         do {
             let value = try await control.settingsGet(domain: domain, key: key.isEmpty ? nil : key)
-            let result = VPhoneGuestPreferenceReadResult(domain: domain, key: key.isEmpty ? nil : key, value: value)
-            readResult = result
-            if result.entries.isEmpty, result.text.isEmpty {
-                succeed(
-                    key.isEmpty
-                        ? String(localized: "\(domain) has no values.", bundle: VPhoneLocalization.bundle)
-                        : String(localized: "\(key) is not set in \(domain).", bundle: VPhoneLocalization.bundle),
-                )
-            } else {
-                status = nil
-            }
+            apply(readValue: value, domain: domain, key: key.isEmpty ? nil : key)
         } catch {
             fail(String(localized: "Unable to read that preference. Check the domain and key, then try again.", bundle: VPhoneLocalization.bundle))
+        }
+    }
+
+    /// Shows what `settings.get` returned for `domain`, or for one `key` in it.
+    func apply(readValue value: Any?, domain: String, key: String?) {
+        let result = VPhoneGuestPreferenceReadResult(domain: domain, key: key, value: value)
+        readResult = result
+        if result.entries.isEmpty, result.text.isEmpty {
+            succeed(
+                key.map { String(localized: "\($0) is not set in \(domain).", bundle: VPhoneLocalization.bundle) }
+                    ?? String(localized: "\(domain) has no values.", bundle: VPhoneLocalization.bundle),
+            )
+        } else {
+            status = nil
         }
     }
 

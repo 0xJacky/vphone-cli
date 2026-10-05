@@ -57,8 +57,7 @@ struct VPhoneGuestPreferencesView: View {
     private var header: some View {
         DKPageHeader(
             String(localized: "Preferences", bundle: VPhoneLocalization.bundle),
-            subtitle: model.readResult?.title
-                ?? String(localized: "Read or write a preferences domain in the guest", bundle: VPhoneLocalization.bundle),
+            subtitle: String(localized: "Read or write a preferences domain in the guest", bundle: VPhoneLocalization.bundle),
         ) {
             DKSegmented(
                 String(localized: "Mode", bundle: VPhoneLocalization.bundle),
@@ -268,23 +267,24 @@ struct VPhoneGuestPreferencesView: View {
     @ViewBuilder
     private var detailBar: some View {
         if isEditing {
+            // In Read mode the selected row already shows the current value.
             DKDetailBar(
                 model.trimmedWriteKey.isEmpty
                     ? String(localized: "New Value", bundle: VPhoneLocalization.bundle)
                     : model.trimmedWriteKey,
-                subtitle: model.trimmedDomain,
-                note: model.currentWriteValue.map {
-                    String(localized: "Current value: \($0.summary) (\($0.typeTitle))", bundle: VPhoneLocalization.bundle)
-                },
+                note: model.mode == .write
+                    ? model.currentWriteValue.map {
+                        String(localized: "Current value: \($0.summary) (\($0.typeTitle))", bundle: VPhoneLocalization.bundle)
+                    }
+                    : nil,
                 layout: .row,
             ) {
                 editor
             }
         } else {
-            DKDetailBar(
-                note: String(localized: "Select a String, Boolean, Integer or Float key to change its value here, or switch to Write to set any key.", bundle: VPhoneLocalization.bundle),
-                layout: .row,
-            )
+            DKDetailBar(layout: .row) {
+                VPhoneGuestDetailNote(String(localized: "Select a String, Boolean, Integer or Float key to change its value here, or switch to Write to set any key.", bundle: VPhoneLocalization.bundle))
+            }
         }
     }
 
@@ -301,7 +301,6 @@ struct VPhoneGuestPreferencesView: View {
             DKButton(DKButtonSpec(
                 String(localized: "Write", bundle: VPhoneLocalization.bundle),
                 glyph: .download,
-                variant: .primary,
                 isEnabled: model.canWrite,
                 help: String(localized: "Write this value to the guest (⌘↩)", bundle: VPhoneLocalization.bundle),
             ) { Task { await model.write() } })

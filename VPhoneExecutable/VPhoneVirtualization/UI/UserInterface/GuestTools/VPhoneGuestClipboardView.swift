@@ -8,10 +8,14 @@ import VPhoneDesignKit
 struct VPhoneGuestClipboardView: View {
     @Bindable var model: VPhoneGuestClipboardModel
     @FocusState private var composeFocused: Bool
-    @State private var contentWidth: CGFloat = 0
+    @State private var contentSize: CGSize = .zero
 
+    /// The columns' flex basis and grow, as in the design: the sections take
+    /// 440pt and three shares of the spare width, History 300pt and two.
+    private static let sectionsBasis: CGFloat = 440
+    private static let historyBasis: CGFloat = 300
     /// The two columns sit side by side once both get their basis width.
-    private static let sideBySideWidth: CGFloat = 440 + 300 + DK.Space.s6 + 2 * DK.Space.s5
+    private static let sideBySideWidth: CGFloat = sectionsBasis + historyBasis + DK.Space.s6 + 2 * DK.Space.s5
 
     var body: some View {
         VStack(spacing: 0) {
@@ -30,7 +34,7 @@ struct VPhoneGuestClipboardView: View {
                 columns
                     .padding(DK.Space.s5)
             }
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { contentWidth = $0 }
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { contentSize = $0 }
             DKStatusBar(
                 isConnected: model.control.isConnected,
                 text: model.activity?.title ?? model.status?.message,
@@ -62,25 +66,34 @@ struct VPhoneGuestClipboardView: View {
 
     @ViewBuilder
     private var columns: some View {
-        if contentWidth == 0 || contentWidth >= Self.sideBySideWidth {
+        if contentSize.width == 0 || contentSize.width >= Self.sideBySideWidth {
+            // History runs the full page height beside the two sections.
             HStack(alignment: .top, spacing: DK.Space.s6) {
                 VStack(spacing: 28) {
                     guestSection
                     sendSection
                 }
                 .frame(maxWidth: .infinity)
-                .layoutPriority(3)
-                historySection
-                    .frame(minWidth: 300, maxWidth: .infinity)
-                    .layoutPriority(2)
+                historySection(grow: true)
+                    .frame(width: historyWidth)
+                    .frame(maxHeight: .infinity)
             }
+            .frame(minHeight: max(contentSize.height - 2 * DK.Space.s5, 0), alignment: .top)
         } else {
             VStack(spacing: 28) {
                 guestSection
                 sendSection
-                historySection
+                historySection(grow: false)
             }
         }
+    }
+
+    /// History's width beside the sections: its basis and two fifths of the
+    /// spare width.
+    private var historyWidth: CGFloat {
+        let available = contentSize.width - 2 * DK.Space.s5 - DK.Space.s6
+        let spare = max(available - Self.sectionsBasis - Self.historyBasis, 0)
+        return Self.historyBasis + spare * 2 / 5
     }
 
     // MARK: - On the Guest
@@ -283,8 +296,8 @@ struct VPhoneGuestClipboardView: View {
 
     // MARK: - History
 
-    private var historySection: some View {
-        let history = model.history
+    private func historySection(grow: Bool) -> some View {
+        let history = model.history.entries
         let note = history.isEmpty
             ? String(localized: "Nothing yet", bundle: VPhoneLocalization.bundle)
             : history.count == 1
@@ -297,6 +310,7 @@ struct VPhoneGuestClipboardView: View {
             String(localized: "History", bundle: VPhoneLocalization.bundle),
             note: note,
             accessory: clear,
+            grow: grow,
             items: history.isEmpty ? [emptyHistoryItem] : history.map(historyItem),
         )
     }
@@ -347,7 +361,13 @@ struct VPhoneGuestClipboardView: View {
     }
 
     /// The first lines of a history item, short enough for a list row.
+    /// Trailing line breaks, such as the Return typed after a password, are
+    /// left out.
     private static func preview(_ text: String) -> String {
+        var text = Substring(text)
+        while let last = text.last, last.isWhitespace {
+            text = text.dropLast()
+        }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).prefix(3)
         var preview = lines.joined(separator: "\n")
         if preview.count > 160 {
@@ -389,6 +409,7 @@ struct VPhoneGuestClipboardView: View {
                 HStack(spacing: DK.Space.s2) { buttons }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 10)
         .padding(.horizontal, DK.Space.s4)
         .background(DK.Palette.window)

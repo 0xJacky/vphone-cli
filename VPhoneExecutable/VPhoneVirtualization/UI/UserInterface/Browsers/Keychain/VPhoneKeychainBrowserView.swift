@@ -258,11 +258,9 @@ struct VPhoneKeychainBrowserView: View {
                     layout: .row,
                 )
             } else if selected.isEmpty {
-                DKDetailBar(
-                    note: VPhoneLocalization.text("Select an item to copy, reveal, edit or delete it."),
-                    actions: actions,
-                    layout: .row,
-                )
+                DKDetailBar(actions: actions, layout: .row) {
+                    VPhoneGuestDetailNote(VPhoneLocalization.text("Select an item to copy, reveal, edit or delete it."))
+                }
             } else {
                 DKDetailBar(
                     VPhoneLocalization.format("%@ items selected", String(selected.count)),
@@ -358,14 +356,6 @@ struct VPhoneKeychainBrowserView: View {
                     let text = model.diagnostics.joined(separator: "\n")
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(text, forType: .string)
-                })
-                DKButton(DKButtonSpec(
-                    VPhoneLocalization.text("Hide Diagnostics"),
-                    glyph: .close,
-                    variant: .ghost,
-                    size: .icon,
-                ) {
-                    model.showDiagnostics = false
                 })
             }
             .padding(.horizontal, DK.Space.s4)

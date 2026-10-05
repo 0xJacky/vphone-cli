@@ -37,21 +37,7 @@ final class VPhoneGuestClipboardModel {
         }
     }
 
-    /// One clipboard read, send or typed text, kept while the VM window is open.
-    struct HistoryEntry: Identifiable {
-        enum Kind {
-            case fromGuest
-            case sent
-            case typed
-        }
-
-        let id = UUID()
-        let kind: Kind
-        let text: String?
-        let imageData: Data?
-        let types: [String]
-        let date: Date
-    }
+    typealias HistoryEntry = VPhoneGuestClipboardHistory.Entry
 
     let control: VPhoneGuestControl
     /// The part of the page the Data menu opened it for: reading the guest
@@ -64,8 +50,8 @@ final class VPhoneGuestClipboardModel {
     private(set) var status: VPhoneGuestToolStatus?
     private(set) var clipboard: VPhoneGuestControl.ClipboardContent?
     private(set) var readDate: Date?
-    /// Newest first. Lives as long as this model, which the VM window owns.
-    private(set) var history: [HistoryEntry] = []
+    /// Lives as long as this model, which the VM window owns.
+    var history = VPhoneGuestClipboardHistory()
     var composeText = ""
 
     var isBusy: Bool {
@@ -100,30 +86,21 @@ final class VPhoneGuestClipboardModel {
         defer { activity = nil }
         do {
             let content = try await control.clipboardGet()
-            clipboard = content
-            readDate = .now
-            status = nil
-            if recording {
-                record(content)
-            }
+            apply(read: content, recording: recording)
         } catch {
             fail(String(localized: "Unable to read the guest clipboard. Check the connection, then try again.", bundle: VPhoneLocalization.bundle))
         }
     }
 
-    /// Adds a guest read to the history, unless it is the same content as the
-    /// last read there.
-    private func record(_ content: VPhoneGuestControl.ClipboardContent) {
-        guard content.text != nil || content.imageData != nil else { return }
-        if let last = history.first(where: { $0.kind == .fromGuest }),
-           last.text == content.text, last.imageData == content.imageData
-        {
-            return
+    /// Shows what the guest clipboard holds and, when `recording`, adds it to
+    /// the history.
+    func apply(read content: VPhoneGuestControl.ClipboardContent, recording: Bool, at date: Date = .now) {
+        clipboard = content
+        readDate = date
+        status = nil
+        if recording {
+            history.recordRead(content, at: date)
         }
-        history.insert(
-            HistoryEntry(kind: .fromGuest, text: content.text, imageData: content.imageData, types: content.types, date: .now),
-            at: 0,
-        )
     }
 
     func copyTextToMac() {
@@ -171,7 +148,7 @@ final class VPhoneGuestClipboardModel {
             return
         }
         activity = nil
-        history.insert(HistoryEntry(kind: .sent, text: text, imageData: nil, types: [], date: .now), at: 0)
+        history.recordSent(text)
 
         // Read it back so On the Guest shows what the guest now holds.
         await read(recording: false)
@@ -204,7 +181,7 @@ final class VPhoneGuestClipboardModel {
             return
         }
         plan.send(through: control)
-        history.insert(HistoryEntry(kind: .typed, text: text, imageData: nil, types: [], date: .now), at: 0)
+        history.recordTyped(text)
 
         let typed = plan.keys.count
         if plan.skipped == 0 {
@@ -244,14 +221,14 @@ final class VPhoneGuestClipboardModel {
     /// Sends or types a history item's text again, the way it went the first time.
     func sendAgain(_ entry: HistoryEntry) async {
         guard let text = entry.text else { return }
-        switch entry.kind {
-        case .typed: type(text)
-        case .sent, .fromGuest: await send(text)
+        switch entry.kind.resendMode {
+        case .typeKeystrokes: type(text)
+        case .setClipboard: await send(text)
         }
     }
 
     func clearHistory() {
-        history.removeAll()
+        history.clear()
     }
 
     // MARK: - Mac Clipboard
@@ -276,5 +253,70 @@ final class VPhoneGuestClipboardModel {
 
     private func fail(_ message: String) {
         status = VPhoneGuestToolStatus(message: message, isError: true)
+    }
+}
+
+// MARK: - History
+
+/// The clipboard reads, sends and typed text of one VM window session,
+/// newest first.
+struct VPhoneGuestClipboardHistory {
+    /// One clipboard read, send or typed text.
+    struct Entry: Identifiable {
+        enum Kind {
+            case fromGuest
+            case sent
+            case typed
+
+            /// How Send Again delivers the entry: typed text is typed again,
+            /// anything else goes back on the guest clipboard.
+            var resendMode: VPhoneGuestClipboardModel.SendMode {
+                self == .typed ? .typeKeystrokes : .setClipboard
+            }
+        }
+
+        let id = UUID()
+        let kind: Kind
+        let text: String?
+        let imageData: Data?
+        let types: [String]
+        let date: Date
+    }
+
+    private(set) var entries: [Entry] = []
+
+    var isEmpty: Bool {
+        entries.isEmpty
+    }
+
+    var count: Int {
+        entries.count
+    }
+
+    /// Adds a guest read, unless it holds nothing or the same content as the
+    /// last read already listed.
+    mutating func recordRead(_ content: VPhoneGuestControl.ClipboardContent, at date: Date = .now) {
+        guard content.text != nil || content.imageData != nil else { return }
+        if let last = entries.first(where: { $0.kind == .fromGuest }),
+           last.text == content.text, last.imageData == content.imageData
+        {
+            return
+        }
+        entries.insert(
+            Entry(kind: .fromGuest, text: content.text, imageData: content.imageData, types: content.types, date: date),
+            at: 0,
+        )
+    }
+
+    mutating func recordSent(_ text: String, at date: Date = .now) {
+        entries.insert(Entry(kind: .sent, text: text, imageData: nil, types: [], date: date), at: 0)
+    }
+
+    mutating func recordTyped(_ text: String, at date: Date = .now) {
+        entries.insert(Entry(kind: .typed, text: text, imageData: nil, types: [], date: date), at: 0)
+    }
+
+    mutating func clear() {
+        entries.removeAll()
     }
 }

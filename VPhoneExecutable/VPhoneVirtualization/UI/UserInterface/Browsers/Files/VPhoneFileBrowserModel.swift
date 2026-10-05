@@ -46,7 +46,9 @@ class VPhoneFileBrowserModel {
             let query = searchText.lowercased()
             list = files.filter { $0.name.lowercased().contains(query) }
         }
-        return list.sorted(using: sortOrder)
+        // Folders stay on top in every sort order, as in Finder.
+        let sorted = list.sorted(using: sortOrder)
+        return sorted.filter(\.isDirectoryLike) + sorted.filter { !$0.isDirectoryLike }
     }
 
     /// The selected rows, in display order.

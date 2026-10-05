@@ -1,4 +1,5 @@
 import SwiftUI
+import VPhoneDesignKit
 
 /// Measures its content at no less than `minimumWidth`.
 ///
@@ -32,5 +33,26 @@ extension View {
     /// Keeps a row-layout `DKDetailBar` from reporting a runaway minimum height.
     func guestDetailBarSizing() -> some View {
         VPhoneGuestDetailBarSizing { self }
+    }
+}
+
+// MARK: - Note Without a Selection
+
+/// The muted line a row-layout `DKDetailBar` shows when nothing is selected.
+/// `DKDetailBar` draws its `note` only under a title, so a bar without one
+/// passes this as its content instead.
+struct VPhoneGuestDetailNote: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(text)
+            .font(DK.Typeface.caption)
+            .foregroundStyle(DK.Palette.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
