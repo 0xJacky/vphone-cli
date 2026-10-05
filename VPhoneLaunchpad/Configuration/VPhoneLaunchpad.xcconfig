@@ -17,3 +17,11 @@ ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
 // with zh-Hans, ja, ko and vi in VPhoneLaunchpad/Localizable.xcstrings and
 // VPhoneLaunchpad/InfoPlist.xcstrings.
 SWIFT_EMIT_LOC_STRINGS = YES
+
+// VPhoneDesignKit, the redesign's component library, is a static library in
+// VPhoneKit. The "Build VPhoneDesignKit" script phase builds it into
+// .build/XcodeKit, the same place VPhone.bundle's kits are built.
+VPHONE_KIT_PRODUCTS = $(SRCROOT)/../.build/XcodeKit/Build/Products/$(VPHONE_KIT_CONFIGURATION)
+LIBRARY_SEARCH_PATHS = $(inherited) $(VPHONE_KIT_PRODUCTS)
+SWIFT_INCLUDE_PATHS = $(inherited) $(VPHONE_KIT_PRODUCTS)
+OTHER_LDFLAGS = $(inherited) -lVPhoneDesignKit

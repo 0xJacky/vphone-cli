@@ -69,7 +69,7 @@
 		5A1000000000000000000011 /* VPhoneLaunchpad */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 5A1000000000000000000092 /* Build configuration list for PBXNativeTarget "VPhoneLaunchpad" */;
-			buildPhases = (5A1000000000000000000051 /* Sources */, 5A1000000000000000000041 /* Frameworks */, 5A1000000000000000000052 /* Resources */, 5A1000000000000000000053 /* Embed Privileged Helper */, 5A10000000000000000000CD /* Embed Command Line Tool */, 5A10000000000000000000ED /* Embed VM Launcher */, 5A10000000000000000000D3 /* Embed Skill */, );
+			buildPhases = (5A1000000000000000000101 /* Build VPhoneDesignKit */, 5A1000000000000000000051 /* Sources */, 5A1000000000000000000041 /* Frameworks */, 5A1000000000000000000052 /* Resources */, 5A1000000000000000000053 /* Embed Privileged Helper */, 5A10000000000000000000CD /* Embed Command Line Tool */, 5A10000000000000000000ED /* Embed VM Launcher */, 5A10000000000000000000D3 /* Embed Skill */, );
 			buildRules = ();
 			dependencies = (5A1000000000000000000072 /* PBXTargetDependency */, 5A10000000000000000000CB /* PBXTargetDependency */, 5A10000000000000000000EB /* PBXTargetDependency */, );
 			fileSystemSynchronizedGroups = (5A1000000000000000000021 /* VPhoneLaunchpad */, 5A1000000000000000000023 /* VPhoneLaunchpadShared */, );
@@ -135,6 +135,9 @@
 /* Begin PBXResourcesBuildPhase section */
 		5A1000000000000000000052 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
+/* Begin PBXShellScriptBuildPhase section */
+		5A1000000000000000000101 /* Build VPhoneDesignKit */ = {isa = PBXShellScriptBuildPhase; alwaysOutOfDate = 1; buildActionMask = 2147483647; files = (); inputPaths = (); name = "Build VPhoneDesignKit"; outputPaths = (); runOnlyForDeploymentPostprocessing = 0; shellPath = /bin/zsh; shellScript = "set -euo pipefail\nroot=\"$(cd \"$SRCROOT/..\" && pwd)\"\n# A clean environment: the app target exports settings the kit build must not inherit.\n/usr/bin/env -i HOME=\"$HOME\" PATH=\"$PATH\" DEVELOPER_DIR=\"$DEVELOPER_DIR\" /usr/bin/xcodebuild -project \"$root/VPhoneKit/VPhoneKit.xcodeproj\" -scheme VPhoneDesignKit -configuration \"$VPHONE_KIT_CONFIGURATION\" -destination 'platform=macOS,arch=arm64' -derivedDataPath \"$root/.build/XcodeKit\" CODE_SIGNING_ALLOWED=NO build\n"; };
+/* End PBXShellScriptBuildPhase section */
 /* Begin PBXSourcesBuildPhase section */
 		5A1000000000000000000051 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		5A1000000000000000000054 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };

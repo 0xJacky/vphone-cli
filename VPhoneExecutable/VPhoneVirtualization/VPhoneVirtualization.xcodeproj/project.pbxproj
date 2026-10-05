@@ -254,7 +254,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/zsh;
-			shellScript = "set -euo pipefail\nroot=\"$(cd \"$SRCROOT/../..\" && pwd)\"\n/usr/bin/xcodebuild -project \"$root/VPhoneKit/VPhoneKit.xcodeproj\" -scheme VPhoneArchiveKit -configuration \"$CONFIGURATION\" -destination 'platform=macOS,arch=arm64' -derivedDataPath \"$root/.build/XcodeKit\" CODE_SIGNING_ALLOWED=NO build\n";
+			shellScript = "set -euo pipefail\nroot=\"$(cd \"$SRCROOT/../..\" && pwd)\"\n/usr/bin/xcodebuild -project \"$root/VPhoneKit/VPhoneKit.xcodeproj\" -scheme VPhoneArchiveKit -configuration \"$CONFIGURATION\" -destination 'platform=macOS,arch=arm64' -derivedDataPath \"$root/.build/XcodeKit\" CODE_SIGNING_ALLOWED=NO build\n/usr/bin/xcodebuild -project \"$root/VPhoneKit/VPhoneKit.xcodeproj\" -scheme VPhoneDesignKit -configuration \"$CONFIGURATION\" -destination 'platform=macOS,arch=arm64' -derivedDataPath \"$root/.build/XcodeKit\" CODE_SIGNING_ALLOWED=NO build\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -418,6 +418,7 @@
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lVPhoneVirtualMachineKit",
+					"-lVPhoneDesignKit",
 					"-lVPhoneCoreKit",
 				);
 				PRODUCT_NAME = "vphone-vm";
@@ -439,6 +440,7 @@
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lVPhoneVirtualMachineKit",
+					"-lVPhoneDesignKit",
 					"-lVPhoneCoreKit",
 				);
 				PRODUCT_NAME = "vphone-vm";

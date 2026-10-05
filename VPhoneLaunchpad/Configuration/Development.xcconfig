@@ -9,4 +9,7 @@ SWIFT_OPTIMIZATION_LEVEL = -Onone
 ONLY_ACTIVE_ARCH = YES
 DEBUG_INFORMATION_FORMAT = dwarf
 
+// VPhoneKit names its debug configuration Debug.
+VPHONE_KIT_CONFIGURATION = Debug
+
 #include? "DevelopmentDeveloper.xcconfig"
