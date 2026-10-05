@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import VPhoneDesignKit
 
 /// Hands the vphone skill to the user's own coding agent. Agents keep skills in
 /// different places, so Launchpad installs nothing itself: it shows a prompt
@@ -34,47 +35,60 @@ struct VPhoneLaunchpadSkillInstallView: View {
 
     var body: some View {
         VPhoneLaunchpadSheet(Text("Install Skill")) {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: DK.Space.s4) {
                 Text("Give this to your coding agent, such as Claude Code, Codex or Grok. It reads the vphone skill from this Mac and installs it where that agent expects skills.")
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(DK.Palette.muted)
+                    .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
 
                 if let prompt {
-                    ScrollView {
-                        Text(prompt)
-                            .font(.system(.callout, design: .monospaced))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(12)
+                    DKSection(String(localized: "Prompt"), grow: true, card: false) {
+                        ScrollView {
+                            Text(prompt)
+                                .font(DK.Typeface.mono)
+                                .foregroundStyle(DK.Palette.ink)
+                                .lineSpacing(2)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, DK.Space.s3)
+                                .padding(.horizontal, 14)
+                        }
+                        .background(DK.Palette.surfaceSunken, in: RoundedRectangle(cornerRadius: DK.Radius.card, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: DK.Radius.card, style: .continuous)
+                                .strokeBorder(DK.Palette.line, lineWidth: DK.Metric.hairline),
+                        )
                     }
-                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
                 } else {
-                    Text("This copy of Launchpad does not contain the skill.")
-                        .foregroundStyle(.secondary)
+                    DKBanner(String(localized: "This copy of Launchpad does not contain the skill."), tone: .info)
                     Spacer(minLength: 0)
                 }
             }
-            .padding(16)
+            .padding(DKSheetMetrics.horizontalPadding)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } accessory: {
-            Button("Show in Finder") {
+            DKButton(DKButtonSpec(String(localized: "Show in Finder"), glyph: .folder, isEnabled: prompt != nil) {
                 if let url = Self.skillURL {
                     NSWorkspace.shared.activateFileViewerSelecting([url])
                 }
-            }
-            .disabled(prompt == nil)
+            })
         } actions: {
-            Button(copied ? "Copied" : "Copy Prompt") {
+            DKButton(DKButtonSpec(
+                copied ? String(localized: "Copied") : String(localized: "Copy Prompt"),
+                glyph: copied ? .check : .copy,
+                isEnabled: prompt != nil,
+            ) {
                 guard let prompt else {
                     return
                 }
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(prompt, forType: .string)
                 copied = true
-            }
-            .disabled(prompt == nil)
-            Button("Done") { dismiss() }
+            })
+            DKButton(String(localized: "Done"), variant: .primary) { dismiss() }
                 .keyboardShortcut(.defaultAction)
         }
         .frame(width: 520, height: 460)
+        .background(DK.Palette.window)
     }
 }

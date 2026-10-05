@@ -1,6 +1,11 @@
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
+import VPhoneDesignKit
 
+/// The Core Bundles page: the installed versions with the default, their
+/// checks and the machines bound to each, and the releases and GitHub Actions
+/// builds that can be installed.
 struct VPhoneLaunchpadCoreBundleView: View {
     enum Source: Hashable {
         case releases
@@ -8,7 +13,6 @@ struct VPhoneLaunchpadCoreBundleView: View {
     }
 
     @Environment(VPhoneLaunchpadModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
     @State private var removal: String?
     @State private var source = Source.releases
     @State private var token = ""
@@ -21,34 +25,30 @@ struct VPhoneLaunchpadCoreBundleView: View {
         bundles.releases.filter { release in !bundles.installed.contains { $0.version == release.version } }
     }
 
+    private static var installHelp: String {
+        String(localized: "Installing needs the privileged helper and Developer Tools access.")
+    }
+
     var body: some View {
         @Bindable var bundles = bundles
-        VPhoneLaunchpadSheet(Text("Core Bundle")) {
-            Form {
-                if !bundles.installed.isEmpty {
-                    installedSection
+        VStack(spacing: 0) {
+            header
+            ScrollView {
+                VStack(alignment: .leading, spacing: DK.Space.s6) {
+                    if let banner = installBanner {
+                        banner
+                    }
+                    if !bundles.installed.isEmpty {
+                        installedSection
+                    }
+                    availableSection
                 }
-                availableSection
+                .padding(DK.Space.s5)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .formStyle(.grouped)
-        } accessory: {
-            Button("Check for Updates") {
-                Task { await bundles.refresh() }
-            }
-            .help("Reload releases and builds, and run host preflight again.")
-            .disabled(bundles.isInstalling)
-            Button("Install Local Build…") {
-                chooseLocalBuild()
-            }
-            .help(model.canInstallBundles
-                ? "Install a VPhone.bundle folder or .zip built on this Mac."
-                : "Installing needs the privileged helper and Developer Tools access.")
-            .disabled(!model.canInstallBundles)
-        } actions: {
-            Button("Done") { dismiss() }
-                .keyboardShortcut(.defaultAction)
         }
-        .frame(width: 640, height: 520)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(DK.Palette.window)
         .errorAlert($bundles.actionError)
         .confirmationDialog(
             "Remove VPhone.bundle \(removal ?? "")?",
@@ -75,102 +75,196 @@ struct VPhoneLaunchpadCoreBundleView: View {
         #endif
     }
 
+    // MARK: - Header
+
+    private var header: some View {
+        DKPageHeader(String(localized: "Core Bundles"), subtitle: subtitle) {
+            DKButton(DKButtonSpec(
+                String(localized: "Check for Updates"),
+                glyph: .refresh,
+                isEnabled: !bundles.isInstalling,
+                help: String(localized: "Reload releases and builds, and run host preflight again."),
+            ) {
+                Task { await bundles.refresh() }
+            })
+            DKButton(DKButtonSpec(
+                String(localized: "Install Local Build…"),
+                glyph: .bundle,
+                isEnabled: model.canInstallBundles,
+                help: model.canInstallBundles
+                    ? String(localized: "Install a VPhone.bundle folder or .zip built on this Mac.")
+                    : Self.installHelp,
+                action: chooseLocalBuild,
+            ))
+        }
+    }
+
+    private var subtitle: String {
+        let count = bundles.installed.count
+        guard count > 0 else {
+            return String(localized: "No Core Bundle installed")
+        }
+        guard let version = bundles.defaultVersion else {
+            return String(localized: "\(count) installed · no default")
+        }
+        return String(localized: "\(count) installed · default \(version)")
+    }
+
+    /// The last install, while it runs or after it stopped short. Its sheet
+    /// may have been hidden; this brings it back.
+    private var installBanner: DKBanner? {
+        guard let progress = bundles.progress, !progress.isFinished else {
+            return nil
+        }
+        let name = progress.version.map { "VPhone.bundle \($0)" } ?? progress.name
+        let show = DKButtonSpec(String(localized: "Show Progress"), size: .small) {
+            model.present(.bundleInstall)
+        }
+        if bundles.isInstalling {
+            return DKBanner(String(localized: "Installing \(name)…"), tone: .info, action: show)
+        }
+        return DKBanner(
+            progress.error?.message ?? String(localized: "The install of \(name) did not finish."),
+            tone: progress.canSkip ? .warning : .danger,
+            action: show,
+        )
+    }
+
     // MARK: - Installed
 
     private var installedSection: some View {
-        Section {
+        DKSection(
+            String(localized: "Installed"),
+            note: String(localized: "New machines use the default. Each machine keeps its own."),
+            footnote: String(localized: "Stored in \(VPhoneLaunchpadBundleStore.root.path) and managed by the helper."),
+        ) {
             ForEach(bundles.installed) { bundle in
-                installedRow(bundle)
+                DKListRow(installedItem(bundle))
+                    .contextMenu { installedMenu(bundle) }
             }
-        } header: {
-            Text("Installed")
-        } footer: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("New machines use the default version. Each machine keeps its own Core Bundle, which you change from the machine list.")
-                Text("Stored in \(VPhoneLaunchpadBundleStore.root.path) and managed by the helper.")
-            }
-            .foregroundStyle(.secondary)
         }
     }
 
-    private func installedRow(_ bundle: VPhoneLaunchpadCoreBundle.Installed) -> some View {
+    private func installedItem(_ bundle: VPhoneLaunchpadCoreBundle.Installed) -> DKListItem {
         let isDefault = bundle.version == bundles.defaultVersion
+        let isCompatible = VPhoneLaunchpadNames.isCompatibleBundleVersion(bundle.version)
         let users = model.machines.machineNames(boundTo: bundle.version)
-        return HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(verbatim: "VPhone.bundle \(bundle.version)")
-                    if isDefault {
-                        Text("Default")
-                            .foregroundStyle(.green)
-                            .help("Used for new machines.")
-                    }
-                }
-                Group {
-                    if VPhoneLaunchpadLocalBundle.isLocal(version: bundle.version) {
-                        if let build = Self.localBuild(bundle.version) {
-                            Text("Local build \(build) · Installed \(bundle.receipt.installedAt.formatted(date: .abbreviated, time: .shortened)) · SHA-256 \(Self.shortDigest(bundle.receipt.sha256))")
-                        } else {
-                            Text("Local build · Installed \(bundle.receipt.installedAt.formatted(date: .abbreviated, time: .shortened)) · SHA-256 \(Self.shortDigest(bundle.receipt.sha256))")
-                        }
-                    } else if bundle.version != VPhoneLaunchpadNames.bundleVersion(of: bundle.version) {
-                        Text("GitHub Actions build · Installed \(bundle.receipt.installedAt.formatted(date: .abbreviated, time: .shortened)) · SHA-256 \(Self.shortDigest(bundle.receipt.sha256))")
-                    } else {
-                        Text("Installed \(bundle.receipt.installedAt.formatted(date: .abbreviated, time: .omitted)) · SHA-256 \(Self.shortDigest(bundle.receipt.sha256))")
-                    }
-                    usersLabel(users)
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Label {
-                Text(checkSummary(bundle))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            } icon: {
-                VPhoneLaunchpadStatusIcon(status: checkStatus(bundle))
-            }
-            .font(.callout)
-            .help(checkHelp(bundle))
-            Menu {
-                Button("Set as Default") { Task { await bundles.setDefault(bundle.version) } }
-                    .disabled(isDefault || !VPhoneLaunchpadNames.isCompatibleBundleVersion(bundle.version))
-                Button("Run Preflight Again") { Task { await bundles.verify(bundle.version) } }
-                    .disabled(!VPhoneLaunchpadNames.isCompatibleBundleVersion(bundle.version))
-                if bundles.isAccepted(bundle.version) {
-                    Button("Require Preflight") { bundles.setAccepted(bundle.version, false) }
-                } else if bundle.preflight == .failed, VPhoneLaunchpadNames.isCompatibleBundleVersion(bundle.version) {
-                    Button("Use Without Preflight") { bundles.setAccepted(bundle.version, true) }
-                }
-                Button("Show in Finder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([VPhoneLaunchpadBundleStore.bundle(version: bundle.version)])
-                }
-                Divider()
-                // The store refuses too; saying so here spares a failed attempt.
-                Button("Remove…", role: .destructive) { removal = bundle.version }
-                    .disabled(bundles.isInstalling || !users.isEmpty)
-                    .help(users.isEmpty ? "" : "Choose another Core Bundle for its machines first.")
-            } label: {
-                Image(systemName: "ellipsis")
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
+        let status = checkStatus(bundle)
+
+        var badges: [DKListItem.Badge] = []
+        if isDefault {
+            badges.append(.init(String(localized: "Default"), tone: .accent))
         }
+        badges.append(checkBadge(bundle, isCompatible: isCompatible))
+
+        var lines: [DKListItem.Line] = [.init(provenance(bundle)), .init(usersText(users))]
+        if isCompatible, status == .failed || status == .warning, let detail = failureDetail(bundle) {
+            lines.append(.init(detail, tone: status == .failed ? .danger : .warning))
+        }
+
+        var actions: [DKButtonSpec] = []
+        if !isDefault, isCompatible {
+            actions.append(DKButtonSpec(String(localized: "Set as Default"), id: "default") {
+                Task { await bundles.setDefault(bundle.version) }
+            })
+        }
+        if isCompatible {
+            if bundles.isAccepted(bundle.version) {
+                actions.append(DKButtonSpec(String(localized: "Require Preflight"), id: "require") {
+                    bundles.setAccepted(bundle.version, false)
+                })
+            } else if status == .failed || status == .pending {
+                actions.append(DKButtonSpec(String(localized: "Run Preflight Again"), id: "verify") {
+                    Task { await bundles.verify(bundle.version) }
+                })
+                if bundle.preflight == .failed {
+                    actions.append(DKButtonSpec(String(localized: "Use Without Preflight"), id: "accept") {
+                        bundles.setAccepted(bundle.version, true)
+                    })
+                }
+            }
+        }
+        actions.append(DKButtonSpec(String(localized: "Show in Finder"), id: "finder") {
+            Self.showInFinder(bundle.version)
+        })
+        // A bound version stays: the store refuses to remove it, and the
+        // context menu says why.
+        if users.isEmpty {
+            actions.append(DKButtonSpec(
+                String(localized: "Remove…"),
+                variant: .danger,
+                isEnabled: !bundles.isInstalling,
+                id: "remove",
+            ) {
+                removal = bundle.version
+            })
+        }
+
+        return DKListItem(
+            bundle.version,
+            glyph: .bundle,
+            monospacedTitle: true,
+            badges: badges,
+            lines: lines,
+            actions: actions,
+            id: bundle.version,
+        )
     }
 
-    /// Names a few machines; past that, a count with the names in the help.
+    /// Every action of a row, including those the row leaves out.
     @ViewBuilder
-    private func usersLabel(_ users: [String]) -> some View {
-        if users.isEmpty {
-            Text("Not used by any machine")
-        } else if users.count <= 3 {
-            Text("Used by \(users.formatted(.list(type: .and)))")
-        } else {
-            Text("Used by \(users.count) machines")
-                .help(users.formatted(.list(type: .and)))
+    private func installedMenu(_ bundle: VPhoneLaunchpadCoreBundle.Installed) -> some View {
+        let isDefault = bundle.version == bundles.defaultVersion
+        let isCompatible = VPhoneLaunchpadNames.isCompatibleBundleVersion(bundle.version)
+        let users = model.machines.machineNames(boundTo: bundle.version)
+        Button("Set as Default") { Task { await bundles.setDefault(bundle.version) } }
+            .disabled(isDefault || !isCompatible)
+        Button("Run Preflight Again") { Task { await bundles.verify(bundle.version) } }
+            .disabled(!isCompatible)
+        if bundles.isAccepted(bundle.version) {
+            Button("Require Preflight") { bundles.setAccepted(bundle.version, false) }
+        } else if bundle.preflight == .failed, isCompatible {
+            Button("Use Without Preflight") { bundles.setAccepted(bundle.version, true) }
         }
+        Button("Show in Finder") { Self.showInFinder(bundle.version) }
+        Divider()
+        Button("Remove…", role: .destructive) { removal = bundle.version }
+            .disabled(bundles.isInstalling || !users.isEmpty)
+            .help(users.isEmpty ? "" : "Choose another Core Bundle for its machines first.")
+    }
+
+    private static func showInFinder(_ version: String) {
+        NSWorkspace.shared.activateFileViewerSelecting([VPhoneLaunchpadBundleStore.bundle(version: version)])
+    }
+
+    /// Where the bundle came from, when it was installed, and its digest.
+    private func provenance(_ bundle: VPhoneLaunchpadCoreBundle.Installed) -> String {
+        let digest = Self.shortDigest(bundle.receipt.sha256)
+        let installedAt = bundle.receipt.installedAt
+        if VPhoneLaunchpadLocalBundle.isLocal(version: bundle.version) {
+            let date = installedAt.formatted(date: .abbreviated, time: .shortened)
+            if let build = Self.localBuild(bundle.version) {
+                return String(localized: "Local build \(build) · Installed \(date) · SHA-256 \(digest)")
+            }
+            return String(localized: "Local build · Installed \(date) · SHA-256 \(digest)")
+        }
+        if bundle.version != VPhoneLaunchpadNames.bundleVersion(of: bundle.version) {
+            let date = installedAt.formatted(date: .abbreviated, time: .shortened)
+            return String(localized: "GitHub Actions build · Installed \(date) · SHA-256 \(digest)")
+        }
+        let date = installedAt.formatted(date: .abbreviated, time: .omitted)
+        return String(localized: "Release · Installed \(date) · SHA-256 \(digest)")
+    }
+
+    /// Names a few machines; past that, a count.
+    private func usersText(_ users: [String]) -> String {
+        if users.isEmpty {
+            return String(localized: "Not used by any machine")
+        }
+        if users.count <= 4 {
+            return String(localized: "Used by \(users.formatted(.list(type: .and)))")
+        }
+        return String(localized: "Used by \(users.count) machines")
     }
 
     /// The build identifier of a `-local.<build>` version; nil for the bare
@@ -197,165 +291,225 @@ struct VPhoneLaunchpadCoreBundleView: View {
         return bundle.policy == .pending && bundle.preflight == .pending ? .pending : .failed
     }
 
-    private func checkSummary(_ bundle: VPhoneLaunchpadCoreBundle.Installed) -> String {
+    /// A bundle of an older series runs only with that series' Launchpad, so
+    /// it is never checked here and its badge names the series instead.
+    private func checkBadge(_ bundle: VPhoneLaunchpadCoreBundle.Installed, isCompatible: Bool) -> DKListItem.Badge {
+        guard isCompatible else {
+            let parts = VPhoneLaunchpadNames.bundleVersion(of: bundle.version).split(separator: ".")
+            guard parts.count >= 2 else {
+                return .init(String(localized: "Not supported"), tone: .neutral)
+            }
+            let series = "\(parts[0]).\(parts[1])"
+            return .init(String(localized: "Needs Launchpad \(series)"), tone: .neutral)
+        }
         switch checkStatus(bundle) {
-        case .running: String(localized: "Checking…")
-        case .passed: String(localized: "Preflight passed")
-        case .warning: String(localized: "Preflight skipped")
-        case .pending: String(localized: "Not checked")
-        case .failed: bundle.policy != .passed ? String(localized: "Not allowed to run") : String(localized: "Preflight failed")
+        case .running: return .init(String(localized: "Checking…"), tone: .info)
+        case .passed: return .init(String(localized: "Preflight passed"), tone: .success)
+        case .warning: return .init(String(localized: "Preflight skipped"), tone: .warning)
+        case .pending: return .init(String(localized: "Not checked"), tone: .neutral)
+        case .failed:
+            return bundle.policy != .passed
+                ? .init(String(localized: "Not allowed to run"), tone: .danger)
+                : .init(String(localized: "Preflight failed"), tone: .danger)
         }
     }
 
-    private func checkHelp(_ bundle: VPhoneLaunchpadCoreBundle.Installed) -> String {
-        let policy = bundle.policy == .passed ? String(localized: "Allowed to run.") : String(localized: "Not allowed to run.")
-        return bundle.preflightDetail.isEmpty ? policy : "\(policy)\n\(bundle.preflightDetail)"
+    /// The first lines of what the failed check said.
+    private func failureDetail(_ bundle: VPhoneLaunchpadCoreBundle.Installed) -> String? {
+        var parts: [String] = []
+        if bundle.policy == .failed {
+            parts.append(String(localized: "Not allowed to run."))
+        }
+        let detail = bundle.preflightDetail
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .prefix(3)
+            .joined(separator: "\n")
+        if bundle.preflight == .failed, !detail.isEmpty {
+            parts.append(detail)
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n")
     }
 
     // MARK: - Available
 
+    /// A section whose head carries the source switch; `DKSection` takes only
+    /// a button there.
     private var availableSection: some View {
-        Section {
-            Picker("Source", selection: $source) {
-                Text("Releases").tag(Source.releases)
-                Text("GitHub Actions").tag(Source.actions)
+        VStack(alignment: .leading, spacing: DK.Space.s2) {
+            HStack(spacing: DK.Space.s3) {
+                Text("Available")
+                    .font(DK.Typeface.sectionTitle)
+                    .foregroundStyle(DK.Palette.muted)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 0)
+                DKSegmented(String(localized: "Source"), selection: $source, options: [
+                    DKSegmentOption(String(localized: "Releases"), value: .releases),
+                    DKSegmentOption(String(localized: "GitHub Actions"), value: .actions),
+                ])
             }
-            .pickerStyle(.segmented)
+            .padding(.horizontal, DK.Space.s1)
             switch source {
             case .releases:
-                if let error = bundles.releasesError, bundles.releases.isEmpty {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.secondary)
-                } else if bundles.releases.isEmpty {
-                    loadingRow("Loading releases…")
-                } else if notInstalled.isEmpty {
-                    Text("Every release is installed.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(notInstalled) { release in
-                        releaseRow(release, prominent: release == bundles.availableUpdate)
-                    }
-                }
+                DKCard { releaseRows }
             case .actions:
-                tokenRow
-                if let error = bundles.artifactsError, bundles.artifacts.isEmpty {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.secondary)
-                } else if bundles.artifacts.isEmpty {
-                    Text("No GitHub Actions builds are available.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(bundles.artifacts) { artifact in
-                        artifactRow(artifact)
-                    }
-                }
-            }
-        } header: {
-            Text("Available")
-        } footer: {
-            if source == .actions {
-                Text("Builds from GitHub Actions, kept for 7 days. To download them, add a token that can read Actions for Lakr233/vphone-cli. The token is stored in your keychain.")
-                    .foregroundStyle(.secondary)
+                DKCard { actionRows }
             }
         }
     }
 
-    private func loadingRow(_ title: LocalizedStringKey) -> some View {
-        HStack {
-            ProgressView().controlSize(.small)
-            Text(title).foregroundStyle(.secondary)
+    @ViewBuilder
+    private var releaseRows: some View {
+        if let error = bundles.releasesError, bundles.releases.isEmpty {
+            message(error, glyph: .warning, tone: .warning)
+        } else if bundles.releases.isEmpty {
+            HStack(spacing: 10) {
+                ProgressView().controlSize(.small)
+                Text("Loading releases…").foregroundStyle(DK.Palette.muted)
+            }
+            .padding(DK.Space.s4)
+        } else if notInstalled.isEmpty {
+            message(String(localized: "Every release is installed."), glyph: .check, tone: .success)
+        } else {
+            ForEach(notInstalled) { release in
+                DKListRow(releaseItem(release, prominent: release == bundles.availableUpdate))
+            }
         }
+    }
+
+    private func releaseItem(_ release: VPhoneLaunchpadRelease, prominent: Bool) -> DKListItem {
+        var badges: [DKListItem.Badge] = []
+        if prominent {
+            badges.append(.init(String(localized: "Latest"), tone: .accent))
+        }
+        if release.isPrerelease {
+            badges.append(.init(String(localized: "Pre-release"), tone: .warning))
+        }
+        let date = release.publishedAt.formatted(date: .abbreviated, time: .omitted)
+        return DKListItem(
+            release.version,
+            glyph: .bundle,
+            monospacedTitle: true,
+            badges: badges,
+            lines: [.init("\(date) · \(Self.size(release.size)) · SHA-256 \(Self.shortDigest(release.sha256))")],
+            actions: [DKButtonSpec(
+                String(localized: "Download and Install"),
+                glyph: .download,
+                variant: prominent ? .primary : .secondary,
+                isEnabled: model.canInstallBundles,
+                help: model.canInstallBundles ? nil : Self.installHelp,
+            ) {
+                Task { await model.installBundle(release) }
+            }],
+            id: release.version,
+        )
+    }
+
+    /// A one-line state in place of a list: an error, or nothing to install.
+    private func message(_ text: String, glyph: DKGlyph, tone: DKTone) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            DKIcon(glyph, size: 18)
+                .foregroundStyle(tone.color)
+            Text(text)
+                .foregroundStyle(DK.Palette.muted)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+        .padding(DK.Space.s4)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - GitHub Actions
 
     @ViewBuilder
-    private var tokenRow: some View {
-        if bundles.hasGitHubToken {
-            LabeledContent("GitHub Token") {
-                HStack {
-                    Text("Saved in the keychain")
-                        .foregroundStyle(.secondary)
-                    Button("Remove") {
-                        bundles.setGitHubToken("")
-                    }
-                }
-            }
+    private var actionRows: some View {
+        VStack(alignment: .leading, spacing: DK.Space.s3) {
+            Text("Builds from GitHub Actions, kept for 7 days. To download them, add a token that can read Actions for Lakr233/vphone-cli. The token is stored in your keychain.")
+                .foregroundStyle(DK.Palette.muted)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+            tokenRow
+        }
+        .padding(DK.Space.s4)
+        if let error = bundles.artifactsError, bundles.artifacts.isEmpty {
+            message(error, glyph: .warning, tone: .warning)
+        } else if bundles.artifacts.isEmpty {
+            message(String(localized: "No GitHub Actions builds are available."), glyph: .info, tone: .neutral)
         } else {
-            LabeledContent("GitHub Token") {
-                HStack {
-                    SecureField("GitHub Token", text: $token, prompt: Text(verbatim: "github_pat_…"))
-                        .labelsHidden()
-                        .onSubmit(saveToken)
-                    Button("Save", action: saveToken)
-                        .disabled(token.trimmingCharacters(in: .whitespaces).isEmpty)
+            ForEach(bundles.artifacts) { artifact in
+                DKListRow(artifactItem(artifact))
+            }
+        }
+    }
+
+    private var tokenRow: some View {
+        HStack(spacing: DK.Space.s2) {
+            Text("GitHub Token")
+                .foregroundStyle(DK.Palette.muted)
+                .frame(width: 96, alignment: .leading)
+            if bundles.hasGitHubToken {
+                Text("Saved in the keychain")
+                    .foregroundStyle(DK.Palette.inkSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                DKButton(String(localized: "Remove")) {
+                    bundles.setGitHubToken("")
                 }
+            } else {
+                SecureField("GitHub Token", text: $token, prompt: Text(verbatim: "github_pat_…"))
+                    .labelsHidden()
+                    .textFieldStyle(.dkFieldMono)
+                    .onSubmit(saveToken)
+                DKButton(DKButtonSpec(
+                    String(localized: "Save"),
+                    variant: .primary,
+                    isEnabled: !token.trimmingCharacters(in: .whitespaces).isEmpty,
+                    action: saveToken,
+                ))
             }
         }
     }
 
     private func saveToken() {
+        guard !token.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return
+        }
         bundles.setGitHubToken(token)
         token = ""
         Task { await bundles.fetchArtifacts() }
     }
 
-    private func artifactRow(_ artifact: VPhoneLaunchpadArtifact) -> some View {
+    private func artifactItem(_ artifact: VPhoneLaunchpadArtifact) -> DKListItem {
         let isInstalled = bundles.installed.contains { $0.version.hasSuffix(artifact.versionSuffix) }
         let canInstall = model.canInstallBundles && bundles.hasGitHubToken
-        return HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(verbatim: "VPhone.bundle")
-                    Link(destination: artifact.runURL) {
-                        Text(verbatim: artifact.branch.isEmpty ? artifact.shortCommit : "\(artifact.branch) @ \(artifact.shortCommit)")
-                            .monospaced()
-                    }
-                    .help("Open the workflow run on GitHub")
-                }
-                Text("\(artifact.createdAt.formatted(date: .abbreviated, time: .shortened)) · \(Self.size(artifact.size)) · Expires \(artifact.expiresAt.formatted(.relative(presentation: .named)))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if isInstalled {
-                Text("Installed")
-                    .foregroundStyle(.secondary)
-            } else {
-                Button("Download and Install") { Task { await model.installArtifact(artifact) } }
-                    .disabled(!canInstall)
-            }
+        let created = artifact.createdAt.formatted(date: .abbreviated, time: .shortened)
+        let expires = artifact.expiresAt.formatted(.relative(presentation: .named))
+        var actions = [DKButtonSpec(
+            String(localized: "Open Run"),
+            glyph: .link,
+            help: String(localized: "Open the workflow run on GitHub"),
+        ) {
+            NSWorkspace.shared.open(artifact.runURL)
+        }]
+        if !isInstalled {
+            actions.append(DKButtonSpec(
+                String(localized: "Download and Install"),
+                glyph: .download,
+                isEnabled: canInstall,
+                help: canInstall ? nil
+                    : model.canInstallBundles ? String(localized: "Add a GitHub token to download builds from GitHub Actions.")
+                    : Self.installHelp,
+            ) {
+                Task { await model.installArtifact(artifact) }
+            })
         }
-        .help(canInstall || isInstalled ? ""
-            : model.canInstallBundles ? "Add a GitHub token to download builds from GitHub Actions."
-            : "Installing needs the privileged helper and Developer Tools access.")
-    }
-
-    private func releaseRow(_ release: VPhoneLaunchpadRelease, prominent: Bool) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(verbatim: "VPhone.bundle \(release.version)")
-                    if release.isPrerelease {
-                        Text("Pre-release")
-                            .foregroundStyle(.orange)
-                    }
-                }
-                Text(verbatim: "\(release.publishedAt.formatted(date: .abbreviated, time: .omitted)) · \(Self.size(release.size)) · SHA-256 \(Self.shortDigest(release.sha256))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            if prominent {
-                Button("Download and Install") { Task { await model.installBundle(release) } }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!model.canInstallBundles)
-            } else {
-                Button("Download and Install") { Task { await model.installBundle(release) } }
-                    .disabled(!model.canInstallBundles)
-            }
-        }
-        .help(model.canInstallBundles ? "" : "Installing needs the privileged helper and Developer Tools access.")
+        return DKListItem(
+            artifact.branch.isEmpty ? artifact.shortCommit : "\(artifact.branch) @ \(artifact.shortCommit)",
+            glyph: .bundle,
+            monospacedTitle: true,
+            badges: isInstalled ? [.init(String(localized: "Installed"), tone: .success)] : [],
+            lines: [.init(String(localized: "\(created) · \(Self.size(artifact.size)) · Expires \(expires)"))],
+            actions: actions,
+            id: String(artifact.id),
+        )
     }
 
     // MARK: - Local build

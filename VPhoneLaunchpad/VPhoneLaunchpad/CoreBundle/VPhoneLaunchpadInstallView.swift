@@ -1,8 +1,9 @@
 import SwiftUI
+import VPhoneDesignKit
 
 /// The last Core Bundle install, as a sheet of its own. It opens when an
 /// install starts and again on launch if the last one did not finish. Hiding
-/// it leaves the install running; Core Bundle offers it again until then.
+/// it leaves the install running; Core Bundles offers it again until then.
 struct VPhoneLaunchpadInstallView: View {
     @Environment(VPhoneLaunchpadModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -12,117 +13,138 @@ struct VPhoneLaunchpadInstallView: View {
     }
 
     var body: some View {
-        @Bindable var bundles = bundles
         VPhoneLaunchpadSheet(Text("Core Bundle Install")) {
-            Form {
-                if let progress = bundles.progress {
-                    Section {
-                        summary(progress)
-                        if progress.status(.download) == .running {
-                            ProgressView(value: Double(progress.received), total: Double(max(progress.size, 1)))
-                                .labelsHidden()
+            ScrollView {
+                VStack(alignment: .leading, spacing: DK.Space.s4) {
+                    if let progress = bundles.progress {
+                        DKSection {
+                            summary(progress)
                         }
-                    }
-                    Section("Steps") {
-                        steps(progress)
-                    }
-                    if let error = progress.error {
-                        Section("Error") {
-                            errorDetail(error)
+                        if let error = progress.error {
+                            DKBanner(error.message, tone: progress.canSkip ? .warning : .danger)
+                            if let detail = error.detail, !detail.isEmpty {
+                                DKSection(String(localized: "Details"), card: false) {
+                                    DKCard(.padded) {
+                                        Text(detail)
+                                            .font(DK.Typeface.mono)
+                                            .foregroundStyle(DK.Palette.inkSecondary)
+                                            .lineLimit(8)
+                                            .textSelection(.enabled)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                }
+                            }
                         }
+                        DKSection(String(localized: "Steps"), card: false) {
+                            DKSteps(steps(progress), label: String(localized: "Steps"))
+                        }
+                    } else {
+                        Text("No install to show.")
+                            .foregroundStyle(DK.Palette.muted)
                     }
-                } else {
-                    Text("No install to show.")
-                        .foregroundStyle(.secondary)
                 }
+                .padding(DKSheetMetrics.horizontalPadding)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .formStyle(.grouped)
+            .dkCardFill(DK.Palette.window)
         } accessory: {
             if let progress = bundles.progress, !bundles.isInstalling {
                 if progress.canSkip {
-                    Button("Skip") { bundles.skipFailedChecks() }
-                        .help("Use this version without the failed checks.")
+                    DKButton(DKButtonSpec(
+                        String(localized: "Skip"),
+                        help: String(localized: "Use this version without the failed checks."),
+                    ) {
+                        bundles.skipFailedChecks()
+                    })
                 }
                 if progress.error != nil {
-                    Button("Retry") {
+                    DKButton(DKButtonSpec(
+                        String(localized: "Retry"),
+                        glyph: .restart,
+                        isEnabled: model.canInstallBundles || progress.status(.install) == .passed,
+                    ) {
                         Task { await model.retryInstall() }
-                    }
-                    .disabled(!model.canInstallBundles && progress.status(.install) != .passed)
+                    })
                 }
             }
         } actions: {
             if bundles.isInstalling {
-                Button("Hide") { dismiss() }
-                    .help("The install keeps running. Core Bundle shows it again.")
-                    .keyboardShortcut(.cancelAction)
+                DKButton(DKButtonSpec(
+                    String(localized: "Hide"),
+                    help: String(localized: "The install keeps running. Core Bundles shows it again."),
+                ) {
+                    dismiss()
+                })
+                .keyboardShortcut(.cancelAction)
             } else {
-                Button("Done") {
+                DKButton(String(localized: "Done"), variant: .primary) {
                     bundles.dismissProgress()
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
             }
         }
-        .frame(width: 480, height: 420)
+        .frame(width: 520, height: 460)
+        .background(DK.Palette.window)
         .interactiveDismissDisabled(bundles.isInstalling)
     }
 
     // MARK: - Summary
 
     private func summary(_ progress: VPhoneLaunchpadCoreBundle.InstallProgress) -> some View {
-        HStack(spacing: 8) {
-            VPhoneLaunchpadStatusIcon(status: progress.overall)
-            Text(verbatim: progress.version.map { "VPhone.bundle \($0)" } ?? progress.name)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer(minLength: 8)
-            Text(state(progress))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-        }
+        let (state, tone) = state(progress)
+        return DKListRow(DKListItem(
+            progress.version.map { "VPhone.bundle \($0)" } ?? progress.name,
+            glyph: .bundle,
+            glyphTone: tone == .neutral ? nil : tone,
+            badges: [.init(state, tone: tone)],
+            lines: [.init(progress.name, monospaced: true)],
+        ))
     }
 
-    private func state(_ progress: VPhoneLaunchpadCoreBundle.InstallProgress) -> String {
+    private func state(_ progress: VPhoneLaunchpadCoreBundle.InstallProgress) -> (String, DKTone) {
         switch progress.overall {
-        case .running: String(localized: "Installing…")
-        case .failed where progress.status(.install) == .passed: String(localized: "Checks failed")
-        case .failed: String(localized: "Not installed")
-        case .warning: String(localized: "Checks skipped")
-        default: String(localized: "Installed")
+        case .running: (String(localized: "Installing…"), .info)
+        case .failed where progress.status(.install) == .passed: (String(localized: "Checks failed"), .warning)
+        case .failed: (String(localized: "Not installed"), .danger)
+        case .warning: (String(localized: "Checks skipped"), .warning)
+        default: (String(localized: "Installed"), .success)
         }
     }
 
-    // MARK: - Details
+    // MARK: - Steps
 
-    private func steps(_ progress: VPhoneLaunchpadCoreBundle.InstallProgress) -> some View {
-        ForEach(progress.plan) { step in
-            HStack(spacing: 8) {
-                VPhoneLaunchpadStatusIcon(status: progress.status(step))
-                Text(step.title)
-                Spacer(minLength: 8)
-                if step == .download, progress.status(.download) == .running {
-                    Text("\(VPhoneLaunchpadCoreBundleView.size(progress.received)) of \(VPhoneLaunchpadCoreBundleView.size(progress.size))")
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                } else if progress.status(step) == .warning {
-                    Text("Skipped")
-                        .foregroundStyle(.secondary)
-                }
+    /// A skipped step reads as done with "Skipped" under it; the kit's steps
+    /// have no skipped state.
+    private func steps(_ progress: VPhoneLaunchpadCoreBundle.InstallProgress) -> [DKStep] {
+        progress.plan.map { step in
+            let status = progress.status(step)
+            var note: String?
+            var fraction: Double?
+            if step == .download, status == .running {
+                let received = VPhoneLaunchpadCoreBundleView.size(progress.received)
+                let size = VPhoneLaunchpadCoreBundleView.size(progress.size)
+                note = String(localized: "\(received) of \(size)")
+                fraction = progress.size > 0 ? Double(progress.received) / Double(progress.size) : nil
+            } else if status == .warning {
+                note = String(localized: "Skipped")
             }
+            return DKStep(
+                step.title,
+                command: note,
+                status: Self.stepStatus(status),
+                progress: fraction,
+                id: step.rawValue,
+            )
         }
     }
 
-    private func errorDetail(_ error: VPhoneLaunchpadError) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(error.message)
-            if let detail = error.detail {
-                Text(detail)
-                    .font(.callout.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(8)
-            }
+    static func stepStatus(_ status: VPhoneLaunchpadStatus) -> DKStepStatus {
+        switch status {
+        case .passed, .warning: .done
+        case .running: .active
+        case .failed: .failed
+        case .pending: .pending
         }
-        .textSelection(.enabled)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
