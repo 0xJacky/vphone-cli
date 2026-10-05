@@ -63,6 +63,13 @@ nonisolated struct VPhoneLaunchpadPatchCatalog: Decodable, Sendable {
         /// `update-kernel`, so the kernel button keyed on it simply
         /// does not appear there. Nil when not pending or not reported.
         let delivery: String?
+        /// Whether the machine's saved choice leaves the patch on, before any
+        /// version gate. Absent from an older bundle.
+        let enabled: Bool?
+        /// Whether the machine's saved choice wants the patch once the version
+        /// gate has run against its OS pairing. Reported only for a named
+        /// machine, alongside `pending`; nil otherwise.
+        let wanted: Bool?
 
         var id: String {
             identifier
@@ -201,6 +208,73 @@ nonisolated struct VPhoneLaunchpadPatchCatalog: Decodable, Sendable {
     private static func matches(_ patch: Patch, _ needle: String) -> Bool {
         [patch.title, patch.identifier, patch.summary, patch.patchSetName, patch.target]
             .contains { $0.localizedCaseInsensitiveContains(needle) }
+    }
+}
+
+// MARK: - Delivery
+
+nonisolated extension VPhoneLaunchpadPatchCatalog {
+    /// The step that carries a change to a patch into an installed guest,
+    /// mirroring `FirmwarePatchDelivery` in the bundle. The order is the
+    /// order the editor lists them in, cheapest first.
+    enum Delivery: String, CaseIterable, Identifiable, Sendable {
+        case updateEnvironment = "update-environment"
+        case updateKernel = "update-kernel"
+        case firmwarePatch = "fw-patch"
+        case restore
+
+        var id: String {
+            rawValue
+        }
+    }
+}
+
+nonisolated extension VPhoneLaunchpadPatchCatalog.Patch {
+    /// The step that delivers this patch: the bundle's own word for a pending
+    /// patch, else the bundle's rule read from where the patch lands, so a
+    /// patch that is not pending (or a catalogue read for New Machine) still
+    /// says how a change to it would arrive.
+    var deliveryKind: VPhoneLaunchpadPatchCatalog.Delivery {
+        if let delivery, let reported = VPhoneLaunchpadPatchCatalog.Delivery(rawValue: delivery) {
+            return reported
+        }
+        switch part ?? target {
+        case "AVPBooter": return .firmwarePatch
+        case "kernelcache": return .updateKernel
+        default: return isBootChain ? .restore : .updateEnvironment
+        }
+    }
+
+    /// Whether iBSS or iBEC carries it: used only while restoring, so a change
+    /// matters at the next restore and not to the guest already installed.
+    var isRestoreOnlyStage: Bool {
+        ["iBSS", "iBEC"].contains(part ?? target)
+    }
+
+    /// What the guest is believed to run for this patch (the receipt, else
+    /// the last `fw patch`), recovered from the bundle's `pending` and what
+    /// the saved choice wants. `savedOn` stands in for `wanted` from a bundle
+    /// that does not report it. Nil when nothing records what the guest runs.
+    func isLive(savedOn: Bool) -> Bool? {
+        pending.map { pending in
+            let wanted = wanted ?? savedOn
+            return pending ? !wanted : wanted
+        }
+    }
+
+    /// Whether the machine's saved choice turns the patch on but its version
+    /// gate leaves it out for this machine's OS pairing, so turning it on
+    /// changes nothing in the guest.
+    var isGatedOut: Bool {
+        enabled == true && wanted == false
+    }
+
+    /// Whether a choice that leaves this patch `on` still has to reach the
+    /// guest, given what the saved choice had (`savedOn`). Nil when nothing
+    /// records what the guest runs. A patch the saved choice never turned on
+    /// has an unknown gate and is taken to pass it.
+    func isPending(on: Bool, savedOn: Bool) -> Bool? {
+        isLive(savedOn: savedOn).map { $0 != (on && !isGatedOut) }
     }
 }
 

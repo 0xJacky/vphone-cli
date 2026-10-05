@@ -1,23 +1,27 @@
 import SwiftUI
+import VPhoneDesignKit
 
-/// The patch editor: a preset, and a checkmark for every patch the bundle
+/// The patch editor: a preset, and a switch for every patch the bundle
 /// declares. New Machine opens it for a machine that does not exist yet, and
 /// the inspector for one that does.
 ///
 /// For an existing machine the choice is read from and saved to that machine
-/// (`fw patches <vm>`, `fw set-patches <vm>`) with its own Core Bundle, and
-/// the status line says how each change reaches it: guest patches at the next
-/// guest environment update, the boot chain only with a restore.
+/// (`fw patches <vm>`, `fw set-patches <vm>`) with its own Core Bundle. The
+/// rows whose wanted state has not reached the guest are highlighted, and
+/// grouped above the table by the step that delivers them (Apply to Guest,
+/// Update Kernel, `fw patch` for AVPBooter, or only a restore), as the bundle
+/// reports them and as the edit in progress changes them. The steps
+/// themselves stay in the Machines inspector.
 ///
 /// The list is never a copy of the catalogue — it is whatever
 /// `vphone-cli fw patches --json` reports, so a patch set added to the bundle
-/// shows up here without a change to Launchpad. Only the boxes that differ from
-/// the preset are kept, and switching preset re-bases them, since a difference
-/// from the preset that is no longer active means nothing.
+/// shows up here without a change to Launchpad. Only the switches that differ
+/// from the preset are kept, and switching preset re-bases them, since a
+/// difference from the preset that is no longer active means nothing.
 struct VPhoneLaunchpadPatchSettingsView: View {
     typealias Catalog = VPhoneLaunchpadPatchCatalog
 
-    /// What the boxes start from.
+    /// What the switches start from.
     let initial: VPhoneLaunchpadPatchSelection
     /// The Core Bundle New Machine creates with; its `vphone-cli` lists the
     /// patches. Nil reads the default version's.
@@ -35,16 +39,29 @@ struct VPhoneLaunchpadPatchSettingsView: View {
     @State private var catalog: Catalog?
     @State private var loadError: String?
     @State private var isLoading = false
-    @State private var filter = ""
-    /// Empty keeps the order the bundle applies the patches in; a header click
-    /// replaces it.
-    @State private var sortOrder: [KeyPathComparator<Catalog.Patch>] = []
-    /// The row whose summary the detail pane reads.
+    @State private var search = ""
+    @State private var filter = Filter.all
+    /// Apply order keeps the order the bundle applies the patches in within
+    /// each set; the others sort each set's rows.
+    @State private var sortOrder = SortOrder.applyOrder
+    /// The row whose summary the detail card reads.
     @State private var highlighted: String?
     @State private var confirmsBootEssential = false
     /// What was on when the editor opened, so the status line can count what
     /// an edit to an existing machine changes. Taken from the first read.
     @State private var initiallyOn: Set<String>?
+    /// The table's height, settled so the sheet's content fills the sheet
+    /// whatever the sections above and below the table take.
+    @State private var tableHeight: CGFloat = 340
+    /// The heights `settleTable()` works from: the sheet's content and the
+    /// table in it as last laid out, the sheet's head and footer, and the
+    /// sheet itself.
+    @State private var contentHeight: CGFloat = 0
+    @State private var renderedTableHeight: CGFloat = 0
+    @State private var chromeHeight: CGFloat = 0
+    @State private var availableHeight: CGFloat = 0
+
+    private static let minimumTableHeight: CGFloat = 160
 
     init(
         initial: VPhoneLaunchpadPatchSelection,
@@ -63,28 +80,55 @@ struct VPhoneLaunchpadPatchSettingsView: View {
         catalog.map { selection.bootEssentialOff(in: $0) } ?? []
     }
 
+    private var saveLabel: String {
+        machine == nil ? String(localized: "Done") : String(localized: "Save")
+    }
+
     var body: some View {
-        VPhoneLaunchpadSheet(Text("Patches")) {
-            VStack(spacing: 0) {
-                header
-                Divider()
+        DKSheet(
+            title,
+            subtitle: subtitle,
+            width: nil,
+            maxHeight: availableHeight > 0 ? availableHeight : .infinity,
+            note: DKSheetNote(status),
+            trailing: [
+                .cancel(String(localized: "Cancel")) { dismiss() },
+                .primary(saveLabel, isEnabled: catalog != nil) { commit() },
+            ],
+        ) {
+            VStack(alignment: .leading, spacing: DK.Space.s4) {
+                controls
+                if let catalog, showsStatus {
+                    pendingSection(catalog)
+                }
                 list
-                Divider()
-                detailPane
+                    .onGeometryChange(for: CGFloat.self, of: \.size.height) { height in
+                        renderedTableHeight = height
+                        settleTable()
+                    }
+                if !essentialOff.isEmpty {
+                    DKBanner(essentialOffText, tone: .warning)
+                }
+                detail
             }
-        } accessory: {
-            Text(status)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-        } actions: {
-            Button("Cancel") { dismiss() }
-                .keyboardShortcut(.cancelAction)
-            Button("Done") { commit() }
-                .keyboardShortcut(.defaultAction)
-                .disabled(catalog == nil)
+            .onGeometryChange(for: CGFloat.self, of: \.size.height) { height in
+                contentHeight = height
+                settleTable()
+            }
         }
-        .frame(width: 920, height: 680)
+        .background(alignment: .top) { chrome }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onGeometryChange(for: CGFloat.self, of: \.size.height) { height in
+            availableHeight = height
+            settleTable()
+        }
+        // Opens at the ideal size; the sheet can be made larger, or as small
+        // as the editor this one replaced.
+        .frame(
+            minWidth: 920, idealWidth: 1040, maxWidth: 1280,
+            minHeight: 680, idealHeight: 800, maxHeight: 1040,
+        )
+        .background(DK.Palette.window)
         .confirmationDialog(
             "Leave ^[\(essentialOff.count) boot-essential patch](inflect: true) off?",
             isPresented: $confirmsBootEssential,
@@ -96,39 +140,70 @@ struct VPhoneLaunchpadPatchSettingsView: View {
         .task { await load(preset: initial.preset) }
     }
 
-    // MARK: - Preset
+    private var title: String {
+        guard let machine else {
+            return String(localized: "Patches")
+        }
+        return String(localized: "Patches — \(machine.name)")
+    }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 8) {
-                // Sized to its content, so the label sits against the menu
-                // and lines up with the summary under it.
+    /// The machine's OS pairing and the Core Bundle whose catalogue this is.
+    private var subtitle: String? {
+        var parts: [String] = []
+        if let machine, let restoreInfo = model.machines.machines.first(where: { $0.path == machine })?.restoreInfo {
+            parts.append(String(localized: "iOS \(restoreInfo.ios.version) (\(restoreInfo.ios.build))"))
+            parts.append(String(localized: "cloudOS \(restoreInfo.cloudOS.version)"))
+        }
+        if let version = bundleVersion ?? model.bundles.defaultVersion {
+            parts.append(String(localized: "Core Bundle \(version)"))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    // MARK: - Controls
+
+    private var controls: some View {
+        VStack(alignment: .leading, spacing: DK.Space.s3) {
+            HStack(spacing: DK.Space.s3) {
+                Text("Preset")
+                    .foregroundStyle(DK.Palette.inkSecondary)
+                // The label sits beside the menu, so the picker's own is hidden.
                 Picker("Preset", selection: presetBinding) {
                     ForEach(catalog?.presets ?? []) { preset in
                         Text(verbatim: preset.displayTitle).tag(preset.identifier)
                     }
                 }
-                .fixedSize()
+                .dkFieldPicker()
                 .disabled(catalog == nil || isLoading)
                 if isLoading {
                     ProgressView().controlSize(.small)
                 }
-                Spacer()
-                VPhoneLaunchpadSearchField(text: $filter, prompt: String(localized: "Filter patches"))
-                    .frame(width: 220)
+                if let summary = catalog?.preset(selection.preset)?.displaySummary, !summary.isEmpty {
+                    Text(verbatim: summary)
+                        .font(DK.Typeface.caption)
+                        .foregroundStyle(DK.Palette.muted)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
             }
-            if let summary = catalog?.preset(selection.preset)?.displaySummary, !summary.isEmpty {
-                Text(verbatim: summary)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: DK.Space.s3) {
+                DKSegmented(String(localized: "Show"), selection: $filter, options: filterOptions)
+                    .disabled(catalog == nil)
+                Spacer(minLength: DK.Space.s2)
+                Picker("Sort", selection: $sortOrder) {
+                    ForEach(SortOrder.allCases) { order in
+                        Text(order.title).tag(order)
+                    }
+                }
+                .dkFieldPicker()
+                .help(String(localized: "Order of the patches within each set"))
+                DKSearchField(String(localized: "Filter patches"), text: $search, width: 200)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
     }
 
-    /// Switching preset clears both override lists: the checkmarks are read as a
+    /// Switching preset clears both override lists: the switches are read as a
     /// difference from the preset, so a difference from the one just left behind
     /// would silently change meaning.
     private var presetBinding: Binding<String> {
@@ -144,144 +219,249 @@ struct VPhoneLaunchpadPatchSettingsView: View {
         )
     }
 
+    private var filterOptions: [DKSegmentOption<Filter>] {
+        let patches = catalog?.patches ?? []
+        var options = [DKSegmentOption(String(localized: "All"), value: Filter.all, count: patches.count)]
+        if showsStatus {
+            options.append(DKSegmentOption(
+                String(localized: "Not Applied"),
+                value: .notApplied,
+                count: patches.count { isPending($0) == true },
+            ))
+        }
+        options.append(DKSegmentOption(String(localized: "Changed"), value: .changed, count: patches.count(where: isChanged)))
+        options.append(DKSegmentOption(String(localized: "Off"), value: .off, count: patches.count { !selection.isOn($0) }))
+        return options
+    }
+
+    // MARK: - Not applied
+
+    private func pendingSection(_ catalog: Catalog) -> some View {
+        let pending = catalog.patches.filter { isPending($0) == true }
+        let title = machine.map {
+            String(AttributedString(localized: "^[\(pending.count) patch](inflect: true) not applied to \($0.name)").characters)
+        } ?? ""
+        return Group {
+            if !pending.isEmpty {
+                VPhoneLaunchpadPatchPendingGroups(
+                    title: title,
+                    installed: catalog.installed != false,
+                    pending: Dictionary(grouping: pending, by: \.deliveryKind).mapValues { $0.map(\.identifier) },
+                )
+            }
+        }
+    }
+
     // MARK: - Patches
 
     @ViewBuilder
     private var list: some View {
-        if let catalog {
-            let rows = catalog.patches(matching: filter).sorted(using: sortOrder)
-            if rows.isEmpty {
-                ContentUnavailableView.search(text: filter)
+        Group {
+            if let catalog {
+                DKCard {
+                    DKDataTable(
+                        String(localized: "Patches"),
+                        columns: columns.map(\.column),
+                        groups: groups(catalog),
+                        selection: $highlighted,
+                        rowStyle: .plain,
+                        emptyText: String(localized: "No patch matches."),
+                        highlight: { isPending($0) == true ? .warning : nil },
+                    ) { patch, index in
+                        cell(patch, columns[index])
+                    }
+                }
+            } else if let loadError {
+                DKCard(.padded, fillsHeight: true) {
+                    Label {
+                        Text("No Patch List").font(DK.Typeface.bodyStrong)
+                    } icon: {
+                        DKIcon(.warning, size: 15).foregroundStyle(DK.Palette.warning)
+                    }
+                    Text(verbatim: loadError)
+                        .foregroundStyle(DK.Palette.muted)
+                        .textSelection(.enabled)
+                }
             } else {
-                table(rows)
+                DKCard(.padded, fillsHeight: true) {
+                    HStack(spacing: DK.Space.s2) {
+                        ProgressView().controlSize(.small)
+                        Text("Reading the bundle's patches…").foregroundStyle(DK.Palette.muted)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
-        } else if let loadError {
-            ContentUnavailableView {
-                Label("No Patch List", systemImage: "exclamationmark.triangle")
-            } description: {
-                Text(verbatim: loadError)
+        }
+        .frame(height: tableHeight)
+    }
+
+    /// One group per patch set, in the order the bundle applies them, with the
+    /// rows the filter and search leave.
+    private func groups(_ catalog: Catalog) -> [DKTableGroup<Catalog.Patch>] {
+        let rows = catalog.patches(matching: search).filter(matchesFilter)
+        let order = Dictionary(catalog.patches.enumerated().map { ($1.identifier, $0) }, uniquingKeysWith: { first, _ in first })
+        var sets: [String] = []
+        var bySet: [String: [Catalog.Patch]] = [:]
+        for patch in catalog.patches where bySet[patch.patchSet] == nil {
+            sets.append(patch.patchSet)
+            bySet[patch.patchSet] = []
+        }
+        for patch in rows {
+            bySet[patch.patchSet, default: []].append(patch)
+        }
+        return sets.compactMap { set in
+            guard let members = bySet[set], let first = members.first else {
+                return nil
             }
-        } else {
-            VStack {
-                ProgressView()
-                Text("Reading the bundle's patches…").foregroundStyle(.secondary)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            let total = catalog.patches.count { $0.patchSet == set }
+            return DKTableGroup(
+                id: set,
+                title: first.patchSetName,
+                detail: set,
+                trailing: String(AttributedString(localized: "^[\(total) patch](inflect: true)").characters),
+                rows: sortOrder.sorted(members, order: order),
+            )
         }
     }
 
-    /// A flat table sorted by the order the bundle applies the patches, which
-    /// already runs one set after another. A header click regroups it; sections
-    /// were tried first and make AppKit report a reentrant table delegate.
-    private func table(_ rows: [Catalog.Patch]) -> some View {
-        Table(rows, selection: $highlighted, sortOrder: $sortOrder) {
-            TableColumn("On") { patch in
-                Toggle("On", isOn: Binding(
-                    get: { selection.isOn(patch) },
-                    set: { selection.set(patch, on: $0) },
-                ))
-                .labelsHidden()
-            }
-            .width(36)
-
-            TableColumn("Component", value: \.component) { patch in
-                Text(verbatim: patch.component)
-                    .font(.system(.callout, design: .monospaced))
-                    .lineLimit(1)
-            }
-            .width(min: 80, ideal: 130)
-
-            TableColumn("Effect", value: \.effect) { patch in
-                Text(verbatim: patch.effect)
-                    .font(.system(.callout, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-            .width(min: 40, ideal: 50)
-
-            TableColumn("Name", value: \.name) { patch in
-                Text(verbatim: patch.name)
-                    .font(.system(.callout, design: .monospaced))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .help(patch.identifier)
-            }
-            .width(min: 140, ideal: 240)
-
-            // Most patches are boot-essential, so a mark on each would say
-            // nothing. It shows only on one that is off.
-            TableColumn("Patch", value: \.title) { patch in
-                HStack(spacing: 4) {
-                    Text(verbatim: patch.title)
-                        .lineLimit(1)
-                    if patch.bootEssential, !selection.isOn(patch) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                            .help(String(localized: "The machine may not boot without this patch."))
-                    }
-                }
-                .help(patch.summary)
-            }
-            .width(min: 140, ideal: 200)
-
-            TableColumn("Applies To", value: \.applicability) { patch in
-                if patch.isVersionGated {
-                    Text(verbatim: patch.applicability).lineLimit(1)
-                } else {
-                    Text("All").foregroundStyle(.tertiary).lineLimit(1)
-                }
-            }
-            .width(min: 80, ideal: 110)
+    private func matchesFilter(_ patch: Catalog.Patch) -> Bool {
+        switch filter {
+        case .all: true
+        case .notApplied: isPending(patch) == true
+        case .changed: isChanged(patch)
+        case .off: !selection.isOn(patch)
         }
+    }
+
+    /// The table's columns. Status needs to know what the guest runs, so it
+    /// shows only for a machine whose bundle records that.
+    private var columns: [Column] {
+        Column.allCases.filter { $0 != .status || showsStatus }
+    }
+
+    @ViewBuilder
+    private func cell(_ patch: Catalog.Patch, _ column: Column) -> some View {
+        switch column {
+        case .on:
+            DKSwitch(patch.title, isOn: Binding(
+                get: { selection.isOn(patch) },
+                set: {
+                    selection.set(patch, on: $0)
+                    highlighted = patch.identifier
+                },
+            ))
+        case .patch:
+            patchCell(patch)
+        case .part:
+            Text(verbatim: Self.partLabel(patch))
+                .font(DK.Typeface.mono)
+                .foregroundStyle(DK.Palette.inkSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(patch.part ?? patch.target)
+        case .delivery:
+            DKBadge(patch.deliveryKind.label, tone: patch.deliveryKind.tone)
+        case .status:
+            statusCell(patch)
+        case .appliesTo:
+            Text(verbatim: patch.isVersionGated ? patch.applicability : String(localized: "All"))
+                .font(DK.Typeface.caption)
+                .foregroundStyle(DK.Palette.muted)
+                .lineLimit(1)
+                .help(patch.isVersionGated ? patch.applicability : "")
+        }
+    }
+
+    // Most patches are boot-essential, so a mark on each would say nothing.
+    // It shows only on one that is off.
+    private func patchCell(_ patch: Catalog.Patch) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text(verbatim: patch.title)
+                    .font(isPending(patch) == true ? DK.Typeface.bodyStrong : DK.Typeface.body)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                if patch.bootEssential, !selection.isOn(patch) {
+                    DKIcon(.warning, size: 13)
+                        .foregroundStyle(DK.Palette.warning)
+                        .help(String(localized: "The machine may not boot without this patch."))
+                }
+            }
+            Text(verbatim: patch.identifier)
+                .font(DK.Typeface.monoSmall)
+                .foregroundStyle(DK.Palette.muted)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .help(patch.summary)
+    }
+
+    private func statusCell(_ patch: Catalog.Patch) -> some View {
+        let isOn = selection.isOn(patch)
+        let (text, color, pending): (String, Color, Bool) = switch isPending(patch) {
+        case true?:
+            (isOn ? String(localized: "Not applied · turns on") : String(localized: "Not applied · turns off"), DK.Palette.warningInk, true)
+        case false?:
+            isOn ? (String(localized: "Applied"), DK.Palette.successInk, false) : (String(localized: "Off"), DK.Palette.muted, false)
+        case nil:
+            (isOn ? String(localized: "On") : String(localized: "Off"), DK.Palette.muted, false)
+        }
+        return Text(verbatim: text)
+            .font(pending ? DK.Typeface.captionStrong : DK.Typeface.caption)
+            .foregroundStyle(color)
+            .lineLimit(1)
     }
 
     // MARK: - Detail
 
-    private var detailPane: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if !essentialOff.isEmpty {
-                Label {
-                    Text("^[\(essentialOff.count) boot-essential patch](inflect: true) off: \(essentialOff.map(\.identifier).joined(separator: ", "))")
-                        .lineLimit(2)
-                } icon: {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                }
-                .foregroundStyle(.orange)
-                .font(.callout)
-            }
-            detail
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
-
     @ViewBuilder
     private var detail: some View {
-        if let patch = catalog?.patch(highlighted) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: patch.title).font(.headline)
-                Text(verbatim: patch.summary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(verbatim: facts(patch).joined(separator: " · "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        DKCard(.padded) {
+            if let patch = catalog?.patch(highlighted) {
+                VStack(alignment: .leading, spacing: DK.Space.s1) {
+                    HStack(alignment: .firstTextBaseline, spacing: DK.Space.s2) {
+                        Text(verbatim: patch.title)
+                            .font(DK.Typeface.bodyStrong)
+                            .lineLimit(1)
+                        Text(verbatim: patch.identifier)
+                            .font(DK.Typeface.monoSmall)
+                            .foregroundStyle(DK.Palette.muted)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .textSelection(.enabled)
+                    }
+                    Text(verbatim: patch.summary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(verbatim: facts(patch).joined(separator: " · "))
+                        .font(DK.Typeface.caption)
+                        .foregroundStyle(DK.Palette.muted)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
+            } else {
+                Text("Select a patch to see what it changes.")
+                    .foregroundStyle(DK.Palette.muted)
+                    .frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
             }
-            .frame(height: 62, alignment: .topLeading)
-        } else {
-            Text("Select a patch to see what it changes.")
-                .foregroundStyle(.secondary)
-                .frame(height: 62, alignment: .topLeading)
         }
     }
 
-    /// The line under a patch's summary: where it comes from, what it
-    /// applies to, and whether the machine boots without it.
+    /// The line under a patch's summary: where it comes from and lands, how a
+    /// change reaches an installed guest, what it applies to, and whether the
+    /// machine boots without it.
     private func facts(_ patch: Catalog.Patch) -> [String] {
-        var facts = [patch.patchSetName, patch.target]
-        if patch.isVersionGated {
-            facts.append(patch.applicability)
+        var facts = [patch.patchSetName]
+        if let part = patch.part, part != patch.target {
+            facts.append("\(part) (\(patch.target))")
+        } else {
+            facts.append(patch.target)
+        }
+        facts.append(Self.reach(patch))
+        facts.append(patch.isVersionGated ? patch.applicability : String(localized: "Every release"))
+        if machine != nil, patch.isGatedOut {
+            facts.append(String(localized: "Not for this machine’s OS"))
         }
         if patch.bootEssential {
             facts.append(String(localized: "Required to boot"))
@@ -289,33 +469,134 @@ struct VPhoneLaunchpadPatchSettingsView: View {
         return facts
     }
 
-    /// What is on, what differs from the preset, and when the choice takes effect.
+    private static func reach(_ patch: Catalog.Patch) -> String {
+        switch patch.deliveryKind {
+        case .updateEnvironment: String(localized: "Apply to Guest turns it on or off in place")
+        case .updateKernel: String(localized: "Update Kernel swaps it into Preboot, keeping the data")
+        case .firmwarePatch: String(localized: "fw patch rewrites AVPBooter in the machine folder; it takes effect at the next boot")
+        case .restore where patch.isRestoreOnlyStage: String(localized: "Used only while restoring; a change matters at the next restore")
+        case .restore: String(localized: "Only a restore applies it, which erases the data")
+        }
+    }
+
+    /// The part column: the component a boot-chain patch lands in, or the last
+    /// path component of a guest file, so the column stays narrow.
+    private static func partLabel(_ patch: Catalog.Patch) -> String {
+        let target = patch.target
+        guard target.hasPrefix("/") else {
+            return target
+        }
+        return (target as NSString).lastPathComponent
+    }
+
+    private var essentialOffText: String {
+        let names = essentialOff.prefix(6).map(\.identifier).joined(separator: ", ")
+        let rest = essentialOff.count - min(essentialOff.count, 6)
+        let list = rest > 0 ? String(localized: "\(names) and \(rest) more") : names
+        let count = String(AttributedString(localized: "^[\(essentialOff.count) boot-essential patch](inflect: true) off").characters)
+        return String(localized: "\(count): \(list). The machine may not boot without them.")
+    }
+
+    // MARK: - State
+
+    /// Whether the bundle reports what this machine's guest runs, which the
+    /// status column and the not-applied groups need.
+    private var showsStatus: Bool {
+        machine != nil && catalog?.patches.contains { $0.pending != nil } == true
+    }
+
+    private func savedOn(_ patch: Catalog.Patch) -> Bool {
+        initiallyOn?.contains(patch.identifier) ?? selection.isOn(patch)
+    }
+
+    /// Whether the switch as it stands has still to reach the guest.
+    private func isPending(_ patch: Catalog.Patch) -> Bool? {
+        guard machine != nil else {
+            return nil
+        }
+        return patch.isPending(on: selection.isOn(patch), savedOn: savedOn(patch))
+    }
+
+    /// Whether the switch differs from the preset.
+    private func isChanged(_ patch: Catalog.Patch) -> Bool {
+        selection.isOn(patch) != patch.inPreset
+    }
+
+    /// What is on, what differs from the preset, and where the choice stands.
     private var status: String {
         guard let catalog else {
             return ""
         }
-        let on = catalog.patches.count(where: { selection.isOn($0) })
+        let on = catalog.patches.count { selection.isOn($0) }
         var parts = [String(localized: "\(on) of \(catalog.patches.count) on")]
-        if selection.hasOverrides {
-            parts.append(String(localized: "\(selection.blocked.count) turned off, \(selection.allowed.count) turned on from the preset"))
+        let changed = catalog.patches.count(where: isChanged)
+        if changed > 0 {
+            let preset = catalog.preset(selection.preset)?.displayTitle ?? selection.preset
+            parts.append(String(localized: "\(changed) changed from \(preset)"))
         }
         if machine == nil {
             parts.append(String(localized: "Applied when the machine is installed"))
-        } else if let initiallyOn {
-            let changed = catalog.patches.filter { selection.isOn($0) != initiallyOn.contains($0.identifier) }
-            let bootChain = changed.count(where: \.isBootChain)
-            let guest = changed.count - bootChain
-            if changed.isEmpty {
+        } else {
+            let edited = initiallyOn.map { initiallyOn in
+                catalog.patches.count { selection.isOn($0) != initiallyOn.contains($0.identifier) }
+            } ?? 0
+            if showsStatus {
+                let pending = catalog.patches.count { isPending($0) == true }
+                parts.append(pending == 0 ? String(localized: "Everything applied") : String(localized: "\(pending) not applied"))
+            }
+            if edited > 0 {
+                parts.append(String(AttributedString(localized: "^[\(edited) change](inflect: true) to save").characters))
+            } else if !showsStatus {
                 parts.append(String(localized: "No change"))
-            }
-            if guest > 0 {
-                parts.append(String(localized: "^[\(guest) guest patch](inflect: true) to apply with a guest environment update"))
-            }
-            if bootChain > 0 {
-                parts.append(String(localized: "^[\(bootChain) boot chain patch](inflect: true) that only a restore applies"))
             }
         }
         return parts.joined(separator: " · ")
+    }
+
+    /// Gives the table whatever height makes the content fill the sheet.
+    ///
+    /// `DKSheet` is as tall as its content, and the content is the table plus
+    /// sections whose height depends on their text. The table takes what is
+    /// left of the sheet after the sheet's own head and footer (`chrome`) and
+    /// the rest of the content, both measured apart from the table, so the
+    /// result does not depend on the table's last height and one step settles
+    /// it. (Steering by the sheet's measured height instead oscillates:
+    /// `DKSheet` sizes its body a layout pass after its content changes.)
+    /// Below the minimum the sheet's body scrolls.
+    private func settleTable() {
+        guard contentHeight > 0, chromeHeight > 0, availableHeight > 0 else {
+            return
+        }
+        let others = contentHeight - renderedTableHeight
+        let next = max(Self.minimumTableHeight, (availableHeight - chromeHeight - others).rounded(.down))
+        if abs(next - tableHeight) > 0.5 {
+            tableHeight = next
+        }
+    }
+
+    /// The sheet with nothing in its body, laid out unseen behind the real one
+    /// to measure its head, footer and body padding. Its buttons answer no key.
+    private var chrome: some View {
+        DKSheet(
+            title,
+            subtitle: subtitle,
+            width: nil,
+            note: DKSheetNote(status),
+            trailing: [
+                DKSheetAction(String(localized: "Cancel"), role: .plain) {},
+                DKSheetAction(saveLabel, variant: .primary, role: .plain) {},
+            ],
+        ) {
+            EmptyView()
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .onGeometryChange(for: CGFloat.self, of: \.size.height) { height in
+            chromeHeight = height
+            settleTable()
+        }
+        .hidden()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     // MARK: - Actions
@@ -339,7 +620,10 @@ struct VPhoneLaunchpadPatchSettingsView: View {
                 initiallyOn = Set(catalog.patches.filter { selection.isOn($0) }.map(\.identifier))
             }
             self.catalog = catalog
-            // The detail pane reserves its space either way, so it starts with
+            if filter == .notApplied, !showsStatus {
+                filter = .all
+            }
+            // The detail card reserves its space either way, so it starts with
             // something to read rather than a gap.
             highlighted = highlighted ?? catalog.patches.first?.identifier
             loadError = nil
@@ -359,5 +643,75 @@ struct VPhoneLaunchpadPatchSettingsView: View {
     private func finish() {
         onSave(selection)
         dismiss()
+    }
+}
+
+// MARK: - Table model
+
+extension VPhoneLaunchpadPatchSettingsView {
+    /// Which rows the table shows.
+    enum Filter: Hashable {
+        case all
+        case notApplied
+        case changed
+        case off
+    }
+
+    enum Column: CaseIterable {
+        case on, patch, part, delivery, status, appliesTo
+
+        var column: DKTableColumn {
+            switch self {
+            case .on: DKTableColumn(String(localized: "On"), width: .fixed(44))
+            case .patch: DKTableColumn(String(localized: "Patch"), width: .flexible(min: 240, weight: 2.4))
+            case .part: DKTableColumn(String(localized: "Part"), width: .fixed(130))
+            case .delivery: DKTableColumn(String(localized: "Reaches the guest by"), width: .fixed(130))
+            case .status: DKTableColumn(String(localized: "Status"), width: .fixed(156))
+            case .appliesTo: DKTableColumn(String(localized: "Applies To"), width: .flexible(min: 96, weight: 0.6))
+            }
+        }
+    }
+
+    /// The order of the rows within each patch set. The sets themselves stay
+    /// in the order the bundle applies them.
+    enum SortOrder: Hashable, CaseIterable, Identifiable {
+        case applyOrder, title, identifier, part, delivery, appliesTo
+
+        var id: Self {
+            self
+        }
+
+        var title: LocalizedStringKey {
+            switch self {
+            case .applyOrder: "Apply Order"
+            case .title: "Title"
+            case .identifier: "Identifier"
+            case .part: "Part"
+            case .delivery: "Delivery"
+            case .appliesTo: "Applies To"
+            }
+        }
+
+        func sorted(_ patches: [Catalog.Patch], order: [String: Int]) -> [Catalog.Patch] {
+            let position = { (patch: Catalog.Patch) in order[patch.identifier] ?? 0 }
+            let key: ((Catalog.Patch) -> String)? = switch self {
+            case .applyOrder: nil
+            case .title: \.title
+            case .identifier: \.identifier
+            case .part: { $0.part ?? $0.target }
+            case .delivery: { String(Catalog.Delivery.allCases.firstIndex(of: $0.deliveryKind) ?? 0) }
+            case .appliesTo: { $0.isVersionGated ? $0.applicability : "" }
+            }
+            guard let key else {
+                return patches.sorted { position($0) < position($1) }
+            }
+            return patches.sorted { lhs, rhs in
+                switch key(lhs).localizedStandardCompare(key(rhs)) {
+                case .orderedAscending: true
+                case .orderedDescending: false
+                case .orderedSame: position(lhs) < position(rhs)
+                }
+            }
+        }
     }
 }
