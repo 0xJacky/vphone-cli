@@ -60,7 +60,7 @@ struct VPhoneLaunchpadRootView: View {
         case .network:
             VPhoneLaunchpadNetworkView()
         case .hostSetup:
-            VPhoneLaunchpadHostSetupView()
+            VPhoneLaunchpadHostSetupView(onReviewDisks: { model.show(.disks) })
         }
     }
 }

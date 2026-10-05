@@ -135,11 +135,11 @@
                     await sheet(.settings([machine]), "09-machine-settings-forwards", suffix)
                     machineSettingsPage = .general
                 }
-                await standalone("09b-patch-settings", suffix, size: NSSize(width: 920, height: 680)) {
+                await standalone("09b-patch-settings", suffix, size: NSSize(width: 1040, height: 800)) {
                     VPhoneLaunchpadPatchSettingsView(initial: VPhoneLaunchpadPatchSelection()) { _ in }
                         .environment(model)
                 }
-                await standalone("09c-patch-settings-machine", suffix, size: NSSize(width: 920, height: 680)) {
+                await standalone("09c-patch-settings-machine", suffix, size: NSSize(width: 1040, height: 800)) {
                     VPhoneLaunchpadPatchSettingsView(
                         initial: patchCatalog(preset: nil, machine: true)?.selection ?? VPhoneLaunchpadPatchSelection(),
                         machine: labMachine,
