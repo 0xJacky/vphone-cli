@@ -364,6 +364,12 @@
         }
       }
     },
+    "This VM window session · %lld items" : {
+
+    },
+    "This VM window session · 1 item" : {
+
+    },
     "Recording in Progress" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -499,6 +505,9 @@
           }
         }
       }
+    },
+    "%@ Unavailable" : {
+
     },
     "%@ apps" : {
       "localizations" : {
@@ -1554,6 +1563,16 @@
         }
       }
     },
+    "%lld of %lld reports" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld of %2$lld reports"
+          }
+        }
+      }
+    },
     "%lld of %lld services, %lld running" : {
       "localizations" : {
         "en" : {
@@ -1621,6 +1640,21 @@
           }
         }
       }
+    },
+    "%lld processes selected" : {
+
+    },
+    "%lld reports" : {
+
+    },
+    "%lld reports in CrashReporter and DiagnosticReports" : {
+
+    },
+    "%lld running" : {
+
+    },
+    "%lld will be skipped." : {
+
     },
     "%lld%% available" : {
       "localizations" : {
@@ -1921,6 +1955,12 @@
           }
         }
       }
+    },
+    "A UInt64 the guest stores before posting. Leave empty to post without a state." : {
+
+    },
+    "ASCII only. Other characters are skipped." : {
+
     },
     "Access Group" : {
       "localizations" : {
@@ -4432,6 +4472,16 @@
         }
       }
     },
+    "Change %lld · read at %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Change %1$lld · read at %2$@"
+          }
+        }
+      }
+    },
     "Change Count" : {
       "localizations" : {
         "en" : {
@@ -5662,6 +5712,9 @@
         }
       }
     },
+    "Copied a history item to the Mac clipboard." : {
+
+    },
     "Copied device information as JSON." : {
       "localizations" : {
         "ja" : {
@@ -5909,6 +5962,9 @@
           }
         }
       }
+    },
+    "Copies made in the guest also reach the Mac when you leave the VM window." : {
+
     },
     "Copy" : {
       "localizations" : {
@@ -6886,6 +6942,9 @@
         }
       }
     },
+    "Copy the guest clipboard to the Mac clipboard" : {
+
+    },
     "Copy the guest image to the Mac clipboard" : {
       "localizations" : {
         "en" : {
@@ -7015,6 +7074,9 @@
           }
         }
       }
+    },
+    "Copy to Mac" : {
+
     },
     "Could not read \"%@\" from disk." : {
       "localizations" : {
@@ -7356,6 +7418,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "当前值"
+          }
+        }
+      }
+    },
+    "Current value: %@ (%@)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Current value: %1$@ (%2$@)"
           }
         }
       }
@@ -8426,6 +8498,9 @@
         }
       }
     },
+    "Display and Power" : {
+
+    },
     "Domain" : {
       "localizations" : {
         "en" : {
@@ -8850,6 +8925,9 @@
         }
       }
     },
+    "Empty" : {
+
+    },
     "Enable" : {
       "localizations" : {
         "ja" : {
@@ -9103,6 +9181,9 @@
           }
         }
       }
+    },
+    "Enter a domain and a key, choose the type and value below, then choose Write." : {
+
     },
     "Enter a domain and choose Read Setting." : {
       "localizations" : {
@@ -10374,6 +10455,9 @@
         }
       }
     },
+    "From guest" : {
+
+    },
     "Full" : {
       "localizations" : {
         "ja" : {
@@ -11399,6 +11483,9 @@
           }
         }
       }
+    },
+    "How to send" : {
+
     },
     "Identifier" : {
       "localizations" : {
@@ -13229,6 +13316,9 @@
         }
       }
     },
+    "Left" : {
+
+    },
     "Left Arrow" : {
       "localizations" : {
         "ja" : {
@@ -14071,6 +14161,9 @@
         }
       }
     },
+    "Modifiers stay held while a special key is sent." : {
+
+    },
     "More Actions" : {
       "localizations" : {
         "ja" : {
@@ -14377,6 +14470,9 @@
         }
       }
     },
+    "Network interfaces" : {
+
+    },
     "New Folder" : {
       "localizations" : {
         "en" : {
@@ -14444,6 +14540,9 @@
           }
         }
       }
+    },
+    "New Value" : {
+
     },
     "No" : {
       "localizations" : {
@@ -15103,6 +15202,9 @@
         }
       }
     },
+    "No clipboard history" : {
+
+    },
     "No completed bootstrap installation was found." : {
       "localizations" : {
         "en" : {
@@ -15475,6 +15577,9 @@
         }
       }
     },
+    "Not Read" : {
+
+    },
     "Not Set" : {
       "localizations" : {
         "ja" : {
@@ -15502,6 +15607,9 @@
           }
         }
       }
+    },
+    "Not available on this guest" : {
+
     },
     "Not running" : {
       "localizations" : {
@@ -15570,6 +15678,12 @@
           }
         }
       }
+    },
+    "Nothing to type. Only ASCII characters can be typed." : {
+
+    },
+    "Nothing yet" : {
+
     },
     "Null" : {
       "localizations" : {
@@ -15756,6 +15870,9 @@
           }
         }
       }
+    },
+    "On the Guest" : {
+
     },
     "Open" : {
       "localizations" : {
@@ -17651,6 +17768,9 @@
         }
       }
     },
+    "History" : {
+
+    },
     "Reveal Value" : {
       "localizations" : {
         "en" : {
@@ -17786,6 +17906,9 @@
           }
         }
       }
+    },
+    "Delete…" : {
+
     },
     "Shut Down Guest" : {
       "localizations" : {
@@ -18631,6 +18754,9 @@
         }
       }
     },
+    "Read or write a preferences domain in the guest" : {
+
+    },
     "Read the device information again (⌘R)" : {
       "localizations" : {
         "ja" : {
@@ -18783,6 +18909,9 @@
         }
       }
     },
+    "Read what the guest copied, or put text on its clipboard" : {
+
+    },
     "Reading %@…" : {
       "localizations" : {
         "ja" : {
@@ -18810,6 +18939,9 @@
           }
         }
       }
+    },
+    "Reading Device Information" : {
+
     },
     "Reading device information…" : {
       "localizations" : {
@@ -19098,6 +19230,9 @@
           }
         }
       }
+    },
+    "Refresh every 5 seconds while this page is open" : {
+
     },
     "Refresh every 5 seconds while this window is open" : {
       "localizations" : {
@@ -19623,6 +19758,9 @@
         }
       }
     },
+    "Replace the text above with the Mac clipboard text" : {
+
+    },
     "Replace the text below with the Mac clipboard text" : {
       "localizations" : {
         "en" : {
@@ -19656,6 +19794,9 @@
           }
         }
       }
+    },
+    "Replaces the guest clipboard. Paste it in the guest with ⌘V." : {
+
     },
     "Report" : {
       "localizations" : {
@@ -20260,6 +20401,9 @@
           }
         }
       }
+    },
+    "Right" : {
+
     },
     "Right Arrow" : {
       "localizations" : {
@@ -21421,6 +21565,9 @@
         }
       }
     },
+    "Select a String, Boolean, Integer or Float key to change its value here, or switch to Write to set any key." : {
+
+    },
     "Select a report to read it." : {
       "localizations" : {
         "ja" : {
@@ -21765,6 +21912,9 @@
         }
       }
     },
+    "Send Again" : {
+
+    },
     "Send SIGTERM to the selected processes (⌘⌫)" : {
       "localizations" : {
         "ja" : {
@@ -21883,6 +22033,9 @@
         }
       }
     },
+    "Send to the Guest" : {
+
+    },
     "Sending %@ to %@…" : {
       "localizations" : {
         "en" : {
@@ -21984,6 +22137,9 @@
           }
         }
       }
+    },
+    "Sent" : {
+
     },
     "Sent %@ to %@." : {
       "localizations" : {
@@ -22272,6 +22428,9 @@
           }
         }
       }
+    },
+    "Set Clipboard" : {
+
     },
     "Set Clipboard Text" : {
       "localizations" : {
@@ -24080,6 +24239,9 @@
         }
       }
     },
+    "Streaming the guest unified log for “%@”" : {
+
+    },
     "Streaming…" : {
       "localizations" : {
         "ja" : {
@@ -24548,6 +24710,9 @@
         }
       }
     },
+    "Text and Image" : {
+
+    },
     "Text for guest clipboard" : {
       "localizations" : {
         "en" : {
@@ -24582,6 +24747,9 @@
         }
       }
     },
+    "Text read from or sent to the guest appears here while the VM window is open." : {
+
+    },
     "Text set on the guest clipboard." : {
       "localizations" : {
         "en" : {
@@ -24615,6 +24783,9 @@
           }
         }
       }
+    },
+    "Text to send" : {
+
     },
     "Text to send to the guest" : {
       "localizations" : {
@@ -24860,6 +25031,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "引导环境已安装。如需重新安装，请先卸载引导环境。"
+          }
+        }
+      }
+    },
+    "The guest agent does not report the “%@” capability. Update vphoned in the guest to use %@." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "The guest agent does not report the “%1$@” capability. Update vphoned in the guest to use %2$@."
           }
         }
       }
@@ -25958,6 +26139,9 @@
         }
       }
     },
+    "Type as Keystrokes" : {
+
+    },
     "Type the text one character at a time (⌘↩)" : {
       "localizations" : {
         "ja" : {
@@ -25982,6 +26166,25 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "逐个字符键入文本（⌘↩）"
+          }
+        }
+      }
+    },
+    "Type this text into the guest (⌘↩)" : {
+
+    },
+    "Typed" : {
+
+    },
+    "Typed %lld characters into the guest." : {
+
+    },
+    "Typed %lld characters into the guest. Skipped %lld that are not ASCII." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Typed %1$lld characters into the guest. Skipped %2$lld that are not ASCII."
           }
         }
       }
@@ -26019,6 +26222,12 @@
           }
         }
       }
+    },
+    "Typed 1 character into the guest." : {
+
+    },
+    "Typed into the focused field in the guest, one key at a time." : {
+
     },
     "Types" : {
       "localizations" : {
@@ -26087,6 +26296,9 @@
           }
         }
       }
+    },
+    "Typing text into the guest…" : {
+
     },
     "UDID for provisioning profile checks" : {
       "localizations" : {
@@ -27409,6 +27621,9 @@
           }
         }
       }
+    },
+    "Unable to load the report. %@" : {
+
     },
     "Unable to load this folder. Check the connection, then try again." : {
       "localizations" : {
@@ -29820,6 +30035,12 @@
         }
       }
     },
+    "Update the guest agent to type text into the guest." : {
+
+    },
+    "Updated at %@" : {
+
+    },
     "Updated at %@." : {
       "localizations" : {
         "en" : {
@@ -30225,6 +30446,9 @@
           }
         }
       }
+    },
+    "Values read from the guest at %@" : {
+
     },
     "Version" : {
       "localizations" : {
@@ -31010,6 +31234,9 @@
         }
       }
     },
+    "Write a Preference" : {
+
+    },
     "Write a typed value to a guest preference key." : {
       "localizations" : {
         "en" : {
@@ -31365,6 +31592,9 @@
     },
     "false" : {
       "shouldTranslate" : false
+    },
+    "iOS" : {
+
     },
     "iOS Version" : {
       "localizations" : {

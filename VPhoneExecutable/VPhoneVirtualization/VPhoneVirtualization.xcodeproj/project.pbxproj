@@ -13,6 +13,11 @@
 		DD0000000000000000000104 /* NIOPosix in Frameworks */ = {isa = PBXBuildFile; productRef = DD0000000000000000000204 /* NIOPosix */; };
 		DD0000000000000000000105 /* libVPhoneVirtualMachineKit.a in Frameworks */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000032 /* libVPhoneVirtualMachineKit.a */; };
 		DD0000000000000000000106 /* ArgumentParser in Frameworks */ = {isa = PBXBuildFile; productRef = DD0000000000000000000201 /* ArgumentParser */; };
+		DD0000000000000000000107 /* libVPhoneVirtualMachineKit.a in Frameworks */ = {isa = PBXBuildFile; fileRef = DD0000000000000000000032 /* libVPhoneVirtualMachineKit.a */; };
+		DD0000000000000000000108 /* ArgumentParser in Frameworks */ = {isa = PBXBuildFile; productRef = DD0000000000000000000201 /* ArgumentParser */; };
+		DD0000000000000000000109 /* Dynamic in Frameworks */ = {isa = PBXBuildFile; productRef = DD0000000000000000000202 /* Dynamic */; };
+		DD000000000000000000010A /* NIOCore in Frameworks */ = {isa = PBXBuildFile; productRef = DD0000000000000000000203 /* NIOCore */; };
+		DD000000000000000000010B /* NIOPosix in Frameworks */ = {isa = PBXBuildFile; productRef = DD0000000000000000000204 /* NIOPosix */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -37,6 +42,13 @@
 			remoteGlobalIDString = DD0000000000000000000014;
 			remoteInfo = "vphone-location";
 		};
+		DD0000000000000000000128 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DD0000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DD0000000000000000000012;
+			remoteInfo = VPhoneVirtualMachineKit;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
@@ -44,6 +56,7 @@
 		DD0000000000000000000032 /* libVPhoneVirtualMachineKit.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libVPhoneVirtualMachineKit.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		DD0000000000000000000033 /* vphone-vm */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "vphone-vm"; sourceTree = BUILT_PRODUCTS_DIR; };
 		DD0000000000000000000034 /* vphone-location */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "vphone-location"; sourceTree = BUILT_PRODUCTS_DIR; };
+		DD0000000000000000000035 /* VPhoneVirtualMachineKitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VPhoneVirtualMachineKitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -52,6 +65,7 @@
 		DD0000000000000000000024 /* Build */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Build; sourceTree = "<group>"; };
 		DD0000000000000000000025 /* VirtualMachineProcess */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = VirtualMachineProcess; sourceTree = "<group>"; };
 		DD0000000000000000000026 /* LocationHelperProcess */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = LocationHelperProcess; sourceTree = "<group>"; };
+		DD0000000000000000000027 /* VPhoneVirtualMachineKitTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = VPhoneVirtualMachineKitTests; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -75,6 +89,18 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		DD0000000000000000000043 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DD0000000000000000000107 /* libVPhoneVirtualMachineKit.a in Frameworks */,
+				DD0000000000000000000108 /* ArgumentParser in Frameworks */,
+				DD0000000000000000000109 /* Dynamic in Frameworks */,
+				DD000000000000000000010A /* NIOCore in Frameworks */,
+				DD000000000000000000010B /* NIOPosix in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -86,6 +112,7 @@
 				DD0000000000000000000024 /* Build */,
 				DD0000000000000000000025 /* VirtualMachineProcess */,
 				DD0000000000000000000026 /* LocationHelperProcess */,
+				DD0000000000000000000027 /* VPhoneVirtualMachineKitTests */,
 				DD0000000000000000000003 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -97,6 +124,7 @@
 				DD0000000000000000000032 /* libVPhoneVirtualMachineKit.a */,
 				DD0000000000000000000033 /* vphone-vm */,
 				DD0000000000000000000034 /* vphone-location */,
+				DD0000000000000000000035 /* VPhoneVirtualMachineKitTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -192,6 +220,32 @@
 			productReference = DD0000000000000000000034 /* vphone-location */;
 			productType = "com.apple.product-type.tool";
 		};
+		DD0000000000000000000015 /* VPhoneVirtualMachineKitTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DD0000000000000000000085 /* Build configuration list for PBXNativeTarget "VPhoneVirtualMachineKitTests" */;
+			buildPhases = (
+				DD0000000000000000000055 /* Sources */,
+				DD0000000000000000000043 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				DD0000000000000000000127 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				DD0000000000000000000027 /* VPhoneVirtualMachineKitTests */,
+			);
+			name = VPhoneVirtualMachineKitTests;
+			packageProductDependencies = (
+				DD0000000000000000000201 /* ArgumentParser */,
+				DD0000000000000000000202 /* Dynamic */,
+				DD0000000000000000000203 /* NIOCore */,
+				DD0000000000000000000204 /* NIOPosix */,
+			);
+			productName = VPhoneVirtualMachineKitTests;
+			productReference = DD0000000000000000000035 /* VPhoneVirtualMachineKitTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -221,6 +275,7 @@
 				DD0000000000000000000012 /* VPhoneVirtualMachineKit */,
 				DD0000000000000000000013 /* vphone-vm */,
 				DD0000000000000000000014 /* vphone-location */,
+				DD0000000000000000000015 /* VPhoneVirtualMachineKitTests */,
 			);
 		};
 /* End PBXProject section */
@@ -280,6 +335,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		DD0000000000000000000055 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -297,6 +359,11 @@
 			isa = PBXTargetDependency;
 			target = DD0000000000000000000014 /* vphone-location */;
 			targetProxy = DD0000000000000000000126 /* PBXContainerItemProxy */;
+		};
+		DD0000000000000000000127 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = DD0000000000000000000012 /* VPhoneVirtualMachineKit */;
+			targetProxy = DD0000000000000000000128 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -344,6 +411,7 @@
 				ARCHS = arm64;
 				CODE_SIGNING_ALLOWED = NO;
 				DEFINES_MODULE = YES;
+				ENABLE_TESTABILITY = YES;
 				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../../.build/XcodeKit/Build/Products/$(CONFIGURATION)";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				OTHER_LDFLAGS = (
@@ -479,6 +547,52 @@
 			};
 			name = Release;
 		};
+		DD000000000000000000007B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../../.build/XcodeKit/Build/Products/$(CONFIGURATION)";
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lVPhoneDesignKit",
+					"-lVPhoneCoreKit",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.vphone.virtualmachinekit.tests;
+				PRODUCT_NAME = VPhoneVirtualMachineKitTests;
+				SDKROOT = macosx;
+				SWIFT_INCLUDE_PATHS = "$(BUILT_PRODUCTS_DIR) $(SRCROOT)/../../.build/XcodeKit/Build/Products/$(CONFIGURATION)";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		DD000000000000000000007C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../../.build/XcodeKit/Build/Products/$(CONFIGURATION)";
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lVPhoneDesignKit",
+					"-lVPhoneCoreKit",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.vphone.virtualmachinekit.tests;
+				PRODUCT_NAME = VPhoneVirtualMachineKitTests;
+				SDKROOT = macosx;
+				SWIFT_INCLUDE_PATHS = "$(BUILT_PRODUCTS_DIR) $(SRCROOT)/../../.build/XcodeKit/Build/Products/$(CONFIGURATION)";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -523,6 +637,15 @@
 			buildConfigurations = (
 				DD0000000000000000000079 /* Debug */,
 				DD000000000000000000007A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DD0000000000000000000085 /* Build configuration list for PBXNativeTarget "VPhoneVirtualMachineKitTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DD000000000000000000007B /* Debug */,
+				DD000000000000000000007C /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
