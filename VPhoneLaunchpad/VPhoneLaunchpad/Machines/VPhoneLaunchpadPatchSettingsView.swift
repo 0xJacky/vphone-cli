@@ -41,9 +41,6 @@ struct VPhoneLaunchpadPatchSettingsView: View {
     @State private var isLoading = false
     @State private var search = ""
     @State private var filter = Filter.all
-    /// Apply order keeps the order the bundle applies the patches in within
-    /// each set; the others sort each set's rows.
-    @State private var sortOrder = SortOrder.applyOrder
     /// The row whose summary the detail card reads.
     @State private var highlighted: String?
     @State private var confirmsBootEssential = false
@@ -162,44 +159,60 @@ struct VPhoneLaunchpadPatchSettingsView: View {
 
     // MARK: - Controls
 
+    /// The preset and what it is, then the filter and the search: on one
+    /// line while they fit, as the design lays them out, else on two.
     private var controls: some View {
-        VStack(alignment: .leading, spacing: DK.Space.s3) {
+        ViewThatFits(in: .horizontal) {
             HStack(spacing: DK.Space.s3) {
-                Text("Preset")
-                    .foregroundStyle(DK.Palette.inkSecondary)
-                // The label sits beside the menu, so the picker's own is hidden.
-                Picker("Preset", selection: presetBinding) {
-                    ForEach(catalog?.presets ?? []) { preset in
-                        Text(verbatim: preset.displayTitle).tag(preset.identifier)
-                    }
-                }
-                .dkFieldPicker()
-                .disabled(catalog == nil || isLoading)
-                if isLoading {
-                    ProgressView().controlSize(.small)
-                }
-                if let summary = catalog?.preset(selection.preset)?.displaySummary, !summary.isEmpty {
-                    Text(verbatim: summary)
-                        .font(DK.Typeface.caption)
-                        .foregroundStyle(DK.Palette.muted)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
-            }
-            HStack(spacing: DK.Space.s3) {
-                DKSegmented(String(localized: "Show"), selection: $filter, options: filterOptions)
-                    .disabled(catalog == nil)
+                presetControls
                 Spacer(minLength: DK.Space.s2)
-                Picker("Sort", selection: $sortOrder) {
-                    ForEach(SortOrder.allCases) { order in
-                        Text(order.title).tag(order)
-                    }
-                }
-                .dkFieldPicker()
-                .help(String(localized: "Order of the patches within each set"))
-                DKSearchField(String(localized: "Filter patches"), text: $search, width: 200)
+                filterControls
             }
+            VStack(alignment: .leading, spacing: DK.Space.s3) {
+                HStack(spacing: DK.Space.s3) {
+                    presetControls
+                    Spacer(minLength: 0)
+                }
+                HStack(spacing: DK.Space.s3) {
+                    Spacer(minLength: 0)
+                    filterControls
+                }
+            }
+        }
+    }
+
+    private var presetControls: some View {
+        HStack(spacing: DK.Space.s3) {
+            Text("Preset")
+                .foregroundStyle(DK.Palette.inkSecondary)
+            // The label sits beside the menu, so the picker's own is hidden.
+            Picker("Preset", selection: presetBinding) {
+                ForEach(catalog?.presets ?? []) { preset in
+                    Text(verbatim: preset.displayTitle).tag(preset.identifier)
+                }
+            }
+            .dkFieldPicker()
+            .disabled(catalog == nil || isLoading)
+            if isLoading {
+                ProgressView().controlSize(.small)
+            }
+            if let summary = catalog?.preset(selection.preset)?.displaySummary, !summary.isEmpty {
+                Text(verbatim: summary)
+                    .font(DK.Typeface.caption)
+                    .foregroundStyle(DK.Palette.muted)
+                    .lineLimit(2)
+                    .frame(maxWidth: 360, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var filterControls: some View {
+        HStack(spacing: DK.Space.s3) {
+            DKSegmented(String(localized: "Show"), selection: $filter, options: filterOptions)
+                .disabled(catalog == nil)
+                .fixedSize()
+            DKSearchField(String(localized: "Filter patches"), text: $search, width: 200)
         }
     }
 
@@ -220,33 +233,38 @@ struct VPhoneLaunchpadPatchSettingsView: View {
     }
 
     private var filterOptions: [DKSegmentOption<Filter>] {
-        let patches = catalog?.patches ?? []
-        var options = [DKSegmentOption(String(localized: "All"), value: Filter.all, count: patches.count)]
-        if showsStatus {
-            options.append(DKSegmentOption(
-                String(localized: "Not Applied"),
-                value: .notApplied,
-                count: patches.count { isPending($0) == true },
-            ))
+        let tally = tally
+        var options = [DKSegmentOption(String(localized: "All"), value: Filter.all, count: tally?.total ?? 0)]
+        if let pending = tally?.pending {
+            options.append(DKSegmentOption(String(localized: "Not Applied"), value: .notApplied, count: pending))
         }
-        options.append(DKSegmentOption(String(localized: "Changed"), value: .changed, count: patches.count(where: isChanged)))
-        options.append(DKSegmentOption(String(localized: "Off"), value: .off, count: patches.count { !selection.isOn($0) }))
+        options.append(DKSegmentOption(String(localized: "Changed"), value: .changed, count: tally?.changed ?? 0))
+        options.append(DKSegmentOption(String(localized: "Off"), value: .off, count: (tally?.total ?? 0) - (tally?.on ?? 0)))
         return options
+    }
+
+    /// The counts the filters, the not-applied groups and the status line
+    /// show, once the catalogue is read.
+    private var tally: VPhoneLaunchpadPatchTally? {
+        catalog.map {
+            VPhoneLaunchpadPatchTally(catalog: $0, selection: selection, initiallyOn: initiallyOn, isMachine: machine != nil)
+        }
     }
 
     // MARK: - Not applied
 
     private func pendingSection(_ catalog: Catalog) -> some View {
-        let pending = catalog.patches.filter { isPending($0) == true }
+        let tally = VPhoneLaunchpadPatchTally(catalog: catalog, selection: selection, initiallyOn: initiallyOn, isMachine: machine != nil)
+        let count = tally.pending ?? 0
         let title = machine.map {
-            String(AttributedString(localized: "^[\(pending.count) patch](inflect: true) not applied to \($0.name)").characters)
+            String(AttributedString(localized: "^[\(count) patch](inflect: true) not applied to \($0.name)").characters)
         } ?? ""
         return Group {
-            if !pending.isEmpty {
+            if count > 0 {
                 VPhoneLaunchpadPatchPendingGroups(
                     title: title,
                     installed: catalog.installed != false,
-                    pending: Dictionary(grouping: pending, by: \.deliveryKind).mapValues { $0.map(\.identifier) },
+                    pending: tally.pendingByDelivery,
                 )
             }
         }
@@ -319,7 +337,7 @@ struct VPhoneLaunchpadPatchSettingsView: View {
                 title: first.patchSetName,
                 detail: set,
                 trailing: String(AttributedString(localized: "^[\(total) patch](inflect: true)").characters),
-                rows: sortOrder.sorted(members, order: order),
+                rows: members.sorted { (order[$0.identifier] ?? 0) < (order[$1.identifier] ?? 0) },
             )
         }
     }
@@ -502,19 +520,12 @@ struct VPhoneLaunchpadPatchSettingsView: View {
     /// Whether the bundle reports what this machine's guest runs, which the
     /// status column and the not-applied groups need.
     private var showsStatus: Bool {
-        machine != nil && catalog?.patches.contains { $0.pending != nil } == true
-    }
-
-    private func savedOn(_ patch: Catalog.Patch) -> Bool {
-        initiallyOn?.contains(patch.identifier) ?? selection.isOn(patch)
+        catalog.map { VPhoneLaunchpadPatchTally.showsStatus($0, isMachine: machine != nil) } ?? false
     }
 
     /// Whether the switch as it stands has still to reach the guest.
     private func isPending(_ patch: Catalog.Patch) -> Bool? {
-        guard machine != nil else {
-            return nil
-        }
-        return patch.isPending(on: selection.isOn(patch), savedOn: savedOn(patch))
+        VPhoneLaunchpadPatchTally.isPending(patch, selection: selection, initiallyOn: initiallyOn, isMachine: machine != nil)
     }
 
     /// Whether the switch differs from the preset.
@@ -524,29 +535,23 @@ struct VPhoneLaunchpadPatchSettingsView: View {
 
     /// What is on, what differs from the preset, and where the choice stands.
     private var status: String {
-        guard let catalog else {
+        guard let catalog, let tally else {
             return ""
         }
-        let on = catalog.patches.count { selection.isOn($0) }
-        var parts = [String(localized: "\(on) of \(catalog.patches.count) on")]
-        let changed = catalog.patches.count(where: isChanged)
-        if changed > 0 {
+        var parts = [String(localized: "\(tally.on) of \(tally.total) on")]
+        if tally.changed > 0 {
             let preset = catalog.preset(selection.preset)?.displayTitle ?? selection.preset
-            parts.append(String(localized: "\(changed) changed from \(preset)"))
+            parts.append(String(localized: "\(tally.changed) changed from \(preset)"))
         }
         if machine == nil {
             parts.append(String(localized: "Applied when the machine is installed"))
         } else {
-            let edited = initiallyOn.map { initiallyOn in
-                catalog.patches.count { selection.isOn($0) != initiallyOn.contains($0.identifier) }
-            } ?? 0
-            if showsStatus {
-                let pending = catalog.patches.count { isPending($0) == true }
+            if let pending = tally.pending {
                 parts.append(pending == 0 ? String(localized: "Everything applied") : String(localized: "\(pending) not applied"))
             }
-            if edited > 0 {
-                parts.append(String(AttributedString(localized: "^[\(edited) change](inflect: true) to save").characters))
-            } else if !showsStatus {
+            if tally.edited > 0 {
+                parts.append(String(AttributedString(localized: "^[\(tally.edited) change](inflect: true) to save").characters))
+            } else if tally.pending == nil {
                 parts.append(String(localized: "No change"))
             }
         }
@@ -668,49 +673,6 @@ extension VPhoneLaunchpadPatchSettingsView {
             case .delivery: DKTableColumn(String(localized: "Reaches the guest by"), width: .fixed(130))
             case .status: DKTableColumn(String(localized: "Status"), width: .fixed(156))
             case .appliesTo: DKTableColumn(String(localized: "Applies To"), width: .flexible(min: 96, weight: 0.6))
-            }
-        }
-    }
-
-    /// The order of the rows within each patch set. The sets themselves stay
-    /// in the order the bundle applies them.
-    enum SortOrder: Hashable, CaseIterable, Identifiable {
-        case applyOrder, title, identifier, part, delivery, appliesTo
-
-        var id: Self {
-            self
-        }
-
-        var title: LocalizedStringKey {
-            switch self {
-            case .applyOrder: "Apply Order"
-            case .title: "Title"
-            case .identifier: "Identifier"
-            case .part: "Part"
-            case .delivery: "Delivery"
-            case .appliesTo: "Applies To"
-            }
-        }
-
-        func sorted(_ patches: [Catalog.Patch], order: [String: Int]) -> [Catalog.Patch] {
-            let position = { (patch: Catalog.Patch) in order[patch.identifier] ?? 0 }
-            let key: ((Catalog.Patch) -> String)? = switch self {
-            case .applyOrder: nil
-            case .title: \.title
-            case .identifier: \.identifier
-            case .part: { $0.part ?? $0.target }
-            case .delivery: { String(Catalog.Delivery.allCases.firstIndex(of: $0.deliveryKind) ?? 0) }
-            case .appliesTo: { $0.isVersionGated ? $0.applicability : "" }
-            }
-            guard let key else {
-                return patches.sorted { position($0) < position($1) }
-            }
-            return patches.sorted { lhs, rhs in
-                switch key(lhs).localizedStandardCompare(key(rhs)) {
-                case .orderedAscending: true
-                case .orderedDescending: false
-                case .orderedSame: position(lhs) < position(rhs)
-                }
             }
         }
     }

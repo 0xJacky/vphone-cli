@@ -10,12 +10,10 @@ import VPhoneDesignKit
 /// truncate in the middle, since the column is narrow.
 struct VPhoneLaunchpadMachineInspector: View {
     let machine: VPhoneLaunchpadMachine
-    let onShowProgress: (VPhoneLaunchpadMachinePath) -> Void
-    let onOpenConsole: (VPhoneLaunchpadMachinePath) -> Void
-    /// Opens one of the Machines page's sheets from the more menu.
-    var onPresent: (VPhoneLaunchpadMachinesView.Sheet) -> Void = { _ in }
-    /// Asks the page to confirm deleting the machine.
-    var onDelete: ([VPhoneLaunchpadMachinePath]) -> Void = { _ in }
+    /// Replace opening the creation sheet and the console sheet, which
+    /// otherwise go through the library's page state.
+    var onShowProgress: ((VPhoneLaunchpadMachinePath) -> Void)?
+    var onOpenConsole: ((VPhoneLaunchpadMachinePath) -> Void)?
     @Environment(VPhoneLaunchpadModel.self) private var model
     @State private var showsCommands = false
     @State private var patchCatalog: VPhoneLaunchpadPatchCatalog?
@@ -33,7 +31,23 @@ struct VPhoneLaunchpadMachineInspector: View {
     }
 
     private var actions: VPhoneLaunchpadMachineActions {
-        VPhoneLaunchpadMachineActions(model: model, present: onPresent, delete: onDelete)
+        VPhoneLaunchpadMachineActions(model: model)
+    }
+
+    private func showProgress(_ path: VPhoneLaunchpadMachinePath) {
+        if let onShowProgress {
+            onShowProgress(path)
+        } else {
+            actions.present(.creation(path))
+        }
+    }
+
+    private func openConsole(_ path: VPhoneLaunchpadMachinePath) {
+        if let onOpenConsole {
+            onOpenConsole(path)
+        } else {
+            actions.present(.console(path))
+        }
     }
 
     private var isStopped: Bool {
@@ -157,7 +171,7 @@ struct VPhoneLaunchpadMachineInspector: View {
         return HStack(spacing: 6) {
             if isCreating {
                 DKButton(DKButtonSpec(String(localized: "Show Progress"), variant: .primary) {
-                    onShowProgress(path)
+                    showProgress(path)
                 })
             } else if state == .running {
                 DKButton(DKButtonSpec(
@@ -176,7 +190,7 @@ struct VPhoneLaunchpadMachineInspector: View {
             }
             if !isCreating {
                 DKButton(DKButtonSpec(String(localized: "Open Console"), glyph: .terminal, size: .icon) {
-                    onOpenConsole(path)
+                    openConsole(path)
                 })
             }
             VPhoneLaunchpadMachineMoreButton(items: actions.items(for: [machine]))
@@ -210,10 +224,14 @@ struct VPhoneLaunchpadMachineInspector: View {
                 } else {
                     DKProgress.indeterminate(tone: .warning, label: step?.title)
                 }
+                Text("Creation continues if you close the window. Start, settings and export wait until it finishes.")
+                    .font(DK.Typeface.caption)
+                    .foregroundStyle(DK.Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         } else if creation.isFinished {
             DKBanner(String(localized: "Created"), tone: .info, actionLabel: String(localized: "View Details")) {
-                onShowProgress(creation.machine)
+                showProgress(creation.machine)
             }
         } else {
             DKBanner(
@@ -221,7 +239,7 @@ struct VPhoneLaunchpadMachineInspector: View {
                 tone: .danger,
                 actionLabel: String(localized: "View Details"),
             ) {
-                onShowProgress(creation.machine)
+                showProgress(creation.machine)
             }
         }
     }
@@ -259,7 +277,7 @@ struct VPhoneLaunchpadMachineInspector: View {
             accessory: DKButtonSpec(
                 String(localized: "Change…"),
                 isEnabled: actions.canChangeBundle([machine]),
-            ) { onPresent(.changeBundle([machine])) },
+            ) { actions.present(.changeBundle([machine])) },
             items: [
                 layer(
                     String(localized: "Host Programs"),
@@ -334,15 +352,13 @@ struct VPhoneLaunchpadMachineInspector: View {
                         ))
                         DKKeyValueRow(DKKeyValue(
                             String(localized: "Overrides"),
-                            catalog.overrideCount == 0
-                                ? String(localized: "None")
-                                : String(localized: "\(catalog.overrideCount) changed from the preset"),
+                            catalog.overrideCount == 0 ? String(localized: "None") : String(catalog.overrideCount),
                         ))
                         .help(overridesHelp(catalog))
                         if catalog.installed == true, let pending = catalog.pendingPatches {
                             DKKeyValueRow(DKKeyValue(
                                 String(localized: "Not Applied"),
-                                pending == 0 ? String(localized: "None") : Self.inflected("^[\(pending) patch](inflect: true)"),
+                                pending == 0 ? String(localized: "None") : String(pending),
                                 tone: pending == 0 ? .success : .warning,
                             ))
                             .help(pendingHelp(catalog, pending: pending))
@@ -375,17 +391,30 @@ struct VPhoneLaunchpadMachineInspector: View {
     }
 
     /// Update Kernel and Apply to Guest while patches are pending, then
-    /// Edit. A running machine says why the first two are dimmed.
+    /// Edit. A running machine says why the first two are dimmed, on the
+    /// buttons' line while it fits beside them.
     private func patchActions(_ catalog: VPhoneLaunchpadPatchCatalog) -> some View {
         let showsKernel = catalog.installed == true && catalog.pendingKernelPatches > 0
         let showsGuest = catalog.installed == true && catalog.pendingGuestPatches > 0
-        return VStack(alignment: .leading, spacing: 6) {
-            if !isStopped, showsKernel || showsGuest {
-                footnote(Text("Stop the machine to apply."))
-            }
+        let hint = !isStopped && (showsKernel || showsGuest)
+        let buttons = patchButtons(catalog, showsKernel: showsKernel, showsGuest: showsGuest)
+        return ViewThatFits(in: .horizontal) {
             HStack(spacing: 6) {
+                if hint {
+                    footnote(Text("Stop the machine to apply."))
+                        .fixedSize()
+                }
                 Spacer(minLength: 0)
-                patchButtons(catalog, showsKernel: showsKernel, showsGuest: showsGuest)
+                buttons
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                if hint {
+                    footnote(Text("Stop the machine to apply."))
+                }
+                HStack(spacing: 6) {
+                    Spacer(minLength: 0)
+                    buttons
+                }
             }
         }
     }
@@ -536,13 +565,18 @@ struct VPhoneLaunchpadMachineInspector: View {
         if let name = machine.network.localHostName {
             rows.append(DKKeyValue(String(localized: "mDNS Name"), "\(name).local", monospaced: true))
         }
-        for (index, forward) in (machine.network.portForwards ?? []).enumerated() {
-            rows.append(DKKeyValue(
-                String(localized: "Port Forward"),
-                "\(forward.transport.uppercased()) \(forward.hostAddress ?? "127.0.0.1"):\(forward.hostPort) → \(forward.guestPort)",
-                monospaced: true,
-                id: "forward-\(index)",
-            ))
+        let forwards = machine.network.portForwards ?? []
+        if !forwards.isEmpty {
+            let text = forwards.map {
+                VPhoneLaunchpadLibraryFormat.portForward(
+                    transport: $0.transport,
+                    hostAddress: $0.hostAddress,
+                    hostPort: $0.hostPort,
+                    guestPort: $0.guestPort,
+                )
+            }
+            .joined(separator: ", ")
+            rows.append(DKKeyValue(String(localized: "Port Forward"), text, monospaced: true))
         }
         return facts(String(localized: "Network"), rows)
     }
@@ -571,19 +605,23 @@ struct VPhoneLaunchpadMachineInspector: View {
 
     // MARK: - Console
 
-    /// The tail of the machine's console log, following it while the machine
-    /// runs, with the full console and the recent commands a click away.
+    /// The end of the machine's console in the embedded terminal, following
+    /// it as the machine writes, with the full console and the recent
+    /// commands a click away.
     private var consoleSection: some View {
         let path = machine.path
-        let isRunning = library.state(of: path) == .running
         return DKSection(
             String(localized: "Console"),
-            accessory: DKButtonSpec(String(localized: "Open Console")) { onOpenConsole(path) },
+            accessory: DKButtonSpec(String(localized: "Open Console")) { openConsole(path) },
             card: false,
         ) {
             VStack(alignment: .trailing, spacing: DK.Space.s2) {
-                VPhoneLaunchpadConsoleTail(url: VPhoneLaunchpadMachineLibrary.consoleLog(path), following: isRunning)
-                    .frame(height: 150)
+                VPhoneLaunchpadTerminalPane(
+                    url: VPhoneLaunchpadMachineLibrary.consoleLog(path),
+                    replayBytes: VPhoneLaunchpadTerminalPane.tailBytes,
+                )
+                .frame(height: 150)
+                .accessibilityLabel(Text("Console"))
                 DKButton(DKButtonSpec(String(localized: "Recent Commands"), size: .small) { showsCommands = true })
             }
         }
@@ -598,10 +636,5 @@ struct VPhoneLaunchpadMachineInspector: View {
             .foregroundStyle(DK.Palette.muted)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, DK.Space.s1)
-    }
-
-    /// A string with an inflection rule applied: "1 patch", "2 patches".
-    private static func inflected(_ resource: LocalizedStringResource) -> String {
-        String(AttributedString(localized: resource).characters)
     }
 }

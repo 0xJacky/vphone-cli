@@ -36,6 +36,11 @@ final class VPhoneLaunchpadMachineLibrary {
     private(set) var addedRoots: [String]
     var selection: Set<Path> = []
     var actionError: VPhoneLaunchpadError?
+    /// The Machines page's open sheet, and the machines its delete
+    /// confirmation is for (empty when it is closed). Kept here rather than in
+    /// the page so the File and Machine menus reach them from any page.
+    var sheet: VPhoneLaunchpadMachinesView.Sheet?
+    var deletion: [Path] = []
 
     /// The default library, canonical. Import writes here.
     let libraryRoot: String

@@ -38,9 +38,6 @@ struct VPhoneLaunchpadMachinesView: View {
     }
 
     @Environment(VPhoneLaunchpadModel.self) private var model
-    @State private var sheet: Sheet?
-    /// The machines the delete confirmation is for; empty when it is closed.
-    @State private var deletion: [MachinePath] = []
     @State private var filter = ""
     @State private var scope = Scope.all
     /// Empty keeps the order `vm list` returns; a header click replaces it.
@@ -56,11 +53,7 @@ struct VPhoneLaunchpadMachinesView: View {
     }
 
     private var actions: VPhoneLaunchpadMachineActions {
-        VPhoneLaunchpadMachineActions(
-            model: model,
-            present: { sheet = $0 },
-            delete: { deletion = $0 },
-        )
+        VPhoneLaunchpadMachineActions(model: model)
     }
 
     /// The machines the table shows: those in the scope that match the
@@ -121,23 +114,23 @@ struct VPhoneLaunchpadMachinesView: View {
         }
         #if DEBUG
         .onReceive(NotificationCenter.default.publisher(for: VPhoneLaunchpadPreview.sheetNotification)) { note in
-            sheet = note.object as? Sheet
+            library.sheet = note.object as? Sheet
         }
         #endif
-        .sheet(item: $sheet) { sheet in
+        .sheet(item: $library.sheet) { sheet in
             sheetContent(sheet)
                 .environment(model)
         }
         .confirmationDialog(
-            deletion.count == 1 ? "Delete \(deletion[0].name)?" : "Delete \(deletion.count) Machines?",
-            isPresented: Binding(get: { !deletion.isEmpty }, set: {
+            library.deletion.count == 1 ? "Delete \(library.deletion[0].name)?" : "Delete \(library.deletion.count) Machines?",
+            isPresented: Binding(get: { !library.deletion.isEmpty }, set: {
                 if !$0 {
-                    deletion = []
+                    library.deletion = []
                 }
             }),
         ) {
             Button("Delete", role: .destructive) {
-                let machines = deletion
+                let machines = library.deletion
                 Task {
                     for machine in machines {
                         await library.delete(machine)
@@ -145,7 +138,7 @@ struct VPhoneLaunchpadMachinesView: View {
                 }
             }
         } message: {
-            if deletion.count == 1 {
+            if library.deletion.count == 1 {
                 Text("The machine's disk, firmware and settings are removed. This cannot be undone.")
             } else {
                 Text("Their disks, firmware and settings are removed. This cannot be undone.")
@@ -175,35 +168,35 @@ struct VPhoneLaunchpadMachinesView: View {
 
     /// The page's title, counts and tools: the state filter, New Machine,
     /// Import and the search field. What acts on the selection is in the
-    /// inspector and the context menu.
+    /// inspector, the context menu and the Machine menu.
     private var header: some View {
-        let all = library.machines
-        let running = all.count { library.state(of: $0.path) == .running }
-        let stopped = all.count { library.state(of: $0.path) == .stopped }
+        let running = library.runningCount
         let shown = String(AttributedString(localized: "^[\(rows.count) machine](inflect: true)").characters)
-        let hasBundle = model.bundles.defaultVersion != nil
+        let actions = actions
         return DKPageHeader(
             String(localized: "Machines"),
             subtitle: String(localized: "\(shown) · \(running) running"),
         ) {
             DKSegmented(String(localized: "Show"), selection: $scope, options: [
-                DKSegmentOption(String(localized: "All"), value: .all, count: all.count),
-                DKSegmentOption(String(localized: "Running"), value: .running, count: running),
-                DKSegmentOption(String(localized: "Stopped"), value: .stopped, count: stopped),
+                DKSegmentOption(String(localized: "All"), value: .all),
+                DKSegmentOption(String(localized: "Running"), value: .running),
+                DKSegmentOption(String(localized: "Stopped"), value: .stopped),
             ])
             DKButton(DKButtonSpec(
                 String(localized: "New Machine"),
                 glyph: .plus,
                 variant: .primary,
-                isEnabled: hasBundle,
+                isEnabled: actions.canCreate,
                 help: String(localized: "Create a machine"),
-            ) { sheet = .newMachine })
+            ) { actions.newMachine() })
+            // A toolbar-style button carries no ellipsis; File › Import… does.
             DKButton(DKButtonSpec(
-                String(localized: "Import…"),
+                String(localized: "Import"),
                 glyph: .download,
-                isEnabled: hasBundle && library.globalActivity == nil,
-            ) { chooseImport() })
-            DKSearchField(String(localized: "Search machines"), text: $filter, width: 180)
+                isEnabled: actions.canImport,
+                help: String(localized: "Import Machine"),
+            ) { actions.chooseImport() })
+            DKSearchField(String(localized: "Name, iOS, UDID"), text: $filter, width: 180)
         }
     }
 
@@ -221,13 +214,7 @@ struct VPhoneLaunchpadMachinesView: View {
     @ViewBuilder
     private var inspector: some View {
         if let machine = library.selected {
-            VPhoneLaunchpadMachineInspector(
-                machine: machine,
-                onShowProgress: { path in sheet = .creation(path) },
-                onOpenConsole: { path in sheet = .console(path) },
-                onPresent: { sheet = $0 },
-                onDelete: { deletion = $0 },
-            )
+            VPhoneLaunchpadMachineInspector(machine: machine)
         } else if library.selection.count > 1 {
             selectionSummary(library.selectedMachines)
         } else {
@@ -293,15 +280,17 @@ struct VPhoneLaunchpadMachinesView: View {
                 VPhoneLaunchpadTableCell(firmwareCell(machine))
             }
             .width(min: 100, ideal: 130)
-            TableColumn("Core Bundle") { machine in
+            TableColumn("Bundle") { machine in
                 VPhoneLaunchpadTableCell(bundleCell(machine.path))
             }
-            .width(min: 64, ideal: 84)
+            .width(min: 64, ideal: 76)
             TableColumn("Resources", value: \.cpuCount) { machine in
                 VPhoneLaunchpadTableCell(.muted(machine.resourcesDescription))
             }
             .width(min: 120, ideal: 150)
         }
+        // The design draws the rows on one background.
+        .alternatingRowBackgrounds(.disabled)
         .contextMenu(forSelectionType: MachinePath.self) { paths in
             DKMenuContent(actions.items(for: library.machines.filter { paths.contains($0.path) }))
         } primaryAction: { paths in
@@ -364,14 +353,16 @@ struct VPhoneLaunchpadMachinesView: View {
         } else if !library.hasListed {
             Color.clear
         } else {
+            let actions = actions
             ContentUnavailableView {
                 Label("No Machines", systemImage: "iphone")
             } description: {
                 Text(library.listError ?? String(localized: "Machines in \(VPhoneLaunchpadHostSetup.abbreviated(URL(fileURLWithPath: library.libraryRoot, isDirectory: true))) appear here."))
             } actions: {
-                Button("New Machine…") { sheet = .newMachine }
+                Button("New Machine…") { actions.newMachine() }
                     .buttonStyle(.borderedProminent)
-                Button("Import…") { chooseImport() }
+                Button("Import…") { actions.chooseImport() }
+                    .disabled(!actions.canImport)
             }
         }
     }
@@ -383,7 +374,7 @@ struct VPhoneLaunchpadMachinesView: View {
         switch sheet {
         case .newMachine:
             VPhoneLaunchpadNewMachineView { path in
-                self.sheet = .creation(path)
+                library.sheet = .creation(path)
             }
         case let .creation(path):
             if let creation = library.creations[path] {
@@ -410,17 +401,6 @@ struct VPhoneLaunchpadMachinesView: View {
         }
     }
 
-    private func chooseImport() {
-        let panel = NSOpenPanel()
-        panel.title = String(localized: "Import Machine")
-        panel.message = String(localized: "Choose an exported machine archive (.tzst or .txz).")
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.present { url in
-            Task { await library.importArchive(url) }
-        }
-    }
-
     // MARK: - Search
 
     private static func matches(_ machine: VPhoneLaunchpadMachine, _ needle: String) -> Bool {
@@ -439,11 +419,10 @@ struct VPhoneLaunchpadMachinesView: View {
     // MARK: - Formatting
 
     static func memory(_ megabytes: Int) -> String {
-        megabytes % 1024 == 0 ? "\(megabytes / 1024) GB" : "\(megabytes) MB"
+        VPhoneLaunchpadMachineFormat.memory(megabytes)
     }
 
     static func disk(_ bytes: Int64) -> String {
-        // Decimal, as iOS and the creation stepper count it.
-        "\(bytes / 1_000_000_000) GB"
+        VPhoneLaunchpadMachineFormat.disk(bytes)
     }
 }

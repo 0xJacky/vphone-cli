@@ -115,6 +115,7 @@ struct VPhoneLaunchpadNewMachineView: View {
     var body: some View {
         DKSheet(
             String(localized: "New Machine"),
+            subtitle: String(localized: "Downloads firmware, patches the boot chain, restores and boots — in one run."),
             width: DKSheetMetrics.defaultWidth,
             note: footerNote,
             trailing: [
@@ -634,7 +635,7 @@ struct VPhoneLaunchpadCreationView: View {
     var body: some View {
         DKSheet(
             String(localized: "Creating \(creation.options.name)"),
-            subtitle: creation.isRunning ? String(localized: "Creation continues if you close this window.") : nil,
+            subtitle: subtitle,
             width: DKSheetMetrics.defaultWidth,
             note: failureNote,
             leading: leadingActions,
@@ -646,16 +647,30 @@ struct VPhoneLaunchpadCreationView: View {
                     stepRow(step)
                 }
             }
-            VPhoneLaunchpadLogTailView(
+            VPhoneLaunchpadTerminalPane(
                 url: creation.logFile,
-                minHeight: 120,
-                label: String(localized: "\(creation.options.name) Creation Log"),
+                style: .creation,
+                replayBytes: VPhoneLaunchpadTerminalPane.tailBytes,
             )
+            .frame(height: 120)
+            .accessibilityLabel(Text("\(creation.options.name) Creation Log"))
         }
         .vphoneLaunchpadSheetChrome()
         .sheet(isPresented: $showsLog) {
-            VPhoneLaunchpadConsoleView(title: "\(creation.options.name) Creation Log", url: creation.logFile)
+            VPhoneLaunchpadConsoleView(title: "\(creation.options.name) Creation Log", url: creation.logFile, style: .creation)
         }
+    }
+
+    /// Which step runs, and that closing the sheet does not stop it.
+    private var subtitle: String? {
+        guard creation.isRunning else {
+            return nil
+        }
+        let note = String(localized: "Creation continues if you close this window.")
+        guard let number = VPhoneLaunchpadMachineFormat.currentStepNumber(Step.allCases.map(formatState)) else {
+            return note
+        }
+        return String(localized: "Step \(number) of \(Step.allCases.count)") + " · " + note
     }
 
     private var leadingActions: [DKSheetAction] {
@@ -698,13 +713,23 @@ struct VPhoneLaunchpadCreationView: View {
         step == .prepare && creation.status(step) == .running ? creation.downloadFraction : nil
     }
 
-    private func segment(_ step: Step) -> DKStepSegment {
+    private func formatState(_ step: Step) -> VPhoneLaunchpadMachineFormat.StepState {
         switch stepStatus(step) {
-        case .done: DKStepSegment(fraction: 1, tone: .success)
-        case .failed: DKStepSegment(fraction: 1, tone: .danger)
-        case .active: DKStepSegment(fraction: progress(step) ?? 0, tone: .warning)
-        case .pending: DKStepSegment(fraction: 0, tone: .warning)
+        case .done: .done
+        case .active: .active
+        case .failed: .failed
+        case .pending: .pending
         }
+    }
+
+    private func segment(_ step: Step) -> DKStepSegment {
+        let segment = VPhoneLaunchpadMachineFormat.segment(formatState(step), progress: progress(step))
+        let tone: DKTone = switch segment.tone {
+        case .success: .success
+        case .warning: .warning
+        case .danger: .danger
+        }
+        return DKStepSegment(fraction: segment.fraction, tone: tone)
     }
 
     private func stepRow(_ step: Step) -> some View {

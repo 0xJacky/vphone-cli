@@ -1,16 +1,19 @@
 import SwiftUI
 import VPhoneDesignKit
 
-/// The menu bar's own items: the View menu picks a page (⌘1 to ⌘6) and hides
-/// the sidebar and the Machines inspector. Settings… (⌘,) comes with the
-/// Settings scene.
+/// The menu bar's own items: File creates and imports machines, the View
+/// menu picks a page (⌘1 to ⌘6) and hides the sidebar and the Machines
+/// inspector, and the Machine menu acts on the selected machines. Settings…
+/// (⌘,) comes with the Settings scene.
 struct VPhoneLaunchpadCommands: Commands {
     let model: VPhoneLaunchpadModel
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
-        // Machines are created from the Machines page, not File › New.
-        CommandGroup(replacing: .newItem) {}
+        // New Machine… and Import… take File › New's place; there is one window.
+        CommandGroup(replacing: .newItem) {
+            DKMenuContent(Self.fileItems(model) { openWindow(id: "main") })
+        }
         SidebarCommands()
         CommandGroup(before: .toolbar) {
             DKMenuContent(Self.pageItems(model) { openWindow(id: "main") })
@@ -19,6 +22,26 @@ struct VPhoneLaunchpadCommands: Commands {
         CommandGroup(after: .sidebar) {
             DKMenuContent([Self.inspectorItem(model)])
         }
+        CommandMenu("Machine") {
+            DKMenuContent(VPhoneLaunchpadMachineActions(model: model).menuBarItems())
+        }
+    }
+
+    /// New Machine… and Import…, from any page: each shows the Machines page,
+    /// bringing the window back when it was closed to the menu bar.
+    static func fileItems(_ model: VPhoneLaunchpadModel, open: @escaping @MainActor () -> Void) -> [DKMenuItem] {
+        let actions = VPhoneLaunchpadMachineActions(model: model)
+        return [
+            DKMenuItem(String(localized: "New Machine…"), shortcut: "⌘N", isEnabled: actions.canCreate) {
+                open()
+                actions.newMachine()
+            },
+            DKMenuItem(String(localized: "Import…"), shortcut: "⌘O", isEnabled: actions.canImport) {
+                open()
+                model.show(.machines)
+                actions.chooseImport()
+            },
+        ]
     }
 
     /// One checked row per page, in sidebar order. Picking one also brings

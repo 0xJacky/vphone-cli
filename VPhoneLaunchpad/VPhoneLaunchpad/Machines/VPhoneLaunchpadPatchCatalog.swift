@@ -278,52 +278,67 @@ nonisolated extension VPhoneLaunchpadPatchCatalog.Patch {
     }
 }
 
-// MARK: - Reading
+// MARK: - Tally
 
-extension VPhoneLaunchpadPatchCatalog {
-    /// Reads the catalogue with one Core Bundle version's `vphone-cli`.
-    ///
-    /// `preset` reports against that preset instead of the machine's own record,
-    /// which is how the picker re-bases what `inPreset` means. Passing neither a
-    /// machine nor a preset reports what the bundle does by default.
-    @MainActor
-    static func read(
-        using commandLine: VPhoneLaunchpadCommandLine?,
-        machine: VPhoneLaunchpadMachinePath?,
-        preset: String?,
-    ) async throws -> VPhoneLaunchpadPatchCatalog {
-        #if DEBUG
-            if VPhoneLaunchpadPreview.isActive {
-                guard let catalog = VPhoneLaunchpadPreview.patchCatalog(preset: preset, machine: machine != nil) else {
-                    throw VPhoneLaunchpadError(String(localized: "Unable to list the bundle's patches."))
-                }
-                return catalog
+/// What the patch editor counts for its filters, its status line and its
+/// not-applied groups, from a catalogue and the switches as they stand.
+nonisolated struct VPhoneLaunchpadPatchTally: Equatable, Sendable {
+    typealias Catalog = VPhoneLaunchpadPatchCatalog
+
+    let total: Int
+    let on: Int
+    /// Switches that differ from the preset.
+    let changed: Int
+    /// Switches that differ from what was on when the editor opened.
+    let edited: Int
+    /// Patches whose switch has still to reach the guest; nil when nothing
+    /// records what the guest runs (New Machine, or an older bundle).
+    let pending: Int?
+    /// The pending patches by the step that delivers them, in catalogue order.
+    let pendingByDelivery: [Catalog.Delivery: [String]]
+
+    /// `initiallyOn` is what was on when the editor opened; nil before the
+    /// first read, when nothing is edited yet. `isMachine` is false in New
+    /// Machine, which has no guest to compare with.
+    init(catalog: Catalog, selection: VPhoneLaunchpadPatchSelection, initiallyOn: Set<String>?, isMachine: Bool) {
+        let patches = catalog.patches
+        total = patches.count
+        on = patches.count { selection.isOn($0) }
+        changed = patches.count { selection.isOn($0) != $0.inPreset }
+        edited = initiallyOn.map { initiallyOn in
+            patches.count { selection.isOn($0) != initiallyOn.contains($0.identifier) }
+        } ?? 0
+        if Self.showsStatus(catalog, isMachine: isMachine) {
+            let pendingPatches = patches.filter {
+                Self.isPending($0, selection: selection, initiallyOn: initiallyOn, isMachine: isMachine) == true
             }
-        #endif
-        guard let commandLine else {
-            throw VPhoneLaunchpadError(
-                String(localized: "No Core Bundle version is in use. Choose a version in Core Bundle."),
-            )
+            pending = pendingPatches.count
+            pendingByDelivery = Dictionary(grouping: pendingPatches, by: \.deliveryKind).mapValues { $0.map(\.identifier) }
+        } else {
+            pending = nil
+            pendingByDelivery = [:]
         }
-        var arguments = ["fw", "patches"]
-        if let machine {
-            arguments.append(machine.name)
+    }
+
+    /// Whether the bundle reports what this machine's guest runs, which the
+    /// status column and the not-applied groups need.
+    static func showsStatus(_ catalog: Catalog, isMachine: Bool) -> Bool {
+        isMachine && catalog.patches.contains { $0.pending != nil }
+    }
+
+    /// Whether the switch as it stands has still to reach the guest. A patch
+    /// counts as saved on as it was when the editor opened.
+    static func isPending(
+        _ patch: Catalog.Patch,
+        selection: VPhoneLaunchpadPatchSelection,
+        initiallyOn: Set<String>?,
+        isMachine: Bool,
+    ) -> Bool? {
+        guard isMachine else {
+            return nil
         }
-        if let preset {
-            arguments += ["--preset", preset]
-        }
-        arguments.append("--json")
-        if let machine {
-            arguments += machine.libraryArguments
-        }
-        let result = try await commandLine.run(arguments, recordInHistory: false)
-        guard result.succeeded, let data = result.jsonData else {
-            throw VPhoneLaunchpadError(
-                String(localized: "Unable to list the bundle's patches."),
-                detail: result.tail,
-            )
-        }
-        return try JSONDecoder().decode(Self.self, from: data)
+        let on = selection.isOn(patch)
+        return patch.isPending(on: on, savedOn: initiallyOn?.contains(patch.identifier) ?? on)
     }
 }
 

@@ -3,8 +3,8 @@ import SwiftUI
 import VPhoneDesignKit
 
 // Rows the machine sheets share, built from DesignKit parts: a stepper laid
-// out as the design draws it, a switch row whose label takes the width, a
-// section head with a control beside the title, and a log that follows a file.
+// out as the design draws it, a switch row whose label takes the width, and a
+// section head with a control beside the title.
 
 // MARK: - Stepper row
 
@@ -181,117 +181,5 @@ struct VPhoneLaunchpadFieldProblem: View {
             .foregroundStyle(DK.Palette.danger)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, DK.Space.s1)
-    }
-}
-
-// MARK: - Log tail
-
-/// The end of a log file in a `DKLog`, followed while the view is on screen.
-/// The file is the only source, as for the console terminal: the view replays
-/// the last part of it when it appears and polls for what is appended.
-struct VPhoneLaunchpadLogTailView: View {
-    let url: URL
-    var minHeight: CGFloat = 120
-    let label: String
-    @State private var buffer = DKLogBuffer(limit: 500)
-
-    var body: some View {
-        DKLog(buffer.lines, following: true, wrapsLines: true, minHeight: minHeight, label: label)
-            .frame(height: minHeight)
-            .task(id: url) {
-                buffer.clear()
-                #if DEBUG
-                    if VPhoneLaunchpadPreview.isActive {
-                        for line in VPhoneLaunchpadPreview.log(for: url) {
-                            buffer.append(line: DKLogLine(line, tone: Self.tone(of: line)))
-                        }
-                        return
-                    }
-                #endif
-                await follow()
-            }
-    }
-
-    /// How a creation log line reads: the commands it ran, its result and its
-    /// failure stand out.
-    static func tone(of line: String) -> DKLogLine.Tone {
-        if line.hasPrefix("$ ") {
-            return .command
-        }
-        if line.hasPrefix("✕") {
-            return .error
-        }
-        if line.hasPrefix("●") {
-            return .success
-        }
-        if line.hasPrefix("warning:") {
-            return .warning
-        }
-        return .plain
-    }
-
-    private func follow() async {
-        var file: UInt64?
-        var offset: UInt64 = 0
-        var pending = ""
-        while !Task.isCancelled {
-            let read = await Self.read(url, file: file, offset: offset)
-            if let read {
-                if read.file != file || read.restarted {
-                    buffer.clear()
-                    pending = ""
-                }
-                file = read.file
-                offset = read.offset
-                pending += read.text
-                var lines = pending.components(separatedBy: "\n")
-                pending = lines.removeLast()
-                for line in lines {
-                    buffer.append(line: DKLogLine(ansi: line, tone: Self.tone(of: line)))
-                }
-            }
-            try? await Task.sleep(for: .milliseconds(500))
-        }
-    }
-
-    private nonisolated struct Read: Sendable {
-        let file: UInt64
-        let offset: UInt64
-        let text: String
-        let restarted: Bool
-    }
-
-    /// How much of an existing log the view replays when it opens.
-    private nonisolated static let replayBytes: UInt64 = 64 << 10
-
-    /// What was appended to the file since `offset`. A new file, or one shorter
-    /// than `offset`, is read again from its last `replayBytes`, skipping the
-    /// partial line that cut leaves at the start.
-    @concurrent
-    private nonisolated static func read(_ url: URL, file: UInt64?, offset: UInt64) async -> Read? {
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let number = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value,
-              let size = (attributes[.size] as? NSNumber)?.uint64Value,
-              let handle = try? FileHandle(forReadingFrom: url)
-        else {
-            return nil
-        }
-        defer { try? handle.close() }
-        var start = offset
-        var restarted = false
-        if file != number || size < offset {
-            start = size > replayBytes ? size - replayBytes : 0
-            restarted = true
-        }
-        guard size > start || restarted else {
-            return Read(file: number, offset: start, text: "", restarted: false)
-        }
-        try? handle.seek(toOffset: start)
-        var data = (try? handle.readToEnd()) ?? Data()
-        let end = start + UInt64(data.count)
-        if restarted, start > 0, let newline = data.firstIndex(of: 0x0A) {
-            data = data[data.index(after: newline)...]
-        }
-        return Read(file: number, offset: end, text: String(decoding: data, as: UTF8.self), restarted: restarted)
     }
 }

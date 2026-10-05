@@ -72,24 +72,9 @@ struct VPhoneLaunchpadMachineSettingsView: View {
         network == "nat" || network == "tunnel"
     }
 
-    /// The mDNS name the machine has, or the one `--mdns on` would give it:
-    /// its name with everything but letters and digits turned into hyphens.
+    /// The mDNS name the machine has, or the one `--mdns on` would give it.
     private var localHostName: String {
-        if let name = machines.first?.network.localHostName {
-            return name
-        }
-        let name = machines.first?.name ?? ""
-        var label = ""
-        for character in name {
-            if character.isASCII, character.isLetter || character.isNumber {
-                label.append(character)
-            } else if !label.hasSuffix("-") {
-                label.append("-")
-            }
-        }
-        label = String(label.trimmingCharacters(in: CharacterSet(charactersIn: "-")).prefix(63))
-        label = label.trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        return label.isEmpty ? "vphone" : label
+        machines.first?.network.localHostName ?? VPhoneLaunchpadMachineFormat.localHostName(for: machines.first?.name ?? "")
     }
 
     /// Bridged and none have no port forwarding; switching to them drops it.
@@ -98,10 +83,12 @@ struct VPhoneLaunchpadMachineSettingsView: View {
     }
 
     private var newForward: String? {
-        guard let host = Int(newHostPort), (1 ... 65535).contains(host),
-              let guest = Int(newGuestPort), (1 ... 65535).contains(guest)
-        else { return nil }
-        return "\(newTransport):\(newOnAllAddresses ? "0.0.0.0" : "127.0.0.1"):\(host):\(guest)"
+        VPhoneLaunchpadMachineFormat.forwardArgument(
+            transport: newTransport,
+            hostPort: newHostPort,
+            guestPort: newGuestPort,
+            onAllAddresses: newOnAllAddresses,
+        )
     }
 
     private var canSave: Bool {
@@ -114,7 +101,9 @@ struct VPhoneLaunchpadMachineSettingsView: View {
         DKSheet(
             title,
             width: 640,
-            note: machines.count > 1 ? DKSheetNote(String(localized: "Only the settings you change are applied to each machine.")) : nil,
+            note: DKSheetNote(single
+                ? String(localized: "Applies the next time \(machines[0].name) starts.")
+                : String(localized: "Only the settings you change are applied to each machine.")),
             trailing: [
                 .cancel(String(localized: "Cancel")) { dismiss() },
                 .primary(String(localized: "Save"), isEnabled: canSave) { save() },
@@ -243,7 +232,7 @@ struct VPhoneLaunchpadMachineSettingsView: View {
                 DKFormRow(String(localized: "MAC Address"), fill: true) {
                     TextField("MAC Address", text: $macAddress, prompt: Text("Generated at next start"))
                         .textFieldStyle(.dkFieldMono)
-                    DKButton(String(localized: "Generate"), size: .small) { macAddress = Self.randomMACAddress() }
+                    DKButton(String(localized: "Generate"), size: .small) { macAddress = VPhoneLaunchpadMachineFormat.randomMACAddress() }
                 }
                 VPhoneLaunchpadSwitchRow(isOn: $resolvesMacName) {
                     Text("Resolve this Mac's name in the guest")
@@ -289,10 +278,13 @@ struct VPhoneLaunchpadMachineSettingsView: View {
             DKSection(String(localized: "Port Forwarding")) {
                 ForEach(forwards, id: \.self) { forward in
                     VPhoneLaunchpadCardRow {
-                        Text(verbatim: Self.forwardLabel(forward))
+                        Text(verbatim: VPhoneLaunchpadMachineFormat.forwardLabel(forward))
                             .font(DK.Typeface.mono)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(verbatim: Self.forwardScope(forward))
+                            .font(DK.Typeface.caption)
+                            .foregroundStyle(DK.Palette.muted)
                         DKButton(String(localized: "Remove"), size: .small) {
                             forwards.removeAll { $0 == forward }
                         }
@@ -301,7 +293,7 @@ struct VPhoneLaunchpadMachineSettingsView: View {
             }
         }
         DKSection(
-            forwards.isEmpty ? String(localized: "Port Forwarding") : nil,
+            forwards.isEmpty ? String(localized: "Port Forwarding") : String(localized: "Add a Forward"),
             footnote: String(localized: "A forwarded port listens on this Mac only, unless it is reachable from other devices."),
         ) {
             DKFormRow(String(localized: "Protocol"), fill: true) {
@@ -335,18 +327,15 @@ struct VPhoneLaunchpadMachineSettingsView: View {
         }
     }
 
-    /// `tcp:127.0.0.1:8022:22` as `TCP 127.0.0.1:8022 → 22`.
-    private static func forwardLabel(_ argument: String) -> String {
-        let parts = argument.split(separator: ":")
-        guard parts.count == 4 else { return argument }
-        return "\(parts[0].uppercased()) \(parts[1]):\(parts[2]) → \(parts[3])"
-    }
-
-    /// A unicast, locally administered address, the kind no vendor assigns.
-    private static func randomMACAddress() -> String {
-        var bytes = (0 ..< 6).map { _ in UInt8.random(in: 0 ... 255) }
-        bytes[0] = (bytes[0] & 0xFC) | 0x02
-        return bytes.map { String(format: "%02x", $0) }.joined(separator: ":")
+    /// Who reaches a forward: this Mac only, other devices too, or the
+    /// address it was set to listen on.
+    private static func forwardScope(_ forward: String) -> String {
+        switch VPhoneLaunchpadMachineFormat.forwardHost(forward) {
+        case "127.0.0.1": String(localized: "This Mac only")
+        case "0.0.0.0": String(localized: "Other devices too")
+        case let host?: host
+        case nil: ""
+        }
     }
 
     private func save() {
@@ -404,7 +393,6 @@ struct VPhoneLaunchpadMachineSettingsView: View {
         dismiss()
     }
 }
-
 
 // MARK: - Rename and clone
 

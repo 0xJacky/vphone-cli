@@ -58,9 +58,15 @@ enum VPhoneLaunchpadTerminalTheme {
 /// and follows it off the main actor while it stays on screen; Ghostty
 /// parses on its own queue. No output passes through the app model, so a
 /// chatty guest or restore never invalidates a SwiftUI view. Keystrokes go
-/// nowhere: the terminal is read only.
+/// nowhere: the terminal is read only. Ghostty keeps the view at the bottom
+/// as lines arrive, unless it has been scrolled up.
 struct VPhoneLaunchpadLogTerminal: View {
     let url: URL
+    /// How the log's lines are drawn: as they are, or a creation log's
+    /// commands, results and failures in their colours.
+    var style = VPhoneLaunchpadLogStyle.plain
+    /// How much of an existing log the terminal replays when it opens.
+    var replayBytes = VPhoneLaunchpadLogTail.replayBytes
     @StateObject private var terminal = TerminalViewState(
         theme: VPhoneLaunchpadTerminalTheme.theme,
         terminalConfiguration: VPhoneLaunchpadTerminalTheme.configuration,
@@ -73,11 +79,13 @@ struct VPhoneLaunchpadLogTerminal: View {
                 terminal.configuration = TerminalSurfaceOptions(backend: .inMemory(session))
                 #if DEBUG
                     if VPhoneLaunchpadPreview.isActive {
-                        session.receive(VPhoneLaunchpadPreview.log(for: url).joined(separator: "\r\n"))
+                        var translator = VPhoneLaunchpadLogTranslator(style: style)
+                        let lines = VPhoneLaunchpadPreview.log(for: url).joined(separator: "\n") + "\n"
+                        session.receive(translator.translate(Data(lines.utf8)))
                         return
                     }
                 #endif
-                await VPhoneLaunchpadLogTail.follow(url, into: session)
+                await VPhoneLaunchpadLogTail.follow(url, style: style, replayBytes: replayBytes, into: session)
             }
     }
 }
@@ -88,15 +96,20 @@ struct VPhoneLaunchpadLogTerminal: View {
 /// Polls, like the child process's own tail: the writer may be a process an
 /// earlier Launchpad session started.
 nonisolated enum VPhoneLaunchpadLogTail {
-    /// How much of an existing log the terminal replays when it opens.
+    /// How much of an existing log the console sheet replays when it opens.
     static let replayBytes: UInt64 = 4 << 20
     static let chunkBytes = 1 << 20
 
     @concurrent
-    static func follow(_ url: URL, into session: InMemoryTerminalSession) async {
+    static func follow(
+        _ url: URL,
+        style: VPhoneLaunchpadLogStyle = .plain,
+        replayBytes: UInt64 = replayBytes,
+        into session: InMemoryTerminalSession,
+    ) async {
         var file: UInt64?
         var offset: UInt64 = 0
-        var newline = VPhoneLaunchpadNewlineTranslator()
+        var translator = VPhoneLaunchpadLogTranslator(style: style)
         var reportedMissing = false
 
         while !Task.isCancelled {
@@ -117,7 +130,7 @@ nonisolated enum VPhoneLaunchpadLogTail {
                     file = number
                     offset = size > replayBytes ? size - replayBytes : 0
                     skipsPartialLine = offset > 0
-                    newline = VPhoneLaunchpadNewlineTranslator()
+                    translator = VPhoneLaunchpadLogTranslator(style: style)
                 }
                 try? handle.seek(toOffset: offset)
                 while !Task.isCancelled, var chunk = try? handle.read(upToCount: chunkBytes), !chunk.isEmpty {
@@ -129,7 +142,7 @@ nonisolated enum VPhoneLaunchpadLogTail {
                         chunk = chunk[chunk.index(after: end)...]
                         skipsPartialLine = false
                     }
-                    session.receive(newline.translate(chunk))
+                    session.receive(translator.translate(chunk))
                 }
                 try? handle.close()
             } else if file == nil, !reportedMissing {
@@ -138,5 +151,49 @@ nonisolated enum VPhoneLaunchpadLogTail {
             }
             try? await Task.sleep(for: .milliseconds(250))
         }
+    }
+}
+
+// MARK: - Writer
+
+/// Appends lines to a log file on a serial queue, so command output is
+/// written from the thread that read it and never waits on the main actor.
+/// Keeps the last few lines for error details.
+final nonisolated class VPhoneLaunchpadLogWriter: @unchecked Sendable {
+    let url: URL
+    private let queue = DispatchQueue(label: "com.vphone.launchpad.log")
+    private let lock = NSLock()
+    private var handle: FileHandle?
+    private var recent: [String] = []
+
+    /// Starts an empty log at `url`, replacing any earlier one.
+    init(url: URL) {
+        self.url = url
+        queue.async { [self] in
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+            handle = try? FileHandle(forWritingTo: url)
+        }
+    }
+
+    deinit {
+        try? handle?.close()
+    }
+
+    func write(_ line: String) {
+        lock.withLock {
+            recent.append(line)
+            if recent.count > 12 {
+                recent.removeFirst(recent.count - 12)
+            }
+        }
+        queue.async { [self] in
+            try? handle?.write(contentsOf: Data("\(line)\n".utf8))
+        }
+    }
+
+    /// The last lines written, for an error's detail text.
+    var tail: String {
+        lock.withLock { recent.joined(separator: "\n") }
     }
 }

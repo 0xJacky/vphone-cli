@@ -17,10 +17,10 @@ struct VPhoneLaunchpadChangeBundleView: View {
         model.machines
     }
 
-    private var title: Text {
+    private var title: String {
         machines.count == 1
-            ? Text("Change Core Bundle of \(machines[0].name)")
-            : Text("Change Core Bundle of \(machines.count) Machines")
+            ? String(localized: "Change Core Bundle of \(machines[0].name)")
+            : String(localized: "Change Core Bundle of \(machines.count) Machines")
     }
 
     /// Nothing to do when every machine already runs with `version` and
@@ -30,48 +30,43 @@ struct VPhoneLaunchpadChangeBundleView: View {
     }
 
     var body: some View {
-        VPhoneLaunchpadSheet(title) {
-            VStack(alignment: .leading, spacing: DK.Space.s4) {
-                DKSection(String(localized: "Current"), rows: machines.map { machine in
-                    DKKeyValue(
-                        machine.name,
-                        library.bundleVersion(for: machine.path) ?? "—",
-                        monospaced: true,
-                        id: machine.path.url.path,
-                    )
-                })
-                DKSection(
-                    footnote: String(localized: "Host programs change at the next start. The guest environment is updated now on stopped machines; running machines keep theirs until it is updated later. Guest patches follow each machine’s patch choice when its guest environment is updated. The boot chain stays as it was built."),
-                ) {
-                    DKFormRow(String(localized: "Core Bundle"), labelWidth: 170) {
-                        Picker("Core Bundle", selection: $version) {
-                            ForEach(model.bundles.selectableVersions, id: \.self) { version in
-                                if version == model.bundles.defaultVersion {
-                                    Text("\(version) (Default)").tag(version)
-                                } else {
-                                    Text(verbatim: version).tag(version)
-                                }
+        DKSheet(
+            title,
+            width: 520,
+            trailing: [
+                .cancel(String(localized: "Cancel")) { dismiss() },
+                .primary(String(localized: "Apply"), isEnabled: canApply) { apply() },
+            ],
+        ) {
+            DKSection(String(localized: "Current"), rows: machines.map { machine in
+                DKKeyValue(
+                    machine.name,
+                    library.bundleVersion(for: machine.path) ?? "—",
+                    monospaced: true,
+                    id: machine.path.url.path,
+                )
+            })
+            DKSection(
+                footnote: String(localized: "Host programs change at the next start. The guest environment is updated now on stopped machines; running machines keep theirs until it is updated later. Guest patches follow each machine’s patch choice when its guest environment is updated. The boot chain stays as it was built."),
+            ) {
+                DKFormRow(String(localized: "Core Bundle"), fill: true) {
+                    Picker("Core Bundle", selection: $version) {
+                        ForEach(model.bundles.selectableVersions, id: \.self) { version in
+                            if version == model.bundles.defaultVersion {
+                                Text("\(version) (Default)").tag(version)
+                            } else {
+                                Text(verbatim: version).tag(version)
                             }
                         }
-                        .labelsHidden()
-                        .fixedSize()
                     }
-                    DKFormRow(String(localized: "Update guest environment"), labelWidth: 170) {
-                        DKSwitch(String(localized: "Update guest environment"), isOn: $updatesEnvironment)
-                    }
+                    .dkFieldPicker(fill: true)
+                }
+                VPhoneLaunchpadSwitchRow(isOn: $updatesEnvironment) {
+                    Text("Update guest environment")
                 }
             }
-            .padding(DK.Space.s4)
-            .dkCardFill(DK.Palette.window)
-        } actions: {
-            Button("Cancel") { dismiss() }
-                .keyboardShortcut(.cancelAction)
-            Button("Apply") { apply() }
-                .keyboardShortcut(.defaultAction)
-                .disabled(!canApply)
         }
-        .frame(width: 460)
-        .fixedSize(horizontal: false, vertical: true)
+        .vphoneLaunchpadSheetChrome()
         .onAppear {
             // The machines' own version when they share one, else the default.
             let current = Set(machines.map { library.bundleVersion(for: $0.path) })

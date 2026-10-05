@@ -5,21 +5,69 @@ import VPhoneDesignKit
 // MARK: - Actions
 
 /// Every action on machines, in one order: run, inspect, configure,
-/// maintain, delete. The table's context menu, the inspector's more button
-/// and the multiple-selection inspector share it, so an item and its
-/// enablement are written once.
+/// maintain, delete. The table's context menu, the inspector's ⋯ button, the
+/// multiple-selection inspector and the menu bar's Machine menu share it:
+/// `VPhoneLaunchpadMachineMenu` decides the items and their enablement, this
+/// gives each one its title, shortcut and action.
+///
+/// Sheets and the delete confirmation are the library's page state, so the
+/// menu bar reaches them from any page; asking for one shows the Machines
+/// page.
 struct VPhoneLaunchpadMachineActions {
     typealias MachinePath = VPhoneLaunchpadMachinePath
+    typealias Plan = VPhoneLaunchpadMachineMenu
 
     let model: VPhoneLaunchpadModel
-    /// Opens one of the Machines page's sheets.
-    let present: (VPhoneLaunchpadMachinesView.Sheet) -> Void
-    /// Asks to delete the machines; the page confirms first.
-    let delete: ([MachinePath]) -> Void
 
     private var library: VPhoneLaunchpadMachineLibrary {
         model.machines
     }
+
+    // MARK: - Page state
+
+    /// Opens one of the Machines page's sheets.
+    func present(_ sheet: VPhoneLaunchpadMachinesView.Sheet) {
+        if model.destination != .machines {
+            model.show(.machines)
+        }
+        library.sheet = sheet
+    }
+
+    /// Asks to delete the machines; the page confirms first.
+    func delete(_ machines: [MachinePath]) {
+        if model.destination != .machines {
+            model.show(.machines)
+        }
+        library.deletion = machines
+    }
+
+    /// New Machine needs a Core Bundle to create with.
+    var canCreate: Bool {
+        model.bundles.defaultVersion != nil
+    }
+
+    /// Import waits for another import, and needs a Core Bundle too.
+    var canImport: Bool {
+        canCreate && library.globalActivity == nil
+    }
+
+    func newMachine() {
+        present(.newMachine)
+    }
+
+    func chooseImport() {
+        let library = library
+        let panel = NSOpenPanel()
+        panel.title = String(localized: "Import Machine")
+        panel.message = String(localized: "Choose an exported machine archive (.tzst or .txz).")
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.present { url in
+            Task { await library.importArchive(url) }
+        }
+    }
+
+    // MARK: - Run
 
     func start(_ machines: [VPhoneLaunchpadMachine], headless: Bool = false) {
         let library = library
@@ -41,151 +89,168 @@ struct VPhoneLaunchpadMachineActions {
         }
     }
 
-    /// The menu for `machines`. Several machines get the batch actions only:
-    /// start and stop, one settings edit, export, Core Bundle change and
-    /// delete, which need every machine stopped.
+    // MARK: - Menus
+
+    /// The menu for `machines`, as the right-click menu and the ⋯ button
+    /// show it.
     func items(for machines: [VPhoneLaunchpadMachine]) -> [DKMenuItem] {
-        if machines.count > 1 {
-            batchItems(machines)
-        } else if let machine = machines.first {
-            singleItems(machine)
-        } else {
-            []
-        }
+        items(Plan.entries(for: machines.map(fact), placement: .contextMenu), machines: machines, shortcuts: false)
     }
 
-    // MARK: - One machine
+    /// The menu bar's Machine menu: the same plan for the selection, with
+    /// shortcuts. It acts only while the Machines page shows the selection
+    /// and no sheet of the window is open: a shortcut typed into a sheet's
+    /// field is not meant for the machines behind it.
+    func menuBarItems() -> [DKMenuItem] {
+        let acts = model.destination == .machines && library.sheet == nil && model.panel == nil
+        let machines = acts ? library.selectedMachines : []
+        return items(Plan.entries(for: machines.map(fact), placement: .menuBar), machines: machines, shortcuts: true)
+    }
 
-    private func singleItems(_ machine: VPhoneLaunchpadMachine) -> [DKMenuItem] {
-        let library = library
+    /// The plan's facts about one machine, read from the library.
+    func fact(_ machine: VPhoneLaunchpadMachine) -> Plan.Machine {
         let path = machine.path
-        let state = library.state(of: path)
-        let isStopped = state == .stopped
         let isCreating = library.creations[path]?.isRunning == true
-        let isExporting = library.exports[path] != nil
-        let patchLog = VPhoneLaunchpadMachineLibrary.consoleLog(path, suffix: "-patch")
-        var items: [DKMenuItem] = []
-
-        // Run. A machine being exported or created offers to stop that
-        // instead; a running one offers Stop.
-        if isExporting {
-            items.append(DKMenuItem("Cancel Export") { library.cancelExport(path) })
+        let run: Plan.Run = switch library.state(of: path) {
+        case .stopped: .stopped
+        case .running: .running
+        case .busy: .busy
         }
-        if isCreating {
-            items.append(DKMenuItem("Show Progress") { present(.creation(path)) })
-        }
-        if state == .running {
-            items.append(DKMenuItem("Stop") { stop([machine]) })
-        } else if !isCreating, !isExporting {
-            items.append(DKMenuItem("Start", isEnabled: isStopped) { start([machine]) })
-            items.append(DKMenuItem("Start Headless", isEnabled: isStopped) { start([machine], headless: true) })
-        }
-
-        // Inspect.
-        items.append(.separator)
-        items.append(DKMenuItem("Open Console") { present(.console(path)) })
-        items.append(DKMenuItem("Show in Finder") {
-            NSWorkspace.shared.activateFileViewerSelecting([path.url])
-        })
-        items.append(.submenu("Logs", items: [
-            DKMenuItem("Console Log") {
-                NSWorkspace.shared.open(VPhoneLaunchpadMachineLibrary.consoleLog(path))
-            },
-            DKMenuItem("Patch Log", isEnabled: FileManager.default.fileExists(atPath: patchLog.path)) {
-                NSWorkspace.shared.open(patchLog)
-            },
-        ]))
-
-        // Configure.
-        items.append(.separator)
-        items.append(DKMenuItem("Settings…", isEnabled: isStopped) { present(.settings([machine])) })
-        items.append(DKMenuItem("Rename…", isEnabled: isStopped) { present(.rename(path)) })
-        items.append(DKMenuItem("Clone…", isEnabled: isStopped) { present(.clone(path)) })
-        items.append(DKMenuItem("Export…", isEnabled: isStopped) { present(.export([path])) })
-
-        // Maintain.
-        items.append(.separator)
-        items.append(.submenu("Core Bundle", items: [
-            changeBundleItem([machine]),
-            // The finished-install counterpart of the item below: redeploys
-            // the machine's own bundle's guest resources without the restore
-            // tree.
-            DKMenuItem(
-                "Update Guest Environment",
-                isEnabled: isStopped && machine.restoreInfo != nil && machine.customFirmwareInstalled != false,
-            ) {
-                Task { await library.updateGuestEnvironment(path) }
-            },
-            // Only for an unfinished install: that is when the restore tree
-            // it reads is still there. A finished one removes it.
-            DKMenuItem("Install Custom Firmware", isEnabled: isStopped && machine.customFirmwareInstalled == false) {
-                Task { await library.installCustomFirmware(path) }
-            },
-        ]))
-
-        // Delete.
-        items.append(.separator)
-        items.append(DKMenuItem("Delete…", isEnabled: isStopped, isDestructive: true) { delete([path]) })
-        return items
-    }
-
-    // MARK: - Several machines
-
-    private func batchItems(_ machines: [VPhoneLaunchpadMachine]) -> [DKMenuItem] {
-        let library = library
-        let stopped = machines.filter { library.state(of: $0.path) == .stopped }
-        let running = machines.filter { library.state(of: $0.path) == .running }
-        let allStopped = stopped.count == machines.count
-        // Only while one of them is exporting or waiting to.
-        let exporting = machines.filter { library.exports[$0.path] != nil }
-        var items: [DKMenuItem] = []
-
-        if !exporting.isEmpty {
-            items.append(DKMenuItem("Cancel Export") {
-                for machine in exporting {
-                    library.cancelExport(machine.path)
-                }
-            })
-            items.append(.separator)
-        }
-        items.append(DKMenuItem("Start", isEnabled: !stopped.isEmpty) { start(stopped) })
-        items.append(DKMenuItem("Start Headless", isEnabled: !stopped.isEmpty) { start(stopped, headless: true) })
-        items.append(DKMenuItem("Stop", isEnabled: !running.isEmpty) { stop(running) })
-
-        items.append(.separator)
-        items.append(DKMenuItem("Show in Finder") {
-            NSWorkspace.shared.activateFileViewerSelecting(machines.map(\.path.url))
-        })
-
-        items.append(.separator)
-        items.append(DKMenuItem("Settings…", isEnabled: allStopped) { present(.settings(machines)) })
-        items.append(DKMenuItem("Export…", isEnabled: allStopped) { present(.export(machines.map(\.path))) })
-
-        items.append(.separator)
-        items.append(changeBundleItem(machines))
-
-        items.append(.separator)
-        items.append(DKMenuItem(
-            String(localized: "Delete \(machines.count) Machines…"),
-            isEnabled: allStopped,
-            isDestructive: true,
-        ) {
-            delete(machines.map(\.path))
-        })
-        return items
+        return Plan.Machine(
+            run: run,
+            isCreating: isCreating,
+            isExporting: library.exports[path] != nil,
+            isRestored: machine.restoreInfo != nil,
+            customFirmwareInstalled: machine.customFirmwareInstalled,
+            hasPatchLog: FileManager.default.fileExists(atPath: Self.patchLog(path).path),
+            canChangeBundle: !model.bundles.selectableVersions.isEmpty && !isCreating,
+        )
     }
 
     /// Rebinding applies at the next start, so running machines may change
     /// too. A machine still being created gets its bundle from the pipeline.
     func canChangeBundle(_ machines: [VPhoneLaunchpadMachine]) -> Bool {
-        !model.bundles.selectableVersions.isEmpty
-            && !machines.contains { library.creations[$0.path]?.isRunning == true }
+        !machines.isEmpty && machines.allSatisfy { fact($0).canChangeBundle }
     }
 
-    private func changeBundleItem(_ machines: [VPhoneLaunchpadMachine]) -> DKMenuItem {
-        DKMenuItem("Change Core Bundle…", isEnabled: canChangeBundle(machines)) {
-            present(.changeBundle(machines))
+    private func items(_ entries: [Plan.Entry], machines: [VPhoneLaunchpadMachine], shortcuts: Bool) -> [DKMenuItem] {
+        entries.map { entry in
+            switch entry {
+            case .separator:
+                return .separator
+            case let .submenu(action, isEnabled, children):
+                return .submenu(
+                    title(action, count: machines.count),
+                    isEnabled: isEnabled,
+                    items: items(children, machines: machines, shortcuts: shortcuts),
+                )
+            case let .item(action, isEnabled):
+                return DKMenuItem(
+                    title(action, count: machines.count),
+                    shortcut: shortcuts ? Self.shortcut(action) : nil,
+                    isEnabled: isEnabled,
+                    isDestructive: action == .delete,
+                ) {
+                    // The sheets the inspector opens are its own state.
+                    if shortcuts, NSApp.keyWindow?.sheetParent != nil {
+                        return
+                    }
+                    perform(action, on: machines)
+                }
+            }
         }
+    }
+
+    private func title(_ action: Plan.Action, count: Int) -> String {
+        switch action {
+        case .cancelExport: String(localized: "Cancel Export")
+        case .showProgress: String(localized: "Show Progress")
+        case .start: String(localized: "Start")
+        case .startHeadless: String(localized: "Start Headless")
+        case .stop: String(localized: "Stop")
+        case .openConsole: String(localized: "Open Console")
+        case .showInFinder: String(localized: "Show in Finder")
+        case .logs: String(localized: "Logs")
+        case .consoleLog: String(localized: "Console Log")
+        case .patchLog: String(localized: "Patch Log")
+        case .settings: String(localized: "Settings…")
+        case .rename: String(localized: "Rename…")
+        case .clone: String(localized: "Clone…")
+        case .export: String(localized: "Export…")
+        case .coreBundle: String(localized: "Core Bundle")
+        case .changeBundle: String(localized: "Change Core Bundle…")
+        case .updateGuestEnvironment: String(localized: "Update Guest Environment")
+        case .installCustomFirmware: String(localized: "Install Custom Firmware")
+        case .delete: count > 1 ? String(localized: "Delete \(count) Machines…") : String(localized: "Delete…")
+        }
+    }
+
+    /// The Machine menu's shortcuts, as the design gives them. The
+    /// right-click menu and the ⋯ button show none.
+    static func shortcut(_ action: Plan.Action) -> DKShortcut? {
+        switch action {
+        case .start: "⌘R"
+        case .startHeadless: "⌥⌘R"
+        case .stop: "⌘."
+        case .openConsole: "⇧⌘C"
+        case .settings: "⌘I"
+        case .clone: "⌘D"
+        case .export: "⇧⌘E"
+        case .delete: "⌘⌫"
+        default: nil
+        }
+    }
+
+    private func perform(_ action: Plan.Action, on machines: [VPhoneLaunchpadMachine]) {
+        guard let path = machines.first?.path else {
+            return
+        }
+        let library = library
+        let paths = machines.map(\.path)
+        switch action {
+        case .cancelExport:
+            for path in paths where library.exports[path] != nil {
+                library.cancelExport(path)
+            }
+        case .showProgress:
+            present(.creation(path))
+        case .start:
+            start(machines.filter { library.state(of: $0.path) == .stopped })
+        case .startHeadless:
+            start(machines.filter { library.state(of: $0.path) == .stopped }, headless: true)
+        case .stop:
+            stop(machines.filter { library.state(of: $0.path) == .running })
+        case .openConsole:
+            present(.console(path))
+        case .showInFinder:
+            NSWorkspace.shared.activateFileViewerSelecting(paths.map(\.url))
+        case .logs, .coreBundle:
+            break
+        case .consoleLog:
+            NSWorkspace.shared.open(VPhoneLaunchpadMachineLibrary.consoleLog(path))
+        case .patchLog:
+            NSWorkspace.shared.open(Self.patchLog(path))
+        case .settings:
+            present(.settings(machines))
+        case .rename:
+            present(.rename(path))
+        case .clone:
+            present(.clone(path))
+        case .export:
+            present(.export(paths))
+        case .changeBundle:
+            present(.changeBundle(machines))
+        case .updateGuestEnvironment:
+            Task { await library.updateGuestEnvironment(path) }
+        case .installCustomFirmware:
+            Task { await library.installCustomFirmware(path) }
+        case .delete:
+            delete(paths)
+        }
+    }
+
+    private static func patchLog(_ path: MachinePath) -> URL {
+        VPhoneLaunchpadMachineLibrary.consoleLog(path, suffix: "-patch")
     }
 }
 

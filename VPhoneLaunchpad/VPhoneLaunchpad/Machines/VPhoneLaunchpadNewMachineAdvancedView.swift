@@ -59,14 +59,8 @@ struct VPhoneLaunchpadNewMachineAdvancedView: View {
                     .dkFieldPicker(fill: true)
                 }
                 DKFormRow(String(localized: "Patches"), fill: true) {
-                    Group {
-                        if patches.hasOverrides {
-                            Text("Differs from the preset: \(patches.blocked.count) off, \(patches.allowed.count) on.")
-                        } else {
-                            Text(verbatim: "")
-                        }
-                    }
-                    .foregroundStyle(DK.Palette.muted)
+                    Text("Differs from the preset: \(patches.blocked.count) off, \(patches.allowed.count) on.")
+                        .foregroundStyle(DK.Palette.muted)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     DKButton(String(localized: "Patch Settings…"), size: .small) { showsPatchSettings = true }
                         .sheet(isPresented: $showsPatchSettings) {
