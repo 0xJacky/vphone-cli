@@ -358,8 +358,8 @@ public struct DKDataTable<Row: Identifiable, CellContent: View>: View {
             }
             .buttonStyle(.plain)
             .accessibilityAddTraits(.isHeader)
-            .accessibilityValue(primary.map { $0.ascending ? "Sorted ascending" : "Sorted descending" } ?? "")
-            .accessibilityHint("Sorts by this column")
+            .accessibilityValue(primary.map { $0.ascending ? String(localized: "Sorted ascending", bundle: .main) : String(localized: "Sorted descending", bundle: .main) } ?? "")
+            .accessibilityHint(String(localized: "Sorts by this column", bundle: .main))
         } else {
             title.accessibilityAddTraits(.isHeader)
         }
