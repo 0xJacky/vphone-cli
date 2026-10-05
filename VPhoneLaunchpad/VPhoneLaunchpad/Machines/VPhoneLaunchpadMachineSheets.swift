@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import VPhoneDesignKit
 
 // MARK: - Settings
 
@@ -59,8 +60,8 @@ struct VPhoneLaunchpadMachineSettingsView: View {
         _unlocksAtStartup = State(initialValue: first?.unlocksAtStartup == true)
     }
 
-    private var title: Text {
-        machines.count == 1 ? Text("\(machines[0].name) Settings") : Text("Settings for \(machines.count) Machines")
+    private var title: String {
+        machines.count == 1 ? String(localized: "\(machines[0].name) Settings") : String(localized: "Settings for \(machines.count) Machines")
     }
 
     private var single: Bool {
@@ -108,45 +109,42 @@ struct VPhoneLaunchpadMachineSettingsView: View {
     }
 
     var body: some View {
-        VPhoneLaunchpadSheet(title) {
-            VStack(spacing: 0) {
-                // Several machines share only hardware, the network mode and
-                // startup, which fit on one page.
-                if single {
-                    VPhoneLaunchpadSheetPages(selection: $page) {
-                        Text("General").tag(Page.general)
-                        Text("Network").tag(Page.network)
-                        Text("Port Forwarding").tag(Page.forwards)
-                    }
-                }
-                Form {
-                    if !single || page == .general {
-                        hardwareSection
-                    }
-                    if !single || page == .network {
-                        networkSection
-                        if single {
-                            addressSection
-                        }
-                    }
-                    if single, page == .forwards {
-                        forwardsSection
-                    }
-                    if !single || page == .general {
-                        startupSection
-                    }
-                }
-                .formStyle(.grouped)
+        // Several machines share only hardware, the network mode and startup,
+        // which fit on one page.
+        DKSheet(
+            title,
+            width: 640,
+            note: machines.count > 1 ? DKSheetNote(String(localized: "Only the settings you change are applied to each machine.")) : nil,
+            trailing: [
+                .cancel(String(localized: "Cancel")) { dismiss() },
+                .primary(String(localized: "Save"), isEnabled: canSave) { save() },
+            ],
+        ) {
+            if !single || page == .general {
+                hardwareSection
             }
-        } actions: {
-            Button("Cancel") { dismiss() }
-                .keyboardShortcut(.cancelAction)
-            Button("Save") { save() }
-                .keyboardShortcut(.defaultAction)
-                .disabled(!canSave)
+            if !single || page == .network {
+                networkSection
+                if single {
+                    addressSection
+                }
+            }
+            if single, page == .forwards {
+                forwardsSection
+            }
+            if !single || page == .general {
+                startupSection
+            }
+        } pages: {
+            if single {
+                DKSegmented(String(localized: "Page"), selection: $page, options: [
+                    DKSegmentOption(String(localized: "General"), value: Page.general),
+                    DKSegmentOption(String(localized: "Network"), value: Page.network),
+                    DKSegmentOption(String(localized: "Port Forwarding"), value: Page.forwards),
+                ])
+            }
         }
-        .frame(width: 480)
-        .fixedSize(horizontal: false, vertical: true)
+        .vphoneLaunchpadSheetChrome()
         .onChange(of: cpu) { edited.insert(.cpu) }
         .onChange(of: memoryMB) { edited.insert(.memory) }
         .onChange(of: network) { edited.insert(.network) }
@@ -170,93 +168,103 @@ struct VPhoneLaunchpadMachineSettingsView: View {
     }
 
     private var hardwareSection: some View {
-        Section {
-            Stepper("CPU: \(cpu) cores", value: $cpu, in: 1 ... ProcessInfo.processInfo.activeProcessorCount)
-            Stepper("Memory: \(memoryMB) MB", value: $memoryMB, in: 2048 ... 65536, step: 1024)
-        } header: {
-            Text("Hardware")
+        DKSection(String(localized: "Hardware")) {
+            VPhoneLaunchpadStepperRow(
+                label: String(localized: "CPU"),
+                value: String(localized: "\(cpu) cores"),
+                number: $cpu,
+                range: 1 ... ProcessInfo.processInfo.activeProcessorCount,
+            )
+            VPhoneLaunchpadStepperRow(label: String(localized: "Memory"), value: "\(memoryMB) MB", number: $memoryMB, range: 2048 ... 65536, step: 1024)
         }
     }
 
     private var startupSection: some View {
-        Section {
-            Toggle("Unlock at startup", isOn: $unlocksAtStartup)
-        } header: {
-            Text("Startup")
-        } footer: {
-            Text("Each time the guest starts, its screen is turned on and the Lock Screen dismissed.")
-                .foregroundStyle(.secondary)
+        DKSection(
+            String(localized: "Startup"),
+            footnote: String(localized: "Each time the guest starts, its screen is turned on and the Lock Screen dismissed."),
+        ) {
+            VPhoneLaunchpadSwitchRow(isOn: $unlocksAtStartup) {
+                Text("Unlock at startup")
+            }
         }
     }
 
     private var networkSection: some View {
-        Section {
-            Picker("Mode", selection: $network) {
-                Text("NAT").tag("nat")
-                Text("Bridged").tag("bridged")
-                Text("Tunnel").tag("tunnel")
-                Text("None").tag("none")
+        DKSection(String(localized: "Network")) {
+            DKFormRow(String(localized: "Mode"), fill: true) {
+                Picker("Mode", selection: $network) {
+                    Text("NAT").tag("nat")
+                    Text("Bridged").tag("bridged")
+                    Text("Tunnel").tag("tunnel")
+                    Text("None").tag("none")
+                }
+                .dkFieldPicker(fill: true)
             }
             if network == "bridged" {
-                TextField("Interface", text: $bridgeInterface, prompt: Text("First available"))
+                DKFormRow(String(localized: "Interface"), fill: true) {
+                    TextField("Interface", text: $bridgeInterface, prompt: Text("First available"))
+                        .textFieldStyle(.dkFieldMono)
+                }
             }
             if network == "tunnel" {
-                Text("Traffic leaves through this Mac's own connections, so it follows the Mac's VPN.")
-                    .foregroundStyle(.secondary)
+                VPhoneLaunchpadCardMessage(text: Text("Traffic leaves through this Mac's own connections, so it follows the Mac's VPN."))
             }
             if dropsForwards {
-                Text("This mode cannot forward ports, so saving removes the port forwards.")
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
-            if !single {
-                Text("Network")
-            }
-        } footer: {
-            if machines.count > 1 {
-                Text("Only the settings you change are applied to each machine.")
-                    .foregroundStyle(.secondary)
+                VPhoneLaunchpadCardMessage(text: Text("This mode cannot forward ports, so saving removes the port forwards."), isWarning: true)
             }
         }
     }
 
     private var addressSection: some View {
-        Section {
+        VPhoneLaunchpadSheetSection(String(localized: "Address")) {
             if network != "none" {
-                Picker("Configure IPv4", selection: $manualAddress) {
-                    Text("Using DHCP").tag(false)
-                    Text("Manually").tag(true)
+                DKFormRow(String(localized: "Configure IPv4"), fill: true) {
+                    Picker("Configure IPv4", selection: $manualAddress) {
+                        Text("Using DHCP").tag(false)
+                        Text("Manually").tag(true)
+                    }
+                    .dkFieldPicker(fill: true)
                 }
                 if manualAddress {
-                    TextField("Address", text: $address, prompt: Text(verbatim: network == "tunnel" ? "192.168.127.3/24" : "192.168.64.50/24"))
-                    TextField("Gateway", text: $gateway, prompt: Text("Automatic"))
-                    TextField("DNS Servers", text: $dns, prompt: Text("Automatic"))
+                    DKFormRow(String(localized: "Address"), fill: true) {
+                        TextField("Address", text: $address, prompt: Text(verbatim: network == "tunnel" ? "192.168.127.3/24" : "192.168.64.50/24"))
+                            .textFieldStyle(.dkFieldMono)
+                    }
+                    DKFormRow(String(localized: "Gateway"), fill: true) {
+                        TextField("Gateway", text: $gateway, prompt: Text("Automatic"))
+                            .textFieldStyle(.dkFieldMono)
+                    }
+                    DKFormRow(String(localized: "DNS Servers"), fill: true) {
+                        TextField("DNS Servers", text: $dns, prompt: Text("Automatic"))
+                            .textFieldStyle(.dkFieldMono)
+                    }
                 }
-                HStack {
+                DKFormRow(String(localized: "MAC Address"), fill: true) {
                     TextField("MAC Address", text: $macAddress, prompt: Text("Generated at next start"))
-                    Button("Generate") { macAddress = Self.randomMACAddress() }
+                        .textFieldStyle(.dkFieldMono)
+                    DKButton(String(localized: "Generate"), size: .small) { macAddress = Self.randomMACAddress() }
                 }
-                Toggle("Resolve this Mac's name in the guest", isOn: $resolvesMacName)
+                VPhoneLaunchpadSwitchRow(isOn: $resolvesMacName) {
+                    Text("Resolve this Mac's name in the guest")
+                }
             }
             // The guest also announces over its USB link to the Mac, so this
             // works without a network device too.
-            Toggle("Reachable as \(localHostName).local", isOn: $advertisesName)
-        } header: {
-            Text("Address")
-        } footer: {
-            Group {
-                switch network {
-                case "none":
-                    EmptyView()
-                case "nat":
-                    Text("Use an address on the Mac's shared NAT network, usually 192.168.64.0/24. For another subnet, use Tunnel.")
-                case "tunnel":
-                    Text("The tunnel hands this address to the guest itself.")
-                default:
-                    Text("vphoned sets this address in the guest. Use your network's gateway and DNS servers.")
-                }
+            VPhoneLaunchpadSwitchRow(isOn: $advertisesName) {
+                Text("Reachable as \(localHostName).local")
             }
-            .foregroundStyle(.secondary)
+        } footnote: {
+            switch network {
+            case "none":
+                EmptyView()
+            case "nat":
+                Text("Use an address on the Mac's shared NAT network, usually 192.168.64.0/24. For another subnet, use Tunnel.")
+            case "tunnel":
+                Text("The tunnel hands this address to the guest itself.")
+            default:
+                Text("vphoned sets this address in the guest. Use your network's gateway and DNS servers.")
+            }
         }
     }
 
@@ -267,56 +275,63 @@ struct VPhoneLaunchpadMachineSettingsView: View {
         if forwardsSupported {
             forwardsList
         } else {
-            Section {
-                Text(dropsForwards
-                    ? "This mode cannot forward ports, so saving removes the port forwards."
-                    : "Port forwarding needs NAT or Tunnel. Change the mode in Network.")
-                    .foregroundStyle(.secondary)
+            DKSection(String(localized: "Port Forwarding")) {
+                VPhoneLaunchpadCardMessage(text: Text(dropsForwards
+                        ? "This mode cannot forward ports, so saving removes the port forwards."
+                        : "Port forwarding needs NAT or Tunnel. Change the mode in Network."))
             }
         }
     }
 
+    @ViewBuilder
     private var forwardsList: some View {
-        Section {
-            ForEach(forwards, id: \.self) { forward in
-                HStack {
-                    Text(Self.forwardLabel(forward))
-                    Spacer()
-                    Button {
-                        forwards.removeAll { $0 == forward }
-                    } label: {
-                        Image(systemName: "minus.circle")
+        if !forwards.isEmpty {
+            DKSection(String(localized: "Port Forwarding")) {
+                ForEach(forwards, id: \.self) { forward in
+                    VPhoneLaunchpadCardRow {
+                        Text(verbatim: Self.forwardLabel(forward))
+                            .font(DK.Typeface.mono)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        DKButton(String(localized: "Remove"), size: .small) {
+                            forwards.removeAll { $0 == forward }
+                        }
                     }
-                    .buttonStyle(.borderless)
-                    .help("Remove")
                 }
             }
-            HStack {
+        }
+        DKSection(
+            forwards.isEmpty ? String(localized: "Port Forwarding") : nil,
+            footnote: String(localized: "A forwarded port listens on this Mac only, unless it is reachable from other devices."),
+        ) {
+            DKFormRow(String(localized: "Protocol"), fill: true) {
                 Picker("Protocol", selection: $newTransport) {
                     Text(verbatim: "TCP").tag("tcp")
                     Text(verbatim: "UDP").tag("udp")
                 }
-                .labelsHidden()
-                .fixedSize()
+                .dkFieldPicker(fill: true)
+            }
+            DKFormRow(String(localized: "Mac Port"), fill: true) {
                 TextField("Mac Port", text: $newHostPort)
+                    .textFieldStyle(.dkFieldMono)
+            }
+            DKFormRow(String(localized: "Guest Port"), fill: true) {
                 TextField("Guest Port", text: $newGuestPort)
-                Button {
+                    .textFieldStyle(.dkFieldMono)
+            }
+            VPhoneLaunchpadSwitchRow(isOn: $newOnAllAddresses) {
+                Text("Reachable from other devices")
+            }
+            VPhoneLaunchpadCardRow {
+                Spacer(minLength: 0)
+                DKButton(DKButtonSpec(String(localized: "Add"), glyph: .plus, size: .small, isEnabled: newForward != nil) {
                     if let newForward, !forwards.contains(newForward) {
                         forwards.append(newForward)
                         newHostPort = ""
                         newGuestPort = ""
                     }
-                } label: {
-                    Image(systemName: "plus.circle")
-                }
-                .buttonStyle(.borderless)
-                .disabled(newForward == nil)
-                .help("Add")
+                })
             }
-            Toggle("Reachable from other devices", isOn: $newOnAllAddresses)
-        } footer: {
-            Text("A forwarded port listens on this Mac only, unless it is reachable from other devices.")
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -390,13 +405,12 @@ struct VPhoneLaunchpadMachineSettingsView: View {
     }
 }
 
+
 // MARK: - Rename and clone
 
-/// A new name for a machine, and for a clone whatever else it takes, in
-/// sections of `options` under the name.
-struct VPhoneLaunchpadNameSheet<Options: View>: View {
-    let title: LocalizedStringKey
-    let action: LocalizedStringKey
+struct VPhoneLaunchpadNameSheet: View {
+    let title: String.LocalizationValue
+    let action: String.LocalizationValue
     let initial: String
     /// The machine renamed or cloned. The new name stays in its library.
     let machine: VPhoneLaunchpadMachinePath
@@ -430,34 +444,36 @@ struct VPhoneLaunchpadNameSheet<Options: View>: View {
     }
 
     var body: some View {
-        VPhoneLaunchpadSheet(Text(title)) {
-            Form {
-                Section {
-                    TextField("Name", text: $name)
-                } footer: {
-                    if fitsLocation {
-                        Text("Use letters, numbers, periods, hyphens, and underscores.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("The path is too long. Use a shorter name, or a location with a shorter path.")
-                            .foregroundStyle(.red)
+        DKSheet(
+            String(localized: title),
+            width: 440,
+            trailing: [
+                .cancel(String(localized: "Cancel")) { dismiss() },
+                .primary(String(localized: action), isEnabled: isValid) {
+                    onConfirm(name)
+                    dismiss()
+                },
+            ],
+        ) {
+            VStack(alignment: .leading, spacing: DK.Space.s2) {
+                DKCard {
+                    DKFormRow(String(localized: "Name"), fill: true, labelWidth: 60) {
+                        TextField("Name", text: $name)
+                            .textFieldStyle(.dkField)
                     }
                 }
-                options
+                if fitsLocation {
+                    Text("Use letters, numbers, periods, hyphens, and underscores.")
+                        .font(DK.Typeface.caption)
+                        .foregroundStyle(DK.Palette.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, DK.Space.s1)
+                } else {
+                    VPhoneLaunchpadFieldProblem(text: String(localized: "The path is too long. Use a shorter name, or a location with a shorter path."))
+                }
             }
-            .formStyle(.grouped)
-        } actions: {
-            Button("Cancel") { dismiss() }
-                .keyboardShortcut(.cancelAction)
-            Button(action) {
-                onConfirm(name)
-                dismiss()
-            }
-            .keyboardShortcut(.defaultAction)
-            .disabled(!isValid)
         }
-        .frame(width: 420)
-        .fixedSize(horizontal: false, vertical: true)
+        .vphoneLaunchpadSheetChrome()
         .onAppear { name = initial }
     }
 }
@@ -514,43 +530,43 @@ struct VPhoneLaunchpadExportView: View {
     @State private var densest = false
     @State private var includeIPSW = false
 
-    private var title: Text {
-        machines.count == 1 ? Text("Export \(machines[0].name)") : Text("Export \(machines.count) Machines")
+    private var title: String {
+        machines.count == 1 ? String(localized: "Export \(machines[0].name)") : String(localized: "Export \(machines.count) Machines")
     }
 
     var body: some View {
-        VPhoneLaunchpadSheet(title) {
-            Form {
-                if machines.count == 1 {
-                    Section {
-                        Toggle("Maximum compression", isOn: $densest)
-                        Toggle("Include the restore IPSW directory", isOn: $includeIPSW)
-                    } footer: {
-                        Text(densest
-                            ? "Creates a smaller .txz archive. Export takes much longer."
-                            : "Creates a .tzst archive.")
-                            .foregroundStyle(.secondary)
+        DKSheet(
+            title,
+            width: 440,
+            trailing: [
+                .cancel(String(localized: "Cancel")) { dismiss() },
+                .primary(String(localized: "Choose Location…")) { choose() },
+            ],
+        ) {
+            if machines.count == 1 {
+                DKSection(footnote: densest
+                    ? String(localized: "Creates a smaller .txz archive. Export takes much longer.")
+                    : String(localized: "Creates a .tzst archive."))
+                {
+                    VPhoneLaunchpadSwitchRow(isOn: $densest) {
+                        Text("Maximum compression")
                     }
-                } else {
-                    Section {
-                        ForEach(machines, id: \.self) { machine in
+                    VPhoneLaunchpadSwitchRow(isOn: $includeIPSW) {
+                        Text("Include the restore IPSW directory")
+                    }
+                }
+            } else {
+                DKSection(footnote: String(localized: "Creates a .tzst archive for each machine in the folder you choose.")) {
+                    ForEach(machines, id: \.self) { machine in
+                        VPhoneLaunchpadCardRow {
                             Text(verbatim: "\(machine.name).tzst")
+                                .font(DK.Typeface.mono)
                         }
-                    } footer: {
-                        Text("Creates a .tzst archive for each machine in the folder you choose.")
-                            .foregroundStyle(.secondary)
                     }
                 }
             }
-            .formStyle(.grouped)
-        } actions: {
-            Button("Cancel") { dismiss() }
-                .keyboardShortcut(.cancelAction)
-            Button("Choose Location…") { choose() }
-                .keyboardShortcut(.defaultAction)
         }
-        .frame(width: 420)
-        .fixedSize(horizontal: false, vertical: true)
+        .vphoneLaunchpadSheetChrome()
     }
 
     private func choose() {

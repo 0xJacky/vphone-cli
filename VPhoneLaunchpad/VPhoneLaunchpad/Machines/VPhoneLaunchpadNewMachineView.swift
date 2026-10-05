@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import VPhoneDesignKit
 
 /// Name, location, Core Bundle, guest device and firmware pairing from
 /// `fw catalog`, hardware and options, on three pages. Every page has
@@ -112,59 +113,39 @@ struct VPhoneLaunchpadNewMachineView: View {
     }
 
     var body: some View {
-        VPhoneLaunchpadSheet(Text("New Machine")) {
-            VStack(spacing: 0) {
-                VPhoneLaunchpadSheetPages(selection: $page) {
-                    Text("General").tag(Page.general)
-                    Text("Hardware").tag(Page.hardware)
-                    Text("Advanced").tag(Page.advanced)
-                }
-                Form {
-                    switch page {
-                    case .general:
-                        Section {
-                            TextField("Name", text: $name)
-                            locationPicker
-                        } footer: {
-                            if let problem = nameProblem ?? locationProblem {
-                                Text(problem).foregroundStyle(.red)
-                            }
-                        }
-
-                        bundleSection
-
-                        firmware
-                    case .hardware:
-                        Section {
-                            Stepper("CPU: \(cpu) cores", value: $cpu, in: 1 ... ProcessInfo.processInfo.activeProcessorCount)
-                            Stepper("Memory: \(memoryMB) MB", value: $memoryMB, in: 2048 ... 65536, step: 1024)
-                            Stepper("Disk: \(diskSizeGB) GB", value: $diskSizeGB, in: 32 ... 512, step: 16)
-                        } footer: {
-                            Text(spaceNote).foregroundStyle(.secondary)
-                        }
-                    case .advanced:
-                        VPhoneLaunchpadNewMachineAdvancedView(
-                            network: $network,
-                            patches: $patches,
-                            keepArtifacts: $keepArtifacts,
-                            patchCatalog: patchCatalog,
-                            patchCatalogError: patchCatalogError,
-                            reloadPatches: { Task { await loadPatchCatalog() } },
-                            bundleVersion: bundleVersion,
-                        )
-                    }
-                }
-                .formStyle(.grouped)
+        DKSheet(
+            String(localized: "New Machine"),
+            width: DKSheetMetrics.defaultWidth,
+            note: footerNote,
+            trailing: [
+                .cancel(String(localized: "Cancel")) { dismiss() },
+                .primary(String(localized: "Create"), isEnabled: canCreate) { create() },
+            ],
+        ) {
+            switch page {
+            case .general:
+                generalPage
+            case .hardware:
+                hardwarePage
+            case .advanced:
+                VPhoneLaunchpadNewMachineAdvancedView(
+                    network: $network,
+                    patches: $patches,
+                    keepArtifacts: $keepArtifacts,
+                    patchCatalog: patchCatalog,
+                    patchCatalogError: patchCatalogError,
+                    reloadPatches: { Task { await loadPatchCatalog() } },
+                    bundleVersion: bundleVersion,
+                )
             }
-        } actions: {
-            Button("Cancel") { dismiss() }
-                .keyboardShortcut(.cancelAction)
-            Button("Create") { create() }
-                .keyboardShortcut(.defaultAction)
-                .disabled(!canCreate)
+        } pages: {
+            DKSegmented(String(localized: "Page"), selection: $page, options: [
+                DKSegmentOption(String(localized: "General"), value: Page.general),
+                DKSegmentOption(String(localized: "Hardware"), value: Page.hardware),
+                DKSegmentOption(String(localized: "Advanced"), value: Page.advanced),
+            ])
         }
-        .frame(width: 560)
-        .fixedSize(horizontal: false, vertical: true)
+        .vphoneLaunchpadSheetChrome()
         // Each bundle version has its own firmware pairings and patch sets.
         .task(id: bundleVersion) { await loadCatalog() }
         .task(id: bundleVersion) { await loadPatchCatalog() }
@@ -180,29 +161,77 @@ struct VPhoneLaunchpadNewMachineView: View {
         }
     }
 
+    /// Why Create is off, from the pages that do not show the field at fault,
+    /// or that the disk may not fit the volume.
+    private var footerNote: DKSheetNote? {
+        if page != .general, let problem = nameProblem ?? locationProblem {
+            return DKSheetNote(problem, tone: .danger)
+        }
+        if freeGB < neededGB {
+            return DKSheetNote(spaceNote, tone: .warning)
+        }
+        return nil
+    }
+
+    // MARK: - Pages
+
+    @ViewBuilder
+    private var generalPage: some View {
+        VStack(alignment: .leading, spacing: DK.Space.s2) {
+            DKCard {
+                DKFormRow(String(localized: "Name"), fill: true) {
+                    TextField("Name", text: $name)
+                        .textFieldStyle(.dkField)
+                }
+                DKFormRow(String(localized: "Location"), fill: true) {
+                    locationPicker
+                }
+            }
+            if let problem = nameProblem ?? locationProblem {
+                VPhoneLaunchpadFieldProblem(text: problem)
+            }
+        }
+
+        bundleSection
+
+        firmware
+    }
+
+    private var hardwarePage: some View {
+        DKSection(footnote: spaceNote) {
+            VPhoneLaunchpadStepperRow(
+                label: String(localized: "CPU"),
+                value: String(localized: "\(cpu) cores"),
+                number: $cpu,
+                range: 1 ... ProcessInfo.processInfo.activeProcessorCount,
+            )
+            VPhoneLaunchpadStepperRow(label: String(localized: "Memory"), value: "\(memoryMB) MB", number: $memoryMB, range: 2048 ... 65536, step: 1024)
+            VPhoneLaunchpadStepperRow(label: String(localized: "Disk"), value: "\(diskSizeGB) GB", number: $diskSizeGB, range: 32 ... 512, step: 16)
+        }
+    }
+
     // MARK: - Core Bundle
 
     private var bundleSection: some View {
-        Section {
+        DKSection(footnote: String(localized: "The boot chain is built when the machine is created. Host programs, the guest environment and guest patches can be changed later.")) {
             if model.bundles.selectableVersions.isEmpty {
-                Label("No Core Bundle is installed. Install one in Core Bundle.", systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.secondary)
+                VPhoneLaunchpadCardMessage(text: Text("No Core Bundle is installed. Install one in Core Bundle."), isWarning: true)
             } else {
-                Picker("Core Bundle", selection: versionBinding) {
-                    ForEach(model.bundles.selectableVersions, id: \.self) { version in
-                        // Store names keep their `-local.` and `-ci.` suffixes,
-                        // so a build that is not a release reads as one.
-                        if version == model.bundles.defaultVersion {
-                            Text("\(version) (Default)").tag(Optional(version))
-                        } else {
-                            Text(verbatim: version).tag(Optional(version))
+                DKFormRow(String(localized: "Core Bundle"), fill: true) {
+                    Picker("Core Bundle", selection: versionBinding) {
+                        ForEach(model.bundles.selectableVersions, id: \.self) { version in
+                            // Store names keep their `-local.` and `-ci.` suffixes,
+                            // so a build that is not a release reads as one.
+                            if version == model.bundles.defaultVersion {
+                                Text("\(version) (Default)").tag(Optional(version))
+                            } else {
+                                Text(verbatim: version).tag(Optional(version))
+                            }
                         }
                     }
+                    .dkFieldPicker(fill: true)
                 }
             }
-        } footer: {
-            Text("The boot chain is built when the machine is created. Host programs, the guest environment and guest patches can be changed later.")
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -256,6 +285,7 @@ struct VPhoneLaunchpadNewMachineView: View {
             // Library roots are absolute, so an empty tag cannot be one.
             Text("Other…").tag("")
         }
+        .dkFieldPicker(fill: true)
         .help(location)
     }
 
@@ -290,48 +320,50 @@ struct VPhoneLaunchpadNewMachineView: View {
     // MARK: - Firmware
 
     private var firmware: some View {
-        Section {
-            Picker("Source", selection: $usesCustomSources) {
-                Text("Catalog").tag(false)
-                Text("Custom IPSWs").tag(true)
-            }
-            .pickerStyle(.segmented)
-
+        VPhoneLaunchpadSheetSection(String(localized: "Firmware")) {
+            DKSegmented(String(localized: "Source"), selection: $usesCustomSources, options: [
+                DKSegmentOption(String(localized: "Catalog"), value: false),
+                DKSegmentOption(String(localized: "Custom IPSWs"), value: true),
+            ])
+        } content: {
             if usesCustomSources {
-                sourceField("iPhone IPSW", $iphoneSource)
-                sourceField("cloudOS IPSW", $cloudOSSource)
+                DKFormRow(String(localized: "iPhone IPSW"), fill: true) {
+                    sourceField("iPhone IPSW", $iphoneSource)
+                }
+                DKFormRow(String(localized: "cloudOS IPSW"), fill: true) {
+                    sourceField("cloudOS IPSW", $cloudOSSource)
+                }
             } else if let catalog {
                 if catalog.guests.count > 1 {
-                    Picker("Device", selection: Binding(
-                        get: { guest },
-                        set: { choose($0) },
-                    )) {
-                        ForEach(catalog.guests) { guest in
-                            Text(verbatim: guest.name).tag(Optional(guest.id))
+                    DKFormRow(String(localized: "Device"), fill: true) {
+                        Picker("Device", selection: Binding(
+                            get: { guest },
+                            set: { choose($0) },
+                        )) {
+                            ForEach(catalog.guests) { guest in
+                                Text(verbatim: guest.detailedName).tag(Optional(guest.id))
+                            }
                         }
+                        .dkFieldPicker(fill: true)
                     }
                 }
-                Picker(selectedGuest?.isPad == true ? "iPadOS" : "iOS", selection: $pairing) {
-                    ForEach((selectedGuest?.pairings ?? []).reversed()) { pairing in
-                        Text(verbatim: "\(pairing.ios.name) (\(pairing.build))").tag(Optional(pairing.id))
-                    }
+                VPhoneLaunchpadPairingList(
+                    label: selectedGuest?.isPad == true ? "iPadOS" : String(localized: "iOS"),
+                    pairings: (selectedGuest?.pairings ?? []).reversed(),
+                    selection: $pairing,
+                )
+                DKFormRow(String(localized: "cloudOS"), fill: true) {
+                    Text(verbatim: selectedPairing?.recommendedCloudOS.name ?? "—")
+                        .textSelection(.enabled)
                 }
-                LabeledContent("cloudOS", value: selectedPairing?.recommendedCloudOS.name ?? "—")
             } else if let catalogError {
-                Label(catalogError, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.secondary)
+                VPhoneLaunchpadCardMessage(text: Text(verbatim: catalogError), isWarning: true)
             } else {
-                HStack {
-                    ProgressView().controlSize(.small)
-                    Text("Loading firmware catalog…").foregroundStyle(.secondary)
-                }
+                VPhoneLaunchpadCardLoading(text: Text("Loading firmware catalog…"))
             }
-        } header: {
-            Text("Firmware")
-        } footer: {
+        } footnote: {
             if !usesCustomSources, let selectedGuest {
                 Text("Recommended firmware pairings for \(selectedGuest.detailedName).")
-                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -342,45 +374,54 @@ struct VPhoneLaunchpadNewMachineView: View {
             && FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) && !isDirectory.boolValue
     }
 
+    @ViewBuilder
     private func sourceField(_ title: LocalizedStringKey, _ text: Binding<String>) -> some View {
-        LabeledContent(title) {
-            HStack {
-                // A chosen file shows only its name; a URL or a path still
-                // being typed stays editable.
-                if Self.isIPSWFile(text.wrappedValue) {
-                    Text(verbatim: URL(fileURLWithPath: text.wrappedValue).lastPathComponent)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .help(text.wrappedValue)
-                    Button {
-                        text.wrappedValue = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                    }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(.secondary)
-                    .help("Clear")
-                } else {
-                    TextField(title, text: text, prompt: Text("URL or path"))
-                        .labelsHidden()
-                }
-                Button("Choose…") {
-                    let panel = NSOpenPanel()
-                    panel.canChooseDirectories = false
-                    panel.present { url in
-                        text.wrappedValue = url.path
-                    }
-                }
+        // A chosen file shows only its name; a URL or a path still
+        // being typed stays editable.
+        if Self.isIPSWFile(text.wrappedValue) {
+            Text(verbatim: URL(fileURLWithPath: text.wrappedValue).lastPathComponent)
+                .font(DK.Typeface.mono)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .help(text.wrappedValue)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                text.wrappedValue = ""
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(DK.Palette.muted)
+            .help("Clear")
+            .accessibilityLabel(Text("Clear"))
+        } else {
+            TextField(title, text: text, prompt: Text("URL or path"))
+                .textFieldStyle(.dkFieldMono)
+                .labelsHidden()
+        }
+        DKButton(String(localized: "Choose…"), size: .small) {
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = false
+            panel.present { url in
+                text.wrappedValue = url.path
             }
         }
     }
 
     /// Disk plus roughly 20 GB of IPSWs and the prepared restore tree.
-    private var spaceNote: String {
+    private var neededGB: Int {
+        diskSizeGB + 20
+    }
+
+    private var freeGB: Int {
         let root = VPhoneLaunchpadHostSetup.existingAncestor(of: URL(fileURLWithPath: location, isDirectory: true))
         let free = (try? root.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
             .volumeAvailableCapacityForImportantUsage ?? 0
-        return String(localized: "Needs about \(diskSizeGB + 20) GB; \(free / 1_000_000_000) GB free.")
+        return Int(free / 1_000_000_000)
+    }
+
+    private var spaceNote: String {
+        String(localized: "Needs about \(neededGB) GB; \(freeGB) GB free.")
     }
 
     // MARK: - Actions
@@ -490,80 +531,254 @@ struct VPhoneLaunchpadNewMachineView: View {
     }
 }
 
+// MARK: - Pairings
+
+/// The catalog's firmware pairings for one device, newest first, as a radio
+/// list in the Firmware card. A long catalog scrolls inside the card, with
+/// the chosen pairing brought into view.
+private struct VPhoneLaunchpadPairingList: View {
+    let label: String
+    let pairings: [VPhoneLaunchpadFirmwareCatalog.Pairing]
+    @Binding var selection: String?
+
+    private static let rowHeight: CGFloat = 36
+    private static let visibleRows = 6
+
+    var body: some View {
+        if pairings.count > Self.visibleRows {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    rows
+                }
+                .frame(height: Self.rowHeight * (CGFloat(Self.visibleRows) + 0.5))
+                .onAppear {
+                    if let selection {
+                        proxy.scrollTo(selection, anchor: .center)
+                    }
+                }
+            }
+        } else {
+            rows
+        }
+    }
+
+    private var rows: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(pairings.enumerated()), id: \.element.id) { index, pairing in
+                if index > 0 {
+                    DK.Palette.dividerSoft.frame(height: DK.Metric.hairline)
+                }
+                row(pairing)
+                    .id(pairing.id)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text(verbatim: label))
+        .onMoveCommand { direction in
+            let step = switch direction {
+            case .up: -1
+            case .down: 1
+            default: 0
+            }
+            guard step != 0, let index = pairings.firstIndex(where: { $0.id == selection }) else {
+                return
+            }
+            let next = min(max(index + step, 0), pairings.count - 1)
+            selection = pairings[next].id
+        }
+    }
+
+    private func row(_ pairing: VPhoneLaunchpadFirmwareCatalog.Pairing) -> some View {
+        let isSelected = pairing.id == selection
+        return Button {
+            selection = pairing.id
+        } label: {
+            HStack(spacing: DK.Space.s3) {
+                Circle()
+                    .strokeBorder(isSelected ? DK.Palette.accent : DK.Palette.inkDisabled, lineWidth: isSelected ? 5 : 1.5)
+                    .frame(width: 16, height: 16)
+                Text(verbatim: pairing.ios.name)
+                    .foregroundStyle(DK.Palette.ink)
+                if !pairing.build.isEmpty {
+                    Text(verbatim: pairing.build)
+                        .font(DK.Typeface.mono)
+                        .foregroundStyle(DK.Palette.muted)
+                }
+                Spacer(minLength: 0)
+            }
+            .font(DK.Typeface.body)
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, minHeight: Self.rowHeight, alignment: .leading)
+            .background(isSelected ? DK.Palette.accentTint : .clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(pairing.ios.url)
+        .accessibilityLabel(Text(verbatim: pairing.build.isEmpty ? pairing.ios.name : "\(pairing.ios.name) (\(pairing.build))"))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+}
+
 // MARK: - Pipeline
 
 /// The pipeline, which keeps running when this sheet closes. A failure shows
-/// on its step; the log, which records why, opens in its own sheet.
+/// on its step and in the footer; the end of the log is shown under the
+/// steps, and the whole log opens in its own sheet.
 struct VPhoneLaunchpadCreationView: View {
     let creation: VPhoneLaunchpadCreationPipeline
     @Environment(\.dismiss) private var dismiss
     @State private var showsLog = false
 
+    private typealias Step = VPhoneLaunchpadCreationPipeline.Step
+
     var body: some View {
-        VPhoneLaunchpadSheet(Text("Creating \(creation.options.name)")) {
-            Form {
-                Section {
-                    ForEach(VPhoneLaunchpadCreationPipeline.Step.allCases) { step in
-                        stepRow(step)
-                    }
-                } footer: {
-                    if creation.isRunning {
-                        Text("Creation continues if you close this window.").foregroundStyle(.secondary)
-                    }
+        DKSheet(
+            String(localized: "Creating \(creation.options.name)"),
+            subtitle: creation.isRunning ? String(localized: "Creation continues if you close this window.") : nil,
+            width: DKSheetMetrics.defaultWidth,
+            note: failureNote,
+            leading: leadingActions,
+            trailing: trailingActions,
+        ) {
+            DKStepStrip(segments: Step.allCases.map(segment))
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Step.allCases) { step in
+                    stepRow(step)
                 }
             }
-            .formStyle(.grouped)
-        } accessory: {
-            Button("Open Log") { showsLog = true }
-        } actions: {
-            if creation.isRunning {
-                Button("Stop Creating", role: .destructive) { creation.cancel() }
-            }
-            if !creation.isRunning, let step = creation.failedStep {
-                Button("Retry from \(step.title)") { creation.start(from: step) }
-            }
-            Button("Close") { dismiss() }
-                .keyboardShortcut(.cancelAction)
+            VPhoneLaunchpadLogTailView(
+                url: creation.logFile,
+                minHeight: 120,
+                label: String(localized: "\(creation.options.name) Creation Log"),
+            )
         }
-        .frame(width: 720)
-        .fixedSize(horizontal: false, vertical: true)
+        .vphoneLaunchpadSheetChrome()
         .sheet(isPresented: $showsLog) {
             VPhoneLaunchpadConsoleView(title: "\(creation.options.name) Creation Log", url: creation.logFile)
         }
     }
 
-    private func stepRow(_ step: VPhoneLaunchpadCreationPipeline.Step) -> some View {
-        LabeledContent {
-            HStack(spacing: 8) {
-                if step == .prepare, let fraction = creation.downloadFraction {
-                    ProgressView(value: fraction)
-                        .controlSize(.small)
-                        .frame(width: 120)
-                    Text(fraction, format: .percent.precision(.fractionLength(0)))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
-                if let duration = creation.durations[step] {
-                    Text(Self.duration(duration))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                }
-                VPhoneLaunchpadCommandInfoButton(command: "vphone-cli \(creation.command(for: step))")
-            }
-        } label: {
-            Label {
-                HStack(spacing: 4) {
-                    Text(step.title)
+    private var leadingActions: [DKSheetAction] {
+        var actions = [DKSheetAction(String(localized: "Open Log"), role: .plain) { showsLog = true }]
+        if creation.isRunning {
+            actions.append(DKSheetAction(String(localized: "Stop Creating"), variant: .danger, role: .plain) { creation.cancel() })
+        }
+        return actions
+    }
+
+    private var trailingActions: [DKSheetAction] {
+        var actions: [DKSheetAction] = []
+        if !creation.isRunning, let step = creation.failedStep {
+            actions.append(DKSheetAction(String(localized: "Retry from \(step.title)"), role: .plain) { creation.start(from: step) })
+        }
+        actions.append(DKSheetAction(String(localized: "Close"), variant: .primary, role: .cancel) { dismiss() })
+        return actions
+    }
+
+    private var failureNote: DKSheetNote? {
+        guard !creation.isRunning, let failure = creation.failure else {
+            return nil
+        }
+        return DKSheetNote(failure.message, tone: .danger)
+    }
+
+    // MARK: - Steps
+
+    private func stepStatus(_ step: Step) -> DKStepStatus {
+        switch creation.status(step) {
+        case .passed, .warning: .done
+        case .running: .active
+        case .failed: .failed
+        case .pending: .pending
+        }
+    }
+
+    /// The download is the only step that reports how far along it is.
+    private func progress(_ step: Step) -> Double? {
+        step == .prepare && creation.status(step) == .running ? creation.downloadFraction : nil
+    }
+
+    private func segment(_ step: Step) -> DKStepSegment {
+        switch stepStatus(step) {
+        case .done: DKStepSegment(fraction: 1, tone: .success)
+        case .failed: DKStepSegment(fraction: 1, tone: .danger)
+        case .active: DKStepSegment(fraction: progress(step) ?? 0, tone: .warning)
+        case .pending: DKStepSegment(fraction: 0, tone: .warning)
+        }
+    }
+
+    private func stepRow(_ step: Step) -> some View {
+        let status = stepStatus(step)
+        let command = creation.command(for: step)
+        return HStack(alignment: .top, spacing: DK.Space.s3) {
+            mark(status)
+                .frame(width: 18, height: 18)
+                .padding(.top, 1)
+                .accessibilityLabel(Text(verbatim: status.accessibilityText))
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: DK.Space.s1) {
+                    Text(verbatim: step.title)
+                        .font(status == .active ? DK.Typeface.bodyStrong : DK.Typeface.body)
+                        .foregroundStyle(status == .pending ? DK.Palette.muted : DK.Palette.ink)
                     if step.needsRoot {
                         Image(systemName: "lock.fill")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(DK.Palette.muted)
                             .help("Runs as root through the privileged helper")
                     }
                 }
-            } icon: {
-                VPhoneLaunchpadStatusIcon(status: creation.status(step))
+                Text(verbatim: command)
+                    .font(DK.Typeface.mono)
+                    .foregroundStyle(DK.Palette.muted)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(command)
+                if let fraction = progress(step) {
+                    HStack(spacing: DK.Space.s2) {
+                        DKProgress(value: fraction, tone: .warning, thin: true, label: step.title)
+                        Text(fraction, format: .percent.precision(.fractionLength(0)))
+                            .font(DK.Typeface.caption)
+                            .monospacedDigit()
+                            .foregroundStyle(DK.Palette.muted)
+                    }
+                    .padding(.top, DK.Space.s1)
+                }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let duration = creation.durations[step] {
+                Text(Self.duration(duration))
+                    .font(DK.Typeface.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(DK.Palette.muted)
+                    .padding(.top, 1)
+            }
+            VPhoneLaunchpadCommandInfoButton(command: "vphone-cli \(command)")
+        }
+        .padding(DK.Space.s2)
+        .background {
+            if status == .active {
+                RoundedRectangle(cornerRadius: DK.Radius.control, style: .continuous)
+                    .fill(DK.Palette.warningSurface)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func mark(_ status: DKStepStatus) -> some View {
+        if status == .active {
+            VPhoneLaunchpadSpinner()
+        } else {
+            DKIcon(status.glyph, size: 18)
+                .foregroundStyle(Self.markColor(status))
+        }
+    }
+
+    private static func markColor(_ status: DKStepStatus) -> Color {
+        switch status {
+        case .done: DK.Palette.success
+        case .active: DK.Palette.muted
+        case .pending: DK.Palette.inkDisabled
+        case .failed: DK.Palette.danger
         }
     }
 

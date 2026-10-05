@@ -1,7 +1,8 @@
 import SwiftUI
+import VPhoneDesignKit
 
-/// New Machine's Advanced page: network, patches and restore options, as
-/// sections of New Machine's form. It edits New Machine's own state.
+/// New Machine's Advanced page: network, restore options and patches, as
+/// sections of New Machine's sheet. It edits New Machine's own state.
 struct VPhoneLaunchpadNewMachineAdvancedView: View {
     @Binding var network: String
     @Binding var patches: VPhoneLaunchpadPatchSelection
@@ -18,38 +19,56 @@ struct VPhoneLaunchpadNewMachineAdvancedView: View {
     @State private var showsPatchSettings = false
 
     var body: some View {
-        Section("Network") {
-            Picker("Mode", selection: $network) {
-                Text("NAT").tag("nat")
-                Text("Bridged").tag("bridged")
-                Text("Tunnel").tag("tunnel")
-                Text("None").tag("none")
+        VStack(alignment: .leading, spacing: DK.Space.s4) {
+            DKSection(String(localized: "Network")) {
+                DKFormRow(String(localized: "Mode"), fill: true) {
+                    Picker("Mode", selection: $network) {
+                        Text("NAT").tag("nat")
+                        Text("Bridged").tag("bridged")
+                        Text("Tunnel").tag("tunnel")
+                        Text("None").tag("none")
+                    }
+                    .dkFieldPicker(fill: true)
+                }
+                if network == "tunnel" {
+                    VPhoneLaunchpadCardMessage(text: Text("Traffic leaves through this Mac's own connections, so it follows the Mac's VPN."))
+                }
             }
-            if network == "tunnel" {
-                Text("Traffic leaves through this Mac's own connections, so it follows the Mac's VPN.")
-                    .foregroundStyle(.secondary)
+
+            DKSection(String(localized: "Options")) {
+                VPhoneLaunchpadSwitchRow(isOn: $keepArtifacts) {
+                    Text("Keep prepared restore files")
+                }
             }
-        }
 
-        patchSection
-
-        Section("Options") {
-            Toggle("Keep prepared restore files", isOn: $keepArtifacts)
+            patchSection
         }
     }
 
     // MARK: - Patches
 
     private var patchSection: some View {
-        Section {
+        VPhoneLaunchpadSheetSection(String(localized: "Patches")) {
             if let patchCatalog {
-                Picker("Preset", selection: presetBinding) {
-                    ForEach(patchCatalog.presets) { preset in
-                        Text(verbatim: preset.displayTitle).tag(preset.identifier)
+                DKFormRow(String(localized: "Preset"), fill: true) {
+                    Picker("Preset", selection: presetBinding) {
+                        ForEach(patchCatalog.presets) { preset in
+                            Text(verbatim: preset.displayTitle).tag(preset.identifier)
+                        }
                     }
+                    .dkFieldPicker(fill: true)
                 }
-                LabeledContent("Patches") {
-                    Button("Patch Settings…") { showsPatchSettings = true }
+                DKFormRow(String(localized: "Patches"), fill: true) {
+                    Group {
+                        if patches.hasOverrides {
+                            Text("Differs from the preset: \(patches.blocked.count) off, \(patches.allowed.count) on.")
+                        } else {
+                            Text(verbatim: "")
+                        }
+                    }
+                    .foregroundStyle(DK.Palette.muted)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    DKButton(String(localized: "Patch Settings…"), size: .small) { showsPatchSettings = true }
                         .sheet(isPresented: $showsPatchSettings) {
                             VPhoneLaunchpadPatchSettingsView(initial: patches, bundleVersion: bundleVersion) { selection in
                                 patches = selection
@@ -59,18 +78,11 @@ struct VPhoneLaunchpadNewMachineAdvancedView: View {
                         }
                 }
             } else if let patchCatalogError {
-                Label(patchCatalogError, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
+                VPhoneLaunchpadCardMessage(text: Text(verbatim: patchCatalogError), isWarning: true)
             } else {
-                HStack {
-                    ProgressView().controlSize(.small)
-                    Text("Reading the bundle's patches…").foregroundStyle(.secondary)
-                }
+                VPhoneLaunchpadCardLoading(text: Text("Reading the bundle's patches…"))
             }
-        } header: {
-            Text("Patches")
-        } footer: {
+        } footnote: {
             patchNote
         }
     }
@@ -78,22 +90,16 @@ struct VPhoneLaunchpadNewMachineAdvancedView: View {
     @ViewBuilder
     private var patchNote: some View {
         let essentialOff = patchCatalog.map { patches.bootEssentialOff(in: $0) } ?? []
-        VStack(alignment: .leading, spacing: 4) {
-            if let summary = patchCatalog?.preset(patches.preset)?.displaySummary, !summary.isEmpty {
-                Text(verbatim: summary).foregroundStyle(.secondary)
+        if let summary = patchCatalog?.preset(patches.preset)?.displaySummary, !summary.isEmpty {
+            Text(verbatim: summary)
+        }
+        if !essentialOff.isEmpty {
+            Label {
+                Text("^[\(essentialOff.count) boot-essential patch](inflect: true) off: \(essentialOff.map(\.identifier).joined(separator: ", "))")
+            } icon: {
+                DKIcon(.warning, size: 12)
             }
-            if patches.hasOverrides {
-                Text("Differs from the preset: \(patches.blocked.count) off, \(patches.allowed.count) on.")
-                    .foregroundStyle(.secondary)
-            }
-            if !essentialOff.isEmpty {
-                Label {
-                    Text("^[\(essentialOff.count) boot-essential patch](inflect: true) off: \(essentialOff.map(\.identifier).joined(separator: ", "))")
-                } icon: {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                }
-                .foregroundStyle(.orange)
-            }
+            .foregroundStyle(DK.Palette.warningInk)
         }
     }
 
