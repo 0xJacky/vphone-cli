@@ -23,6 +23,17 @@ enum VPhoneControlsKey: String, CaseIterable, Identifiable {
         [.left, .up, .down, .right].contains(self)
     }
 
+    /// The arrow an arrow key shows on its button.
+    var arrowSymbol: String {
+        switch self {
+        case .left: "←"
+        case .up: "↑"
+        case .down: "↓"
+        case .right: "→"
+        default: ""
+        }
+    }
+
     var title: String {
         switch self {
         case .return: String(localized: "Return", bundle: VPhoneLocalization.bundle)

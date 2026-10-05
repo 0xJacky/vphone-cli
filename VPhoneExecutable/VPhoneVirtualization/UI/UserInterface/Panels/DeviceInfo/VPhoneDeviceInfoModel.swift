@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import VPhoneDesignKit
 
 @MainActor
 @Observable
@@ -10,8 +11,7 @@ final class VPhoneDeviceInfoModel {
     private(set) var isLoading = false
     private(set) var status: VPhoneGuestToolStatus?
     var autoRefresh = false
-    var addressSortOrder = [KeyPathComparator(\VPhoneDeviceNetworkAddress.interface)]
-    var selectedAddresses = Set<VPhoneDeviceNetworkAddress.ID>()
+    var selectedAddress: VPhoneDeviceNetworkAddress.ID?
 
     /// The raw `device.info` result, `device.environment` result and the
     /// `memory` object of `memory.pressure`.
@@ -69,8 +69,9 @@ final class VPhoneDeviceInfoModel {
         let options: JSONSerialization.WritingOptions = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         infoJSON = (try? JSONSerialization.data(withJSONObject: result, options: options))
             .flatMap { String(data: $0, encoding: .utf8) }
-        let known = Set(addresses.map(\.id))
-        selectedAddresses.formIntersection(known)
+        if let selectedAddress, !addresses.contains(where: { $0.id == selectedAddress }) {
+            self.selectedAddress = nil
+        }
     }
 
     func apply(environmentResult result: [String: Any]) {
@@ -92,11 +93,8 @@ final class VPhoneDeviceInfoModel {
         copy(value, message: String(localized: "Copied the value to the Mac clipboard.", bundle: VPhoneLocalization.bundle))
     }
 
-    func copyAddresses(_ ids: Set<VPhoneDeviceNetworkAddress.ID>, full: Bool) {
-        let rows = sortedAddresses.filter { ids.contains($0.id) }
-        guard !rows.isEmpty else { return }
-        let text = rows.map { full ? $0.line : $0.address }.joined(separator: "\n")
-        copy(text, message: String(localized: "Copied the selection to the Mac clipboard.", bundle: VPhoneLocalization.bundle))
+    func copyAddress(_ address: VPhoneDeviceNetworkAddress, full: Bool) {
+        copy(full ? address.line : address.address, message: String(localized: "Copied the selection to the Mac clipboard.", bundle: VPhoneLocalization.bundle))
     }
 
     private func copy(_ text: String, message: String) {
@@ -117,8 +115,9 @@ final class VPhoneDeviceInfoModel {
         return raw.compactMap(VPhoneDeviceNetworkAddress.init).filter { seen.insert($0.id).inserted }
     }
 
+    /// The addresses by interface, IPv4 before IPv6.
     var sortedAddresses: [VPhoneDeviceNetworkAddress] {
-        addresses.sorted(using: addressSortOrder)
+        addresses.sorted { ($0.interface, $0.family, $0.address) < ($1.interface, $1.family, $1.address) }
     }
 
     // MARK: - Sections
@@ -127,28 +126,37 @@ final class VPhoneDeviceInfoModel {
         guard let info else { return [] }
         var sections = [
             deviceSection(info),
-            hardwareSection(info),
             powerSection(info),
-            displaySection(info),
             securitySection(info),
+            agentSection(info),
+            hardwareSection(info),
+            displaySection(info),
         ]
-        if let environment {
+        // The full environment report only says something on a jailbroken guest.
+        if let environment, environment.string("layout") != nil {
             sections.append(environmentSection(environment))
         }
-        sections.append(agentSection(info))
         return sections
+    }
+
+    func sections(in column: VPhoneDeviceInfoSection.Column) -> [VPhoneDeviceInfoSection] {
+        sections.filter { $0.kind.column == column }
     }
 
     private func deviceSection(_ info: [String: Any]) -> VPhoneDeviceInfoSection {
         let kernel = [info.string("sysname"), info.string("kernel")].compactMap(\.self).joined(separator: " ")
         return VPhoneDeviceInfoSection(kind: .device, title: Self.text("Device"), rows: [
-            VPhoneDeviceInfoRow(label: Self.text("Model"), value: Self.value(info.string("model"))),
-            VPhoneDeviceInfoRow(label: Self.text("iOS Version"), value: Self.value(info.string("ios_version"))),
-            VPhoneDeviceInfoRow(label: Self.text("Kernel"), value: Self.value(kernel)),
-            VPhoneDeviceInfoRow(label: Self.text("Host Name"), value: Self.value(info.string("host"))),
+            VPhoneDeviceInfoRow(label: Self.text("Model"), value: Self.value(info.string("model")), monospaced: true),
+            VPhoneDeviceInfoRow(label: Self.text("iOS Version"), value: Self.value(info.string("ios_version")), monospaced: true),
+            VPhoneDeviceInfoRow(label: Self.text("Kernel"), value: Self.value(kernel), monospaced: true),
+            VPhoneDeviceInfoRow(label: Self.text("Host Name"), value: Self.value(info.string("host")), monospaced: true),
             VPhoneDeviceInfoRow(label: Self.text("Boot Time"), value: VPhonePanelFormat.date(info.double("boot_time"))),
             VPhoneDeviceInfoRow(label: Self.text("Uptime"), value: VPhonePanelFormat.duration(info.double("uptime_seconds"))),
-            VPhoneDeviceInfoRow(label: Self.text("Boot Session UUID"), value: Self.value(info.string("boot_session_uuid"))),
+            VPhoneDeviceInfoRow(
+                label: Self.text("Boot Session UUID"),
+                value: Self.value(info.string("boot_session_uuid")),
+                monospaced: true,
+            ),
         ])
     }
 
@@ -167,7 +175,7 @@ final class VPhoneDeviceInfoModel {
                 localized: "\(VPhonePanelFormat.bytes(used)) used of \(VPhonePanelFormat.bytes(total)) (\(VPhonePanelFormat.percent(fraction)))",
                 bundle: VPhoneLocalization.bundle,
             )
-            let tone: VPhoneDeviceInfoRow.Tone = fraction >= 0.95 ? .critical : fraction >= 0.85 ? .warning : .good
+            let tone: DKTone = fraction >= 0.95 ? .danger : fraction >= 0.85 ? .warning : .success
             rows.append(VPhoneDeviceInfoRow(label: Self.text("Storage"), value: value, tone: tone, gauge: fraction))
         } else {
             rows.append(VPhoneDeviceInfoRow(label: Self.text("Storage"), value: "—"))
@@ -185,12 +193,12 @@ final class VPhoneDeviceInfoModel {
             return VPhoneDeviceInfoRow(label: label, value: Self.text("Unavailable"))
         }
         let name: String
-        let tone: VPhoneDeviceInfoRow.Tone
+        let tone: DKTone
         switch level {
-        case 0, 1: (name, tone) = (Self.text("Normal"), .good)
+        case 0, 1: (name, tone) = (Self.text("Normal"), .success)
         case 2: (name, tone) = (Self.text("Warning"), .warning)
-        case 4: (name, tone) = (Self.text("Urgent"), .critical)
-        case 8: (name, tone) = (Self.text("Critical"), .critical)
+        case 4: (name, tone) = (Self.text("Urgent"), .danger)
+        case 8: (name, tone) = (Self.text("Critical"), .danger)
         default: (name, tone) = ("\(Self.text("Unknown")) (\(level))", .warning)
         }
         guard let available = memory.double("memorystatus_level") else {
@@ -206,22 +214,26 @@ final class VPhoneDeviceInfoModel {
 
     private func powerSection(_ info: [String: Any]) -> VPhoneDeviceInfoSection {
         let battery = info.object("battery") ?? [:]
-        let stateName: String = switch battery.int("state") {
+        let state = battery.int("state")
+        let stateName: String = switch state {
         case 1: Self.text("Unplugged")
         case 2: Self.text("Charging")
         case 3: Self.text("Full")
         default: Self.text("Unknown")
         }
         // UIDevice reports -1 when the level is unknown.
-        let batteryValue: String = if let fraction = battery.double("fraction"), fraction >= 0 {
-            "\(VPhonePanelFormat.percent(fraction)) · \(stateName)"
-        } else {
-            stateName
+        let fraction = battery.double("fraction").flatMap { $0 >= 0 ? $0 : nil }
+        let batteryValue = fraction.map { "\(VPhonePanelFormat.percent($0)) · \(stateName)" } ?? stateName
+        var batteryTone: DKTone?
+        if state == 2 || state == 3 {
+            batteryTone = .success
+        } else if state == 1, let fraction, fraction < 0.2 {
+            batteryTone = .warning
         }
         let lock = info.object("lock") ?? [:]
         let lowPower = info.object("low_power_mode")?.bool("enabled")
         return VPhoneDeviceInfoSection(kind: .power, title: Self.text("Power"), rows: [
-            VPhoneDeviceInfoRow(label: Self.text("Battery"), value: batteryValue),
+            VPhoneDeviceInfoRow(label: Self.text("Battery"), value: batteryValue, tone: batteryTone),
             VPhoneDeviceInfoRow(
                 label: Self.text("Low Power Mode"),
                 value: Self.onOff(lowPower),
@@ -232,10 +244,6 @@ final class VPhoneDeviceInfoModel {
                 value: lock.bool("locked").map { $0 ? Self.text("Locked") : Self.text("Unlocked") } ?? "—",
             ),
             VPhoneDeviceInfoRow(label: Self.text("Screen"), value: lock.bool("screen_off").map { $0 ? Self.text("Off") : Self.text("On") } ?? "—"),
-            VPhoneDeviceInfoRow(
-                label: Self.text("Passcode"),
-                value: lock.bool("passcode_enabled").map { $0 ? Self.text("Set") : Self.text("Not Set") } ?? "—",
-            ),
         ])
     }
 
@@ -259,14 +267,12 @@ final class VPhoneDeviceInfoModel {
         } else {
             orientationName
         }
-        let rotationLocked = rotation.bool("locked")
         return VPhoneDeviceInfoSection(kind: .display, title: Self.text("Display"), rows: [
-            VPhoneDeviceInfoRow(label: Self.text("Size"), value: size),
-            VPhoneDeviceInfoRow(label: Self.text("Pixels"), value: pixels),
+            VPhoneDeviceInfoRow(label: Self.text("Size"), value: size, monospaced: true),
+            VPhoneDeviceInfoRow(label: Self.text("Pixels"), value: pixels, monospaced: true),
             VPhoneDeviceInfoRow(label: Self.text("Scale"), value: scale),
             VPhoneDeviceInfoRow(label: Self.text("Orientation"), value: orientation),
-            VPhoneDeviceInfoRow(label: Self.text("Device Orientation"), value: Self.deviceOrientation(rotation.int("device_orientation"))),
-            VPhoneDeviceInfoRow(label: Self.text("Rotation Lock"), value: Self.onOff(rotationLocked)),
+            VPhoneDeviceInfoRow(label: Self.text("Rotation Lock"), value: Self.onOff(rotation.bool("locked"))),
             VPhoneDeviceInfoRow(label: Self.text("Brightness"), value: VPhonePanelFormat.percent(brightness.double("value"))),
             VPhoneDeviceInfoRow(label: Self.text("Auto-Brightness"), value: Self.onOff(brightness.bool("auto"))),
             VPhoneDeviceInfoRow(label: Self.text("Volume"), value: VPhonePanelFormat.percent(info.double("volume"))),
@@ -276,29 +282,29 @@ final class VPhoneDeviceInfoModel {
     private func securitySection(_ info: [String: Any]) -> VPhoneDeviceInfoSection {
         let developer = info.object("developer_mode") ?? [:]
         let developerValue: String
-        let developerTone: VPhoneDeviceInfoRow.Tone?
+        let developerTone: DKTone?
         if developer.bool("enabled") == true {
-            (developerValue, developerTone) = (Self.text("On"), .good)
+            (developerValue, developerTone) = (Self.text("On"), .success)
         } else if developer.bool("armed") == true {
             (developerValue, developerTone) = (Self.text("On After Restart"), .warning)
         } else if developer.bool("enabled") == false {
-            (developerValue, developerTone) = (Self.text("Off"), nil)
+            (developerValue, developerTone) = (Self.text("Off"), .idle)
         } else {
             (developerValue, developerTone) = (Self.text("Unavailable"), nil)
         }
         let jailbreak = info.object("jailbreak") ?? [:]
-        let layout = jailbreak.string("layout")
-        return VPhoneDeviceInfoSection(kind: .security, title: Self.text("Security"), rows: [
+        var rows = [
             VPhoneDeviceInfoRow(label: Self.text("Developer Mode"), value: developerValue, tone: developerTone),
             VPhoneDeviceInfoRow(label: Self.text("Developer Mode Writable"), value: Self.yesNo(developer.bool("writable"))),
-            VPhoneDeviceInfoRow(
-                label: Self.text("Jailbreak Layout"),
-                value: layout ?? Self.text("Not Detected"),
-                tone: layout == nil ? nil : .info,
-            ),
-            VPhoneDeviceInfoRow(label: Self.text("jbroot"), value: Self.value(jailbreak.string("jbroot"))),
-            VPhoneDeviceInfoRow(label: Self.text("Detected By"), value: Self.value(jailbreak.string("source"))),
-        ])
+        ]
+        if let layout = jailbreak.string("layout") {
+            rows.append(VPhoneDeviceInfoRow(label: Self.text("Jailbreak Layout"), value: layout, tone: .info))
+            rows.append(VPhoneDeviceInfoRow(label: Self.text("jbroot"), value: Self.value(jailbreak.string("jbroot")), monospaced: true))
+            rows.append(VPhoneDeviceInfoRow(label: Self.text("Detected By"), value: Self.value(jailbreak.string("source"))))
+        } else {
+            rows.append(VPhoneDeviceInfoRow(label: Self.text("Jailbreak Layout"), value: Self.text("Not Detected"), tone: .idle))
+        }
+        return VPhoneDeviceInfoSection(kind: .security, title: Self.text("Security"), rows: rows)
     }
 
     /// icli `environmentReport()`, as served by `device.environment`.
@@ -310,25 +316,29 @@ final class VPhoneDeviceInfoModel {
         let basebin = report.string("basebin_version") ?? ""
         let layout = report.string("layout")
         return VPhoneDeviceInfoSection(kind: .environment, title: Self.text("Jailbreak Environment"), rows: [
-            VPhoneDeviceInfoRow(label: Self.text("Jailbreak Layout"), value: layout ?? Self.text("Not Detected"), tone: layout == nil ? nil : .info),
-            VPhoneDeviceInfoRow(label: Self.text("jbroot"), value: Self.value(report.string("jbroot"))),
+            VPhoneDeviceInfoRow(label: Self.text("Jailbreak Layout"), value: layout ?? Self.text("Not Detected"), tone: layout == nil ? .idle : .info),
+            VPhoneDeviceInfoRow(label: Self.text("jbroot"), value: Self.value(report.string("jbroot")), monospaced: true),
             VPhoneDeviceInfoRow(label: Self.text("jbroot Source"), value: Self.value(report.string("jbroot_source"))),
-            VPhoneDeviceInfoRow(label: Self.text("System Root Path"), value: Self.value(report.string("rootfs_prefix"))),
+            VPhoneDeviceInfoRow(label: Self.text("System Root Path"), value: Self.value(report.string("rootfs_prefix")), monospaced: true),
             VPhoneDeviceInfoRow(label: Self.text("Markers"), value: markers.isEmpty ? Self.text("None") : markers.joined(separator: ", ")),
-            VPhoneDeviceInfoRow(label: Self.text("BaseBin Version"), value: basebin.isEmpty ? "—" : basebin),
+            VPhoneDeviceInfoRow(label: Self.text("BaseBin Version"), value: basebin.isEmpty ? "—" : basebin, monospaced: true),
             VPhoneDeviceInfoRow(label: Self.text("Bootstrap Tools"), value: present.isEmpty ? Self.text("None") : present.joined(separator: ", ")),
-            VPhoneDeviceInfoRow(label: Self.text("Missing Tools"), value: missing.isEmpty ? Self.text("None") : missing.joined(separator: ", ")),
+            VPhoneDeviceInfoRow(
+                label: Self.text("Missing Tools"),
+                value: missing.isEmpty ? Self.text("None") : missing.joined(separator: ", "),
+                tone: missing.isEmpty ? nil : .warning,
+            ),
             VPhoneDeviceInfoRow(label: Self.text("Platform Binary"), value: Self.yesNo(report.bool("platform_binary"))),
             VPhoneDeviceInfoRow(label: Self.text("RootHide Runtime"), value: Self.yesNo(report.bool("roothide_runtime_active"))),
-            VPhoneDeviceInfoRow(label: Self.text("Effective UID"), value: Self.value(report.string("euid"))),
+            VPhoneDeviceInfoRow(label: Self.text("Effective UID"), value: Self.value(report.string("euid")), monospaced: true),
         ])
     }
 
     private func agentSection(_ info: [String: Any]) -> VPhoneDeviceInfoSection {
         let agent = info.object("agent") ?? [:]
         return VPhoneDeviceInfoSection(kind: .agent, title: Self.text("vphoned Agent"), rows: [
-            VPhoneDeviceInfoRow(label: Self.text("Binary SHA-256"), value: Self.value(agent.string("binary_hash")), truncatesMiddle: true),
-            VPhoneDeviceInfoRow(label: Self.text("PID"), value: Self.value(agent.string("pid"))),
+            VPhoneDeviceInfoRow(label: Self.text("Binary SHA-256"), value: Self.value(agent.string("binary_hash")), monospaced: true),
+            VPhoneDeviceInfoRow(label: Self.text("PID"), value: Self.value(agent.string("pid")), monospaced: true),
         ])
     }
 
@@ -360,19 +370,5 @@ final class VPhoneDeviceInfoModel {
     private static func byteCount(_ value: Double) -> Int64? {
         guard value.isFinite, value >= 0, value < Double(Int64.max) else { return nil }
         return Int64(value)
-    }
-
-    /// UIDeviceOrientation raw values.
-    private static func deviceOrientation(_ value: Int?) -> String {
-        switch value {
-        case 1: text("Portrait")
-        case 2: text("Upside Down")
-        case 3: text("Landscape Left")
-        case 4: text("Landscape Right")
-        case 5: text("Face Up")
-        case 6: text("Face Down")
-        case nil: "—"
-        default: text("Unknown")
-        }
     }
 }

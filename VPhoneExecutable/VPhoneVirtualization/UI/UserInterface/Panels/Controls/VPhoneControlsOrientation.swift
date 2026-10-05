@@ -25,6 +25,16 @@ enum VPhoneControlsOrientation: Int, CaseIterable, Identifiable {
         }
     }
 
+    /// The shorter label of the orientation segment.
+    var shortTitle: String {
+        switch self {
+        case .portrait: String(localized: "Portrait", bundle: VPhoneLocalization.bundle)
+        case .landscapeLeft: String(localized: "Left", bundle: VPhoneLocalization.bundle)
+        case .landscapeRight: String(localized: "Right", bundle: VPhoneLocalization.bundle)
+        case .upsideDown: String(localized: "Upside Down", bundle: VPhoneLocalization.bundle)
+        }
+    }
+
     var title: String {
         switch self {
         case .portrait: String(localized: "Portrait", bundle: VPhoneLocalization.bundle)

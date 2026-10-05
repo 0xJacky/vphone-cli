@@ -1,4 +1,5 @@
 import Foundation
+import VPhoneDesignKit
 
 /// The names `input.button` accepts.
 enum VPhoneControlsButton: String, CaseIterable, Identifiable {
@@ -48,6 +49,17 @@ enum VPhoneControlsButton: String, CaseIterable, Identifiable {
         case .volumeUp: String(localized: "Press the volume up button", bundle: VPhoneLocalization.bundle)
         case .volumeDown: String(localized: "Press the volume down button", bundle: VPhoneLocalization.bundle)
         case .mute: String(localized: "Toggle mute for the active audio category", bundle: VPhoneLocalization.bundle)
+        }
+    }
+
+    var glyph: DKGlyph {
+        switch self {
+        case .home: .home
+        case .lock: .lock
+        case .wake: .sun
+        case .volumeUp: .speakerPlus
+        case .volumeDown: .speakerMinus
+        case .mute: .mute
         }
     }
 

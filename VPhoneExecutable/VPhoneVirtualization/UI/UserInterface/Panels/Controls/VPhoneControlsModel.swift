@@ -44,6 +44,8 @@ final class VPhoneControlsModel {
     var isConnected: Bool
     private(set) var activity: Activity?
     private(set) var status: VPhoneGuestToolStatus?
+    /// When the guest's values were last read.
+    private(set) var readAt: Date?
 
     // MARK: - Display State
 
@@ -152,6 +154,9 @@ final class VPhoneControlsModel {
         // audio.state fails when no audio session is active; that is a readout, not a failure.
         await readAudioState()
 
+        if failures < reads.count {
+            readAt = .now
+        }
         if failures == reads.count {
             fail(String(localized: "Unable to read the guest controls. Check the connection, then try again.", bundle: VPhoneLocalization.bundle))
         } else if failures > 0 {

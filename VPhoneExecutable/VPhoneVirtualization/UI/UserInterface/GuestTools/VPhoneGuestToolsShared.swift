@@ -1,4 +1,5 @@
 import SwiftUI
+import VPhoneDesignKit
 
 // MARK: - Mode
 
@@ -47,6 +48,14 @@ struct VPhoneGuestToolModePicker: View {
 struct VPhoneGuestToolStatus {
     let message: String
     let isError: Bool
+}
+
+extension DKStatusBar {
+    /// A Guest Tools page's status bar: the connection, then what the page is
+    /// doing or last did, and `detail` (the guest method, a count) at the end.
+    init(isConnected: Bool, activity: String?, status: VPhoneGuestToolStatus?, detail: String? = nil) {
+        self.init(isConnected: isConnected, text: activity ?? status?.message, detail: detail)
+    }
 }
 
 /// The bottom bar shared by the guest windows: connection, activity, result.

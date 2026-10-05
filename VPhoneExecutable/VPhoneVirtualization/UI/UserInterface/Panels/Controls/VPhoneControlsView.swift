@@ -1,34 +1,24 @@
 import SwiftUI
+import VPhoneDesignKit
 
 struct VPhoneControlsView: View {
     @Bindable var model: VPhoneControlsModel
 
     var body: some View {
         VStack(spacing: 0) {
-            Form {
-                displaySection
-                audioSection
-                powerSection
-                buttonsSection
-                keyboardSection
-                notificationSection
+            header
+            VPhoneGuestToolContent {
+                VPhoneGuestToolColumns {
+                    displaySection
+                    audioSection
+                    buttonsSection
+                } trailing: {
+                    keyboardSection
+                    notificationSection
+                }
             }
-            .formStyle(.grouped)
             .disabled(!model.isConnected)
-
-            Divider()
-            VPhoneGuestToolStatusBar(
-                isConnected: model.isConnected,
-                activity: model.activity?.title,
-                status: model.status,
-            )
-        }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
-                    .help("Read the guest's current values again (⌘R)")
-                    .disabled(model.isBusy)
-            }
+            DKStatusBar(isConnected: model.isConnected, activity: model.activity?.title, status: model.status)
         }
         .guestToolShortcuts([
             VPhoneGuestToolShortcut(key: "r", isEnabled: !model.isBusy) {
@@ -41,87 +31,108 @@ struct VPhoneControlsView: View {
         .task { await model.run() }
     }
 
-    // MARK: - Display
+    // MARK: - Header
+
+    private var header: some View {
+        DKPageHeader(
+            String(localized: "Controls", bundle: VPhoneLocalization.bundle),
+            subtitle: model.readAt.map {
+                String(localized: "Values read from the guest at \($0.formatted(date: .omitted, time: .standard))", bundle: VPhoneLocalization.bundle)
+            },
+            actions: [
+                DKButtonSpec(
+                    String(localized: "Refresh", bundle: VPhoneLocalization.bundle),
+                    glyph: .refresh,
+                    isEnabled: !model.isBusy,
+                    help: String(localized: "Read the guest's current values again (⌘R)", bundle: VPhoneLocalization.bundle),
+                ) { Task { await model.refresh() } },
+            ],
+        )
+    }
+
+    // MARK: - Display and Power
 
     private var displaySection: some View {
-        Section("Display") {
-            LabeledContent("Brightness") {
-                HStack(spacing: 8) {
-                    Slider(value: $model.brightness, in: 0 ... 1) { editing in
-                        if !editing {
-                            Task { await model.commitBrightness() }
-                        }
-                    }
-                    .labelsHidden()
-                    .accessibilityLabel("Brightness")
-                    .disabled(!model.canWrite || model.guestBrightness == nil)
-                    value(model.guestBrightness == nil ? "—" : VPhonePanelFormat.percent(model.brightness))
+        DKSection(String(localized: "Display and Power", bundle: VPhoneLocalization.bundle)) {
+            DKFormRow(String(localized: "Orientation", bundle: VPhoneLocalization.bundle)) {
+                if let orientation = model.orientation {
+                    DKSegmented(
+                        String(localized: "Orientation", bundle: VPhoneLocalization.bundle),
+                        selection: orientationBinding(orientation),
+                        options: VPhoneControlsOrientation.allCases.map { DKSegmentOption($0.shortTitle, value: $0) },
+                    )
+                    .disabled(!model.canWrite)
+                    .help(String(localized: "Rotate the guest interface", bundle: VPhoneLocalization.bundle))
+                } else {
+                    unavailable
                 }
             }
-
-            LabeledContent("Auto-Brightness") {
-                value(onOff(model.autoBrightness))
+            DKFormRow(String(localized: "Rotation Lock", bundle: VPhoneLocalization.bundle)) {
+                switchControl(
+                    String(localized: "Rotation Lock", bundle: VPhoneLocalization.bundle),
+                    value: model.rotationLocked,
+                    help: String(localized: "Keep the guest interface from rotating with the device", bundle: VPhoneLocalization.bundle),
+                ) { await model.setRotationLocked($0) }
             }
-
-            Picker("Orientation", selection: orientationBinding) {
-                if model.orientation == nil {
-                    Text("Unknown").tag(VPhoneControlsOrientation?.none)
-                }
-                ForEach(VPhoneControlsOrientation.allCases) { orientation in
-                    Text(orientation.title).tag(VPhoneControlsOrientation?.some(orientation))
-                }
+            DKFormRow(String(localized: "Low Power Mode", bundle: VPhoneLocalization.bundle)) {
+                switchControl(
+                    String(localized: "Low Power Mode", bundle: VPhoneLocalization.bundle),
+                    value: model.lowPowerMode,
+                    help: String(localized: "Turn Low Power Mode on or off", bundle: VPhoneLocalization.bundle),
+                ) { await model.setLowPowerMode($0) }
             }
-            .disabled(!model.canWrite || model.orientation == nil)
-            .help("Rotate the guest interface")
-
-            Toggle("Rotation Lock", isOn: toggleBinding(model.rotationLocked) { locked in
-                await model.setRotationLocked(locked)
-            })
-            .disabled(!model.canWrite || model.rotationLocked == nil)
-            .help("Keep the guest interface from rotating with the device")
         }
     }
 
     // MARK: - Audio
 
     private var audioSection: some View {
-        Section("Audio") {
-            Picker("Category", selection: categoryBinding) {
-                ForEach(VPhoneControlsVolumeCategory.allCases) { category in
-                    Text(category.title).tag(category)
-                }
+        DKSection(String(localized: "Audio", bundle: VPhoneLocalization.bundle)) {
+            DKFormRow(String(localized: "Category", bundle: VPhoneLocalization.bundle)) {
+                DKSegmented(
+                    String(localized: "Category", bundle: VPhoneLocalization.bundle),
+                    selection: categoryBinding,
+                    options: VPhoneControlsVolumeCategory.allCases.map { DKSegmentOption($0.title, value: $0) },
+                )
+                .disabled(!model.canWrite)
+                .help(String(localized: "Choose which volume the slider below reads and sets", bundle: VPhoneLocalization.bundle))
             }
-            .disabled(!model.canWrite)
-            .help("Choose which volume the slider below reads and sets")
-
-            LabeledContent("Volume") {
-                HStack(spacing: 8) {
-                    Slider(value: $model.volume, in: 0 ... 1) { editing in
-                        if !editing {
-                            Task { await model.commitVolume() }
-                        }
+            DKFormRow(String(localized: "Volume", bundle: VPhoneLocalization.bundle)) {
+                Slider(value: $model.volume, in: 0 ... 1) { editing in
+                    if !editing {
+                        Task { await model.commitVolume() }
                     }
-                    .labelsHidden()
-                    .accessibilityLabel("Volume")
-                    .disabled(!model.canWrite || model.guestVolume == nil)
-                    value(model.guestVolume == nil ? "—" : VPhonePanelFormat.percent(model.volume))
                 }
+                .labelsHidden()
+                .tint(DK.Palette.accent)
+                .frame(width: 160)
+                .accessibilityLabel(String(localized: "Volume", bundle: VPhoneLocalization.bundle))
+                .disabled(!model.canWrite || model.guestVolume == nil)
+                Text(model.guestVolume == nil ? "—" : VPhonePanelFormat.percent(model.volume))
+                    .font(DK.Typeface.mono)
+                    .monospacedDigit()
+                    .foregroundStyle(DK.Palette.ink)
+                    .frame(width: 36, alignment: .trailing)
             }
-
-            LabeledContent("Active Session") {
-                if let error = model.audioStateError {
-                    VPhonePanelMonoText(error, secondary: true)
-                } else if let category = model.activeAudioCategory {
-                    VPhonePanelMonoText(activeSession(category))
-                } else {
-                    value("—")
-                }
+            DKFormRow(String(localized: "Active Session", bundle: VPhoneLocalization.bundle)) {
+                Text(activeSession)
+                    .font(DK.Typeface.body)
+                    .foregroundStyle(DK.Palette.muted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+                    .help(activeSession)
             }
         }
     }
 
-    private func activeSession(_ category: String) -> String {
+    private var activeSession: String {
+        if let error = model.audioStateError {
+            return error
+        }
+        guard let category = model.activeAudioCategory else { return "—" }
         let name = category.isEmpty ? String(localized: "None", bundle: VPhoneLocalization.bundle) : category
+        guard model.activeAudioVolume != nil || model.activeAudioMuted != nil else { return name }
         let level = VPhonePanelFormat.percent(model.activeAudioVolume)
         if model.activeAudioMuted == true {
             return String(localized: "\(name), \(level), muted", bundle: VPhoneLocalization.bundle)
@@ -129,81 +140,92 @@ struct VPhoneControlsView: View {
         return String(localized: "\(name), \(level)", bundle: VPhoneLocalization.bundle)
     }
 
-    // MARK: - Power
-
-    private var powerSection: some View {
-        Section("Power") {
-            Toggle("Low Power Mode", isOn: toggleBinding(model.lowPowerMode) { enabled in
-                await model.setLowPowerMode(enabled)
-            })
-            .disabled(!model.canWrite || model.lowPowerMode == nil)
-            .help("Turn Low Power Mode on or off")
-        }
-    }
-
     // MARK: - Hardware Buttons
 
     private var buttonsSection: some View {
-        Section("Hardware Buttons") {
-            buttonRow([.home, .lock, .wake])
-            buttonRow([.volumeUp, .volumeDown, .mute])
-        }
-    }
-
-    private func buttonRow(_ buttons: [VPhoneControlsButton]) -> some View {
-        HStack(spacing: 8) {
-            ForEach(buttons) { button in
-                Button {
-                    Task { await model.press(button) }
-                } label: {
-                    Label(button.title, systemImage: button.systemImage)
-                        .frame(maxWidth: .infinity)
+        DKSection(String(localized: "Hardware Buttons", bundle: VPhoneLocalization.bundle)) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(minimum: 0), spacing: DK.Space.s2), count: 3), spacing: DK.Space.s2) {
+                ForEach(VPhoneControlsButton.allCases) { button in
+                    DKButton(DKButtonSpec(
+                        button.title,
+                        glyph: button.glyph,
+                        size: .tile,
+                        isEnabled: model.canWrite,
+                        help: button.help,
+                    ) { Task { await model.press(button) } })
                 }
-                .buttonStyle(.bordered)
-                .help(button.help)
             }
+            .padding(DK.Space.s3)
         }
-        .disabled(!model.canWrite)
     }
 
     // MARK: - Keyboard
 
     private var keyboardSection: some View {
-        Section("Keyboard") {
-            TextField("Text", text: $model.keyboardText, prompt: Text("Text to send to the guest"), axis: .vertical)
-                .labelsHidden()
-                .lineLimit(3 ... 6)
-                .font(.system(size: 11, design: .monospaced))
+        DKSection(String(localized: "Keyboard", bundle: VPhoneLocalization.bundle), card: false) {
+            DKCard(.padded) {
+                VPhoneControlsTextArea(
+                    text: $model.keyboardText,
+                    prompt: String(localized: "Text to send to the guest", bundle: VPhoneLocalization.bundle),
+                )
 
-            HStack(spacing: 8) {
-                Text(model.keyboardText.count == 1
-                    ? String(localized: "1 character", bundle: VPhoneLocalization.bundle)
-                    : String(localized: "\(model.keyboardText.count) characters", bundle: VPhoneLocalization.bundle))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                Spacer(minLength: 8)
-                Button("Paste") { Task { await model.pasteText() } }
-                    .help("Insert the whole text at once")
-                Button("Type") { Task { await model.typeText() } }
-                    .help("Type the text one character at a time (⌘↩)")
-            }
-            .disabled(!model.canSendText)
-
-            HStack(spacing: 8) {
-                ForEach(VPhoneControlsKey.allCases.filter { !$0.isArrow }) { key in
-                    keyButton(key)
+                HStack(spacing: DK.Space.s2) {
+                    Text(model.keyboardText.count == 1
+                        ? String(localized: "1 character", bundle: VPhoneLocalization.bundle)
+                        : String(localized: "\(model.keyboardText.count) characters", bundle: VPhoneLocalization.bundle))
+                        .font(DK.Typeface.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(DK.Palette.muted)
+                    Spacer(minLength: DK.Space.s2)
+                    DKButton(DKButtonSpec(
+                        String(localized: "Paste", bundle: VPhoneLocalization.bundle),
+                        isEnabled: model.canSendText,
+                        help: String(localized: "Insert the whole text at once", bundle: VPhoneLocalization.bundle),
+                    ) { Task { await model.pasteText() } })
+                    DKButton(DKButtonSpec(
+                        String(localized: "Type", bundle: VPhoneLocalization.bundle),
+                        variant: .primary,
+                        isEnabled: model.canSendText,
+                        help: String(localized: "Type the text one character at a time (⌘↩)", bundle: VPhoneLocalization.bundle),
+                    ) { Task { await model.typeText() } })
                 }
-            }
 
-            HStack(spacing: 8) {
-                ForEach(VPhoneControlsKey.allCases.filter(\.isArrow)) { key in
-                    keyButton(key)
+                VStack(alignment: .leading, spacing: 6) {
+                    keyRow(VPhoneControlsKey.allCases.filter { !$0.isArrow }.map { .key($0) })
+                    keyRow(VPhoneControlsKey.allCases.filter(\.isArrow).map { .key($0) }
+                        + VPhoneControlsModifier.allCases.map { .modifier($0) })
                 }
-                Spacer(minLength: 8)
-                ForEach(VPhoneControlsModifier.allCases) { modifier in
-                    Toggle(modifier.symbol, isOn: modifierBinding(modifier))
-                        .toggleStyle(.button)
-                        .help(modifier.help)
+                .padding(.top, DK.Space.s3)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(DK.Palette.dividerSoft).frame(height: DK.Metric.hairline)
+                }
+
+                Text("Modifiers stay held while a special key is sent.", bundle: VPhoneLocalization.bundle)
+                    .font(DK.Typeface.caption)
+                    .foregroundStyle(DK.Palette.muted)
+            }
+        }
+    }
+
+    private enum KeyCell: Identifiable {
+        case key(VPhoneControlsKey)
+        case modifier(VPhoneControlsModifier)
+
+        var id: String {
+            switch self {
+            case let .key(key): "key-\(key.rawValue)"
+            case let .modifier(modifier): "modifier-\(modifier.rawValue)"
+            }
+        }
+    }
+
+    /// One row of equal-width small keys.
+    private func keyRow(_ cells: [KeyCell]) -> some View {
+        HStack(spacing: 6) {
+            ForEach(cells) { cell in
+                switch cell {
+                case let .key(key): keyButton(key)
+                case let .modifier(modifier): modifierButton(modifier)
                 }
             }
         }
@@ -213,61 +235,149 @@ struct VPhoneControlsView: View {
         Button {
             Task { await model.send(key) }
         } label: {
-            if key.isArrow {
-                Image(systemName: key.systemImage)
-                    .accessibilityLabel(key.title)
-            } else {
-                Label(key.title, systemImage: key.systemImage)
-                    .frame(maxWidth: .infinity)
-            }
+            Text(key.isArrow ? key.arrowSymbol : key.title)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
         }
-        .buttonStyle(.bordered)
-        .help(String(localized: "Send \(model.keyName(key)) to the guest", bundle: VPhoneLocalization.bundle))
+        .buttonStyle(DKButtonStyle(size: .small))
         .disabled(!model.canWrite)
+        .help(String(localized: "Send \(model.keyName(key)) to the guest", bundle: VPhoneLocalization.bundle))
+        .accessibilityLabel(key.title)
+    }
+
+    private func modifierButton(_ modifier: VPhoneControlsModifier) -> some View {
+        let isOn = model.modifiers.contains(modifier)
+        return Button {
+            if isOn {
+                model.modifiers.remove(modifier)
+            } else {
+                model.modifiers.insert(modifier)
+            }
+        } label: {
+            Text(modifier.symbol)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(DKButtonStyle(variant: isOn ? .ghostOn : .secondary, size: .small))
+        .help(modifier.help)
+        .accessibilityLabel(modifier.help)
+        .accessibilityAddTraits(isOn ? .isSelected : [])
     }
 
     // MARK: - Darwin Notification
 
     private var notificationSection: some View {
-        Section("Darwin Notification") {
-            HStack(spacing: 8) {
-                TextField("Name", text: $model.notificationName, prompt: Text(verbatim: "com.apple.springboard.lockcomplete"))
-                    .font(.system(size: 11, design: .monospaced))
-                Menu("Presets") {
-                    ForEach(VPhoneControlsNotification.presets, id: \.self) { group in
-                        Section {
-                            ForEach(group, id: \.self) { name in
-                                Button(name) { model.notificationName = name }
-                            }
-                        }
+        DKSection(String(localized: "Darwin Notification", bundle: VPhoneLocalization.bundle), card: false) {
+            DKCard(.padded) {
+                HStack(spacing: DK.Space.s2) {
+                    fieldLabel(String(localized: "Name", bundle: VPhoneLocalization.bundle))
+                    TextField(
+                        String(localized: "Name", bundle: VPhoneLocalization.bundle),
+                        text: $model.notificationName,
+                        prompt: Text(verbatim: "com.apple.springboard.lockcomplete"),
+                    )
+                    .textFieldStyle(.dkFieldMono)
+                    .labelsHidden()
+                    presetsMenu
+                }
+
+                HStack(spacing: DK.Space.s2) {
+                    fieldLabel(String(localized: "State", bundle: VPhoneLocalization.bundle))
+                    TextField(
+                        String(localized: "State", bundle: VPhoneLocalization.bundle),
+                        text: $model.notificationState,
+                        prompt: Text("None", bundle: VPhoneLocalization.bundle),
+                    )
+                    .textFieldStyle(.dkFieldMono)
+                    .labelsHidden()
+                }
+
+                Text("A UInt64 the guest stores before posting. Leave empty to post without a state.", bundle: VPhoneLocalization.bundle)
+                    .font(DK.Typeface.caption)
+                    .foregroundStyle(DK.Palette.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack(spacing: DK.Space.s2) {
+                    Spacer(minLength: DK.Space.s2)
+                    DKButton(DKButtonSpec(
+                        String(localized: "Read State", bundle: VPhoneLocalization.bundle),
+                        isEnabled: model.canUseNotification,
+                        help: String(localized: "Read the notification's current state from the guest", bundle: VPhoneLocalization.bundle),
+                    ) { Task { await model.readNotificationState() } })
+                    DKButton(DKButtonSpec(
+                        String(localized: "Post", bundle: VPhoneLocalization.bundle),
+                        variant: .primary,
+                        isEnabled: model.canUseNotification,
+                        help: String(localized: "Post the notification in the guest", bundle: VPhoneLocalization.bundle),
+                    ) { Task { await model.postNotification() } })
+                }
+            }
+        }
+    }
+
+    private func fieldLabel(_ text: String) -> some View {
+        Text(text)
+            .font(DK.Typeface.body)
+            .foregroundStyle(DK.Palette.inkSecondary)
+            .frame(width: 48, alignment: .leading)
+    }
+
+    private var presetsMenu: some View {
+        let shape = RoundedRectangle(cornerRadius: DK.Radius.field, style: .continuous)
+        return Menu(String(localized: "Presets", bundle: VPhoneLocalization.bundle)) {
+            ForEach(VPhoneControlsNotification.presets, id: \.self) { group in
+                Section {
+                    ForEach(group, id: \.self) { name in
+                        Button(name) { model.notificationName = name }
                     }
                 }
-                .fixedSize()
-                .help("Choose a notification name the system posts or observes")
             }
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.visible)
+        .tint(DK.Palette.ink)
+        .fixedSize()
+        .padding(.horizontal, DK.Space.s2)
+        .frame(height: 28)
+        .background(shape.fill(DK.Palette.window))
+        .overlay(shape.strokeBorder(DK.Palette.lineStrong, lineWidth: DK.Metric.hairline))
+        .help(String(localized: "Choose a notification name the system posts or observes", bundle: VPhoneLocalization.bundle))
+    }
 
-            TextField("State", text: $model.notificationState, prompt: Text("None"))
-                .font(.system(size: 11, design: .monospaced))
-                .help("A UInt64 the guest stores before posting, read by observers through notify_get_state. Leave empty to post without a state.")
+    // MARK: - Controls
 
-            HStack(spacing: 8) {
-                Spacer(minLength: 8)
-                Button("Read State") { Task { await model.readNotificationState() } }
-                    .help("Read the notification's current state from the guest")
-                Button("Post") { Task { await model.postNotification() } }
-                    .help("Post the notification in the guest")
-            }
-            .disabled(!model.canUseNotification)
+    private var unavailable: some View {
+        Text("Unavailable", bundle: VPhoneLocalization.bundle)
+            .font(DK.Typeface.body)
+            .foregroundStyle(DK.Palette.muted)
+    }
+
+    /// A switch for a guest value; a value the guest did not report reads Unavailable.
+    @ViewBuilder
+    private func switchControl(
+        _ label: String,
+        value: Bool?,
+        help: String,
+        set: @escaping @MainActor (Bool) async -> Void,
+    ) -> some View {
+        if let value {
+            DKSwitch(label, isOn: Binding {
+                value
+            } set: { newValue in
+                Task { await set(newValue) }
+            })
+            .disabled(!model.canWrite)
+            .help(help)
+        } else {
+            unavailable
         }
     }
 
     // MARK: - Bindings
 
-    private var orientationBinding: Binding<VPhoneControlsOrientation?> {
+    private func orientationBinding(_ current: VPhoneControlsOrientation) -> Binding<VPhoneControlsOrientation> {
         Binding {
-            model.orientation
+            current
         } set: { orientation in
-            guard let orientation else { return }
             Task { await model.setOrientation(orientation) }
         }
     }
@@ -279,41 +389,39 @@ struct VPhoneControlsView: View {
             Task { await model.selectVolumeCategory(category) }
         }
     }
+}
 
-    private func toggleBinding(_ value: Bool?, set: @escaping @MainActor (Bool) async -> Void) -> Binding<Bool> {
-        Binding {
-            value ?? false
-        } set: { newValue in
-            Task { await set(newValue) }
-        }
-    }
+// MARK: - Text Area
 
-    private func modifierBinding(_ modifier: VPhoneControlsModifier) -> Binding<Bool> {
-        Binding {
-            model.modifiers.contains(modifier)
-        } set: { isOn in
-            if isOn {
-                model.modifiers.insert(modifier)
-            } else {
-                model.modifiers.remove(modifier)
+/// A multi-line monospaced text field (`.dk-textarea`) with a placeholder.
+private struct VPhoneControlsTextArea: View {
+    @Binding var text: String
+    let prompt: String
+
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: DK.Radius.control, style: .continuous)
+        TextEditor(text: $text)
+            .font(DK.Typeface.mono)
+            .scrollContentBackground(.hidden)
+            .focused($isFocused)
+            .focusEffectDisabled()
+            .padding(.horizontal, 5)
+            .padding(.vertical, DK.Space.s2)
+            .frame(height: 72)
+            .background(shape.fill(DK.Palette.window))
+            .overlay(alignment: .topLeading) {
+                if text.isEmpty {
+                    Text(prompt)
+                        .font(DK.Typeface.mono)
+                        .foregroundStyle(DK.Palette.muted)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, DK.Space.s2)
+                        .allowsHitTesting(false)
+                }
             }
-        }
-    }
-
-    // MARK: - Values
-
-    private func value(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundStyle(.secondary)
-            .frame(minWidth: 36, alignment: .trailing)
-    }
-
-    private func onOff(_ value: Bool?) -> String {
-        switch value {
-        case true?: String(localized: "On", bundle: VPhoneLocalization.bundle)
-        case false?: String(localized: "Off", bundle: VPhoneLocalization.bundle)
-        case nil: "—"
-        }
+            .overlay(shape.strokeBorder(isFocused ? DK.Palette.accent : DK.Palette.lineStrong, lineWidth: DK.Metric.hairline))
+            .accessibilityLabel(prompt)
     }
 }

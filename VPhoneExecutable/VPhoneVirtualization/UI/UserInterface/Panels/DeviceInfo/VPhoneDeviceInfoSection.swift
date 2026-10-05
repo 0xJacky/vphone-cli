@@ -1,4 +1,4 @@
-import SwiftUI
+import VPhoneDesignKit
 
 // MARK: - Section
 
@@ -6,12 +6,26 @@ import SwiftUI
 struct VPhoneDeviceInfoSection: Identifiable {
     enum Kind: String {
         case device
-        case hardware
         case power
-        case display
         case security
-        case environment
         case agent
+        case hardware
+        case display
+        case environment
+
+        /// The page's two columns: what the device is and runs on the left,
+        /// what it is built from on the right.
+        var column: Column {
+            switch self {
+            case .device, .power, .security, .agent: .leading
+            case .hardware, .display, .environment: .trailing
+            }
+        }
+    }
+
+    enum Column {
+        case leading
+        case trailing
     }
 
     let kind: Kind
@@ -26,33 +40,21 @@ struct VPhoneDeviceInfoSection: Identifiable {
 // MARK: - Row
 
 struct VPhoneDeviceInfoRow: Identifiable {
-    /// A semantic status dot drawn before the value.
-    enum Tone {
-        case good
-        case warning
-        case critical
-        case info
-
-        var color: Color {
-            switch self {
-            case .good: .green
-            case .warning: .orange
-            case .critical: .red
-            case .info: .blue
-            }
-        }
-    }
-
     let label: String
     let value: String
-    var tone: Tone?
-    /// A 0...1 fill drawn as a thin capacity bar under the value.
+    /// A status dot before the value, for rows that report a state.
+    var tone: DKTone?
+    /// A 0...1 fill drawn as a thin capacity bar before the value.
     var gauge: Double?
-    /// Long single-token values (hashes) truncate in the middle and show the
-    /// full value in a tooltip; everything else wraps.
-    var truncatesMiddle = false
+    /// Identifiers, versions, hashes and sizes in monospace. Monospaced values
+    /// truncate in the middle.
+    var monospaced = false
 
     var id: String {
         label
+    }
+
+    var keyValue: DKKeyValue {
+        DKKeyValue(label, value, monospaced: monospaced, tone: tone)
     }
 }

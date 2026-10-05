@@ -1,23 +1,23 @@
 import SwiftUI
+import VPhoneDesignKit
 
 struct VPhoneDeviceInfoView: View {
     @Bindable var model: VPhoneDeviceInfoModel
 
     var body: some View {
         VStack(spacing: 0) {
+            header
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            Divider()
-            VPhoneGuestToolStatusBar(
+            DKStatusBar(
                 isConnected: model.control.isConnected,
                 activity: model.isLoading && !model.hasInfo
                     ? String(localized: "Reading device information…", bundle: VPhoneLocalization.bundle)
                     : nil,
                 status: model.status,
+                detail: "device.info",
             )
         }
-        .toolbar { toolbar }
         .guestToolShortcuts([
             VPhoneGuestToolShortcut(key: "r", isEnabled: !model.isLoading) {
                 Task { await model.refresh() }
@@ -26,7 +26,7 @@ struct VPhoneDeviceInfoView: View {
                 model.copyJSON()
             },
         ])
-        // Restarts when Auto Refresh changes and stops when the window closes.
+        // Restarts when Auto Refresh changes and stops when the page closes.
         .task(id: model.autoRefresh) {
             if !model.hasInfo, model.control.isConnected {
                 await model.refresh()
@@ -40,25 +40,35 @@ struct VPhoneDeviceInfoView: View {
         }
     }
 
-    // MARK: - Toolbar
+    // MARK: - Header
 
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
-            Toggle(isOn: $model.autoRefresh) {
-                Label("Auto Refresh", systemImage: "timer")
-            }
-            .toggleStyle(.button)
-            .help("Refresh every 5 seconds while this window is open")
-
-            Button("Copy as JSON", systemImage: "curlybraces") { model.copyJSON() }
-                .help("Copy the raw device.info response as JSON (⇧⌘C)")
-                .disabled(!model.canCopyJSON)
-
-            Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
-                .help("Read the device information again (⌘R)")
-                .disabled(model.isLoading)
-        }
+    private var header: some View {
+        DKPageHeader(
+            String(localized: "Device Info", bundle: VPhoneLocalization.bundle),
+            subtitle: model.updatedAt.map {
+                String(localized: "Updated at \($0.formatted(date: .omitted, time: .standard))", bundle: VPhoneLocalization.bundle)
+            },
+            actions: [
+                DKButtonSpec(
+                    String(localized: "Auto Refresh", bundle: VPhoneLocalization.bundle),
+                    glyph: .timer,
+                    variant: model.autoRefresh ? .pressed : .secondary,
+                    help: String(localized: "Refresh every 5 seconds while this page is open", bundle: VPhoneLocalization.bundle),
+                ) { model.autoRefresh.toggle() },
+                DKButtonSpec(
+                    String(localized: "Copy as JSON", bundle: VPhoneLocalization.bundle),
+                    glyph: .copy,
+                    isEnabled: model.canCopyJSON,
+                    help: String(localized: "Copy the raw device.info response as JSON (⇧⌘C)", bundle: VPhoneLocalization.bundle),
+                ) { model.copyJSON() },
+                DKButtonSpec(
+                    String(localized: "Refresh", bundle: VPhoneLocalization.bundle),
+                    glyph: .refresh,
+                    isEnabled: !model.isLoading,
+                    help: String(localized: "Read the device information again (⌘R)", bundle: VPhoneLocalization.bundle),
+                ) { Task { await model.refresh() } },
+            ],
+        )
     }
 
     // MARK: - Content
@@ -68,181 +78,146 @@ struct VPhoneDeviceInfoView: View {
         if model.hasInfo {
             readout
         } else if model.isLoading {
-            ProgressView()
+            VPhoneGuestToolPlaceholder(
+                glyph: .info,
+                title: String(localized: "Reading Device Information", bundle: VPhoneLocalization.bundle),
+                isLoading: true,
+            )
         } else if !model.control.isConnected {
-            VPhonePanelEmptyState(
-                title: "Guest Not Connected",
-                systemImage: "iphone.slash",
-                message: "Device information appears once vphoned connects. Start the VM, then choose Refresh.",
+            VPhoneGuestToolPlaceholder(
+                glyph: .phone,
+                title: String(localized: "Guest Not Connected", bundle: VPhoneLocalization.bundle),
+                message: String(localized: "Device information appears once vphoned connects. Start the VM, then choose Refresh.", bundle: VPhoneLocalization.bundle),
             )
         } else {
-            VPhonePanelEmptyState(
-                title: "No Device Information",
-                systemImage: "iphone",
-                message: "Choose Refresh to read the device again.",
+            VPhoneGuestToolPlaceholder(
+                glyph: .phone,
+                title: String(localized: "No Device Information", bundle: VPhoneLocalization.bundle),
+                message: String(localized: "Choose Refresh to read the device again.", bundle: VPhoneLocalization.bundle),
             )
         }
     }
 
     private var readout: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 0, verticalSpacing: 6) {
-                    ForEach(Array(model.sections.enumerated()), id: \.element.id) { index, section in
-                        GridRow {
-                            sectionHeader(section.title, divided: index > 0)
-                                .gridCellColumns(3)
-                        }
-                        ForEach(section.rows) { row in
-                            GridRow {
-                                Text(row.label)
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .fixedSize()
-                                    .gridColumnAlignment(.trailing)
-                                    .padding(.trailing, 6)
-                                VPhoneDeviceInfoToneDot(tone: row.tone)
-                                VPhoneDeviceInfoValue(row: row) { model.copyValue(row.value) }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                        }
-                    }
+        VPhoneGuestToolContent {
+            VPhoneGuestToolColumns {
+                let leading = model.sections(in: .leading)
+                ForEach(leading) { section in
+                    sectionView(section, grows: section.id == leading.last?.id)
                 }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    sectionHeader(String(localized: "Network", bundle: VPhoneLocalization.bundle), divided: true)
-                    networkTable
+            } trailing: {
+                ForEach(model.sections(in: .trailing)) { section in
+                    sectionView(section, grows: false)
                 }
+                networkSection
             }
-            .padding(16)
         }
     }
 
-    private func sectionHeader(_ title: String, divided: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if divided {
-                Divider()
-                    .padding(.top, 4)
+    private func sectionView(_ section: VPhoneDeviceInfoSection, grows: Bool) -> some View {
+        DKSection(section.title, grow: grows) {
+            ForEach(section.rows) { row in
+                VPhoneDeviceInfoRowView(row: row) { model.copyValue(row.value) }
             }
-            Text(title)
-                .font(.system(size: 12, weight: .semibold))
-                .accessibilityAddTraits(.isHeader)
         }
-        .padding(.bottom, 2)
     }
 
     // MARK: - Network
 
-    @ViewBuilder
-    private var networkTable: some View {
-        let rows = model.sortedAddresses
-        if rows.isEmpty {
-            Text("The guest reported no IPv4 or IPv6 addresses.")
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-        } else {
-            Table(rows, selection: $model.selectedAddresses, sortOrder: $model.addressSortOrder) {
-                TableColumn("Interface", value: \.interface) { row in
-                    VPhonePanelMonoText(row.interface)
+    private var networkSection: some View {
+        DKSection(String(localized: "Network", bundle: VPhoneLocalization.bundle), grow: true) {
+            let rows = model.sortedAddresses
+            if rows.isEmpty {
+                Text("The guest reported no IPv4 or IPv6 addresses.", bundle: VPhoneLocalization.bundle)
+                    .font(DK.Typeface.caption)
+                    .foregroundStyle(DK.Palette.muted)
+                    .padding(.horizontal, 14)
+                    .frame(maxWidth: .infinity, minHeight: DK.Metric.rowHeight, alignment: .leading)
+            } else {
+                DKDataTable(
+                    String(localized: "Network interfaces", bundle: VPhoneLocalization.bundle),
+                    columns: [
+                        DKTableColumn(String(localized: "Interface", bundle: VPhoneLocalization.bundle), width: .fixed(90)),
+                        DKTableColumn(String(localized: "Family", bundle: VPhoneLocalization.bundle), width: .fixed(70)),
+                        DKTableColumn(String(localized: "Address", bundle: VPhoneLocalization.bundle), width: .flexible(min: 160)),
+                    ],
+                    rows: rows,
+                    selection: $model.selectedAddress,
+                    minWidth: 340,
+                    scrollsVertically: false,
+                ) { address, column in
+                    addressCell(address, column: column)
                 }
-                .width(min: 56, ideal: 72, max: 96)
-                TableColumn("Family", value: \.family) { row in
-                    VPhonePanelMonoText(row.family, secondary: true)
-                }
-                .width(min: 44, ideal: 52, max: 60)
-                TableColumn("Address", value: \.address) { row in
-                    VPhonePanelMonoText(row.address)
-                }
-                .width(min: 140, ideal: 280)
             }
-            .contextMenu(forSelectionType: VPhoneDeviceNetworkAddress.ID.self) { ids in
-                Button("Copy Address") { model.copyAddresses(ids, full: false) }
-                    .disabled(ids.isEmpty)
-                Button("Copy Row") { model.copyAddresses(ids, full: true) }
-                    .disabled(ids.isEmpty)
-            }
-            .tableStyle(.bordered(alternatesRowBackgrounds: true))
-            // Sized to its rows so the readout scrolls as one page; long
-            // lists scroll inside the table past twelve rows.
-            .frame(height: 28 + 24 * CGFloat(min(rows.count, 12)))
-            .accessibilityLabel("Network addresses")
         }
+    }
+
+    private func addressCell(_ address: VPhoneDeviceNetworkAddress, column: Int) -> some View {
+        let cell: DKTableCell = switch column {
+        case 0: .mono(address.interface)
+        case 1: .text(address.family)
+        default: .mono(address.address)
+        }
+        return DKTableCellView(cell)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .contextMenu {
+                Button(String(localized: "Copy Address", bundle: VPhoneLocalization.bundle)) {
+                    model.copyAddress(address, full: false)
+                }
+                Button(String(localized: "Copy Row", bundle: VPhoneLocalization.bundle)) {
+                    model.copyAddress(address, full: true)
+                }
+            }
     }
 }
 
-// MARK: - Value
+// MARK: - Row
 
-/// A selectable monospace value with an optional capacity bar.
-private struct VPhoneDeviceInfoValue: View {
+/// A key-value row; a row with a gauge shows a thin capacity bar before its
+/// value, as Storage does.
+private struct VPhoneDeviceInfoRowView: View {
     let row: VPhoneDeviceInfoRow
     let copy: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            valueText
+        Group {
             if let gauge = row.gauge {
-                VPhoneDeviceInfoCapacityBar(fraction: gauge, color: row.tone?.color ?? .accentColor)
-                    .frame(maxWidth: 240)
+                gaugeRow(gauge)
+            } else {
+                DKKeyValueRow(row.keyValue)
             }
         }
+        .help(row.monospaced ? row.value : "")
         .contextMenu {
-            Button("Copy") { copy() }
+            Button(String(localized: "Copy", bundle: VPhoneLocalization.bundle), action: copy)
         }
-        .accessibilityElement(children: .combine)
     }
 
-    @ViewBuilder
-    private var valueText: some View {
-        let text = Text(row.value)
-            .font(.system(size: 11, design: .monospaced))
-            .textSelection(.enabled)
-        if row.truncatesMiddle {
-            text
+    /// `DKKeyValueRow` with the design's 72pt progress bar between the dot
+    /// and the value.
+    private func gaugeRow(_ gauge: Double) -> some View {
+        HStack(spacing: DK.Space.s3) {
+            Text(row.label)
+                .foregroundStyle(DK.Palette.muted)
                 .lineLimit(1)
-                .truncationMode(.middle)
-                .help(row.value)
-        } else {
-            text
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-}
-
-// MARK: - Capacity Bar
-
-private struct VPhoneDeviceInfoCapacityBar: View {
-    let fraction: Double
-    let color: Color
-
-    var body: some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(.quaternary)
-                Capsule()
-                    .fill(color)
-                    .frame(width: proxy.size.width * max(0, min(1, fraction)))
+                .fixedSize()
+            Spacer(minLength: 0)
+            HStack(spacing: DK.Space.s2) {
+                if let tone = row.tone {
+                    DKStatusDot(tone)
+                }
+                DKProgress(value: gauge, tone: .accent, thin: true, label: row.label)
+                    .frame(width: 72)
+                Text(row.value)
+                    .foregroundStyle(row.keyValue.valueTone?.text ?? DK.Palette.ink)
+                    .lineLimit(1)
+                    .textSelection(.enabled)
             }
         }
-        .frame(height: 4)
-        .accessibilityHidden(true)
-    }
-}
-
-// MARK: - Tone Dot
-
-/// The status dot column, kept even when empty so every value starts at the
-/// same x.
-private struct VPhoneDeviceInfoToneDot: View {
-    let tone: VPhoneDeviceInfoRow.Tone?
-
-    var body: some View {
-        Circle()
-            .fill(tone?.color ?? .clear)
-            .frame(width: 6, height: 6)
-            .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
-            .frame(width: 16)
-            .accessibilityHidden(true)
+        .font(DK.Typeface.body)
+        .frame(maxWidth: .infinity, minHeight: DK.Metric.rowHeight)
+        .padding(.horizontal, 14)
+        .accessibilityElement(children: .combine)
     }
 }
