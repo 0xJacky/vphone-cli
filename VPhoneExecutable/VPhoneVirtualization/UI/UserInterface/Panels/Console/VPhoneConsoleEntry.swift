@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 
 // MARK: - Entry
 
@@ -91,14 +90,6 @@ enum VPhoneConsoleLevel: Int, Comparable, Sendable {
         case .notice: "Default"
         case .error: "Error"
         case .fault: "Fault"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .fault: .red
-        case .error: .orange
-        default: .secondary
         }
     }
 }

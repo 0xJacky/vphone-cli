@@ -1,5 +1,6 @@
 import SwiftUI
 import VPhoneCoreKit
+import VPhoneDesignKit
 
 struct VPhoneAppBrowserView: View {
     @Bindable var model: VPhoneAppBrowserModel
@@ -7,31 +8,27 @@ struct VPhoneAppBrowserView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Divider()
-            VPhoneGuestToolStatusBar(
+            header
+            VPhoneSystemPageBanner(status: model.status)
+            HStack(spacing: 0) {
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                if model.isInspectorPresented {
+                    DK.Palette.divider
+                        .frame(width: DK.Metric.hairline)
+                    VPhoneAppInfoView(model: model)
+                        .frame(minWidth: 280, idealWidth: 320, maxWidth: 360, maxHeight: .infinity)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            VPhoneSystemPageStatusBar(
                 isConnected: model.control.isConnected,
                 activity: model.activity?.title,
                 status: model.status,
+                detail: model.hasLoaded ? model.countText : nil,
             )
-            .overlay(alignment: .trailing) {
-                if model.hasLoaded {
-                    Text(model.countText)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                        .background(.bar)
-                }
-            }
         }
-        .inspector(isPresented: $model.isInspectorPresented) {
-            VPhoneAppInfoView(model: model)
-                .inspectorColumnWidth(min: 280, ideal: 320, max: 520)
-        }
-        .toolbar { toolbar }
-        .searchable(text: $model.searchText, placement: .toolbar, prompt: Text("Search Apps"))
-        .searchFocused($isSearchFocused)
+        .background(DK.Palette.window)
         .guestToolShortcuts(shortcuts)
         .task { await model.refresh() }
         .task(id: inspectedID) {
@@ -69,7 +66,7 @@ struct VPhoneAppBrowserView: View {
         }
     }
 
-    /// The inspector follows the selection while it is open.
+    /// The info pane follows the selection while it is open.
     private var inspectedID: VPhoneAppRecord.ID? {
         model.isInspectorPresented ? model.selectedApp?.id : nil
     }
@@ -86,6 +83,71 @@ struct VPhoneAppBrowserView: View {
         guard model.isSearchFocusRequested else { return }
         model.isSearchFocusRequested = false
         Task { isSearchFocused = true }
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        DKPageHeader(VPhoneLocalization.text("Apps"), subtitle: model.hasLoaded ? subtitle : nil) {
+            DKSegmented(
+                VPhoneLocalization.text("Filter"),
+                selection: $model.filter,
+                options: VPhoneAppBrowserModel.Filter.allCases.map { DKSegmentOption($0.title, value: $0) },
+            )
+            .help(VPhoneLocalization.text("Filter apps by type (⌘1, ⌘2, ⌘3, ⌘4)"))
+            DKButton(DKButtonSpec(
+                VPhoneLocalization.text("Launch"),
+                glyph: .play,
+                variant: .primary,
+                isEnabled: model.canLaunch(model.selection),
+                help: VPhoneLocalization.text("Launch the selected app (⌘↩)"),
+            ) { launchSelection() })
+            DKButton(DKButtonSpec(
+                VPhoneLocalization.text("Terminate"),
+                glyph: .stop,
+                size: .icon,
+                isEnabled: model.canTerminate(model.selection),
+                help: VPhoneLocalization.text("Terminate the selected apps (⌥⌘Q)"),
+            ) { Task { await model.terminate(model.apps(model.selection)) } })
+            DKButton(DKButtonSpec(
+                VPhoneLocalization.text("Install App Package"),
+                glyph: .download,
+                size: .icon,
+                isEnabled: !model.isBusy && model.control.isConnected,
+                help: VPhoneLocalization.text("Install an IPA or TIPA package (⌘O)"),
+            ) { model.isImportingPackage = true })
+            DKButton(DKButtonSpec(
+                VPhoneLocalization.text("Refresh"),
+                glyph: .refresh,
+                size: .icon,
+                isEnabled: !model.isBusy,
+                help: VPhoneLocalization.text("Reload the app list (⌘R)"),
+            ) { Task { await model.refresh() } })
+            VPhoneSystemToggleButton(
+                label: VPhoneLocalization.text("App Info"),
+                glyph: .info,
+                isOn: $model.isInspectorPresented,
+                size: .icon,
+                help: VPhoneLocalization.text("Show or hide app info (⌘I)"),
+            )
+            VPhoneSystemSearchField(
+                placeholder: VPhoneLocalization.text("Search Apps"),
+                text: $model.searchText,
+                width: 160,
+                focus: $isSearchFocused,
+            )
+        }
+    }
+
+    private var subtitle: String {
+        let running = model.apps.count(where: \.isRunning)
+        return "\(model.countText) · " + String(localized: "\(running) running", bundle: VPhoneLocalization.bundle)
+    }
+
+    private func launchSelection() {
+        if let app = model.selectedApp {
+            Task { await model.launch(app) }
+        }
     }
 
     // MARK: - Content
@@ -118,45 +180,39 @@ struct VPhoneAppBrowserView: View {
     private var appTable: some View {
         Table(of: VPhoneAppRecord.self, selection: $model.selection, sortOrder: $model.sortOrder) {
             TableColumn("Name", value: \.displayName) { app in
-                Text(app.displayName)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .help(app.displayName)
+                VPhoneSystemCell(
+                    model.selection.contains(app.id) ? .strong(app.displayName) : .text(app.displayName),
+                    help: app.displayName,
+                )
             }
-            .width(min: 100, ideal: 120, max: .infinity)
+            .width(min: 100, ideal: 150, max: .infinity)
 
             TableColumn("Bundle ID", value: \.bundleID) { app in
-                VPhonePanelMonoText(app.bundleID)
+                VPhoneSystemCell(.mono(app.bundleID), help: app.bundleID)
             }
-            .width(min: 130, ideal: 160, max: .infinity)
+            .width(min: 130, ideal: 200, max: .infinity)
 
             TableColumn("Version", value: \.version) { app in
-                VPhonePanelMonoText(app.version.isEmpty ? "—" : app.version, secondary: app.version.isEmpty)
+                VPhoneSystemCell(.muted(app.version.isEmpty ? "—" : app.version))
             }
             .width(min: 52, ideal: 64, max: 140)
 
             TableColumn("Type", value: \.type) { app in
-                Text(app.typeTitle)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                VPhoneSystemCell(.muted(app.typeTitle))
             }
-            .width(min: 48, ideal: 56, max: 90)
+            .width(min: 48, ideal: 60, max: 90)
 
             TableColumn("PID", value: \.pid) { app in
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(app.isRunning ? Color.green : Color.clear)
-                        .frame(width: 6, height: 6)
-                    VPhonePanelMonoText(app.isRunning ? String(app.pid) : "—", secondary: !app.isRunning)
-                }
-                .accessibilityLabel(app.isRunning ? Text("Running, PID \(app.pid)") : Text("Not running"))
+                VPhoneSystemCell(app.isRunning ? .status(.success, String(app.pid)) : .muted("—"))
+                    .accessibilityLabel(app.isRunning ? Text("Running, PID \(app.pid)") : Text("Not running"))
             }
-            .width(min: 60, ideal: 64, max: 100)
+            .width(min: 60, ideal: 70, max: 100)
         } rows: {
             ForEach(model.filteredApps) { app in
                 TableRow(app)
             }
         }
+        .systemPageTable()
         .contextMenu(forSelectionType: VPhoneAppRecord.ID.self) { ids in
             rowMenu(ids)
         } primaryAction: { ids in
@@ -227,56 +283,6 @@ struct VPhoneAppBrowserView: View {
             .disabled(!model.canUninstall(ids))
     }
 
-    // MARK: - Toolbar
-
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .navigation) {
-            Picker("Filter", selection: $model.filter) {
-                ForEach(VPhoneAppBrowserModel.Filter.allCases) { filter in
-                    Text(filter.title).tag(filter)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .help("Filter apps by type (⌘1, ⌘2, ⌘3, ⌘4)")
-        }
-
-        ToolbarItemGroup(placement: .primaryAction) {
-            Button("Launch", systemImage: "play") {
-                if let app = model.selectedApp {
-                    Task { await model.launch(app) }
-                }
-            }
-            .help("Launch the selected app (⌘↩)")
-            .disabled(!model.canLaunch(model.selection))
-
-            Button("Terminate", systemImage: "stop") {
-                Task { await model.terminate(model.apps(model.selection)) }
-            }
-            .help("Terminate the selected apps (⌥⌘Q)")
-            .disabled(!model.canTerminate(model.selection))
-
-            Button("Install App Package", systemImage: "square.and.arrow.down") {
-                model.isImportingPackage = true
-            }
-            .help("Install an IPA or TIPA package (⌘O)")
-            .disabled(model.isBusy || !model.control.isConnected)
-
-            Button("Refresh", systemImage: "arrow.clockwise") {
-                Task { await model.refresh() }
-            }
-            .help("Reload the app list (⌘R)")
-            .disabled(model.isBusy)
-
-            Button("App Info", systemImage: "info.circle") {
-                model.isInspectorPresented.toggle()
-            }
-            .help("Show or hide app info (⌘I)")
-        }
-    }
-
     private var shortcuts: [VPhoneGuestToolShortcut] {
         let filters = VPhoneAppBrowserModel.Filter.allCases.map { filter in
             VPhoneGuestToolShortcut(key: filter.shortcut) { model.filter = filter }
@@ -286,15 +292,14 @@ struct VPhoneAppBrowserView: View {
                 Task { await model.refresh() }
             },
             VPhoneGuestToolShortcut(key: "i") { model.isInspectorPresented.toggle() },
+            VPhoneGuestToolShortcut(key: "f") { isSearchFocused = true },
             VPhoneGuestToolShortcut(key: .return, isEnabled: model.canLaunch(model.selection)) {
-                if let app = model.selectedApp {
-                    Task { await model.launch(app) }
-                }
+                launchSelection()
             },
             VPhoneGuestToolShortcut(key: "q", modifiers: [.command, .option], isEnabled: model.canTerminate(model.selection)) {
                 Task { await model.terminate(model.apps(model.selection)) }
             },
-            VPhoneGuestToolShortcut(key: .delete, isEnabled: model.canUninstall(model.selection)) {
+            VPhoneGuestToolShortcut(key: .delete, isEnabled: model.canUninstall(model.selection) && !isSearchFocused) {
                 model.requestUninstall(model.apps(model.selection))
             },
             VPhoneGuestToolShortcut(key: "o", isEnabled: !model.isBusy && model.control.isConnected) {
@@ -313,24 +318,27 @@ struct VPhoneAppOpenURLSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: DK.Space.s3) {
             Text("Open URL in \(app.displayName)")
-                .font(.headline)
+                .font(DK.Typeface.sheetTitle)
+                .foregroundStyle(DK.Palette.ink)
             TextField("URL", text: $model.openURLText, prompt: Text(verbatim: "scheme://path"))
-                .textFieldStyle(.roundedBorder)
-                .font(.system(.body, design: .monospaced))
+                .textFieldStyle(DKFieldStyle(mono: true))
                 .onSubmit(open)
-            HStack {
+            HStack(spacing: DK.Space.s2) {
                 Spacer()
-                Button("Cancel", role: .cancel) { dismiss() }
+                Button(VPhoneLocalization.text("Cancel"), role: .cancel) { dismiss() }
+                    .buttonStyle(DKButtonStyle())
                     .keyboardShortcut(.cancelAction)
-                Button("Open", action: open)
+                Button(VPhoneLocalization.text("Open"), action: open)
+                    .buttonStyle(DKButtonStyle(variant: .primary))
                     .keyboardShortcut(.defaultAction)
                     .disabled(model.openURLText.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
-        .padding(16)
-        .frame(width: 400)
+        .padding(DK.Space.s5)
+        .frame(width: 420)
+        .background(DK.Palette.window)
     }
 
     private func open() {

@@ -85,8 +85,8 @@ final class VPhoneAppBrowserModel {
     /// Set by Find; the view focuses the search field and clears it.
     var isSearchFocusRequested = false
 
-    // Info inspector
-    var isInspectorPresented = false
+    // Info pane, shown beside the table until the user hides it
+    var isInspectorPresented = true
     private(set) var detail: VPhoneAppDetail?
     private(set) var isLoadingDetail = false
     /// `apps.url_schemes` covers every app; it is read once per list load.

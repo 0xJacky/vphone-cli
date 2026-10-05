@@ -1,17 +1,20 @@
 import SwiftUI
+import VPhoneDesignKit
 
-// MARK: - App Info Inspector
+// MARK: - App Info
 
-/// The trailing inspector: `apps.info`, `apps.binary`, URL schemes and the
-/// CoreTelephony network policy of the selected app.
+/// The App Info pane beside the app table: `apps.info`, `apps.binary`, URL
+/// schemes and the CoreTelephony network policy of the selected app, with
+/// the selected app's actions.
 struct VPhoneAppInfoView: View {
     let model: VPhoneAppBrowserModel
 
     var body: some View {
-        if let detail = model.detail, model.selectedApp?.id == detail.bundleID {
+        if let detail = model.detail, let app = model.selectedApp, app.id == detail.bundleID {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: DK.Space.s4) {
                     header(detail)
+                    actions(app, detail)
                     bundleSection(detail)
                     containerSection(detail)
                     schemeSection(detail)
@@ -19,9 +22,10 @@ struct VPhoneAppInfoView: View {
                     entitlementSection(detail)
                     networkSection(detail)
                 }
-                .padding(12)
+                .padding(DK.Space.s4)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .accessibilityLabel(VPhoneLocalization.text("App Info"))
         } else if model.selection.count > 1 {
             VPhonePanelEmptyState(
                 title: "Multiple Apps Selected",
@@ -40,15 +44,16 @@ struct VPhoneAppInfoView: View {
     // MARK: - Header
 
     private func header(_ detail: VPhoneAppDetail) -> some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: DK.Space.s2) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(detail.displayName)
-                    .font(.headline)
+                    .font(DK.Typeface.pageTitle)
+                    .foregroundStyle(DK.Palette.ink)
                     .lineLimit(2)
                     .textSelection(.enabled)
                 Text(detail.bundleID)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .font(DK.Typeface.mono)
+                    .foregroundStyle(DK.Palette.muted)
                     .lineLimit(2)
                     .textSelection(.enabled)
             }
@@ -60,204 +65,294 @@ struct VPhoneAppInfoView: View {
         }
     }
 
+    private func actions(_ app: VPhoneAppRecord, _ detail: VPhoneAppDetail) -> some View {
+        let ids: Set<VPhoneAppRecord.ID> = [app.id]
+        return VPhoneAppInfoFlow {
+            DKButton(DKButtonSpec(
+                VPhoneLocalization.text("Open URL…"),
+                glyph: .link,
+                isEnabled: model.canLaunch(ids),
+                help: VPhoneLocalization.text("Open a URL in this app"),
+            ) { model.requestOpenURL(app) })
+            DKButton(DKButtonSpec(
+                VPhoneLocalization.text("Show in Files"),
+                glyph: .folder,
+                isEnabled: model.control.isConnected,
+                help: VPhoneLocalization.text("Open the File Browser at the data container"),
+            ) {
+                if detail.dataPath.isEmpty {
+                    Task { await model.showDataContainer(app) }
+                } else {
+                    model.reveal(path: detail.dataPath)
+                }
+            })
+            DKButton(DKButtonSpec(
+                VPhoneLocalization.text("Uninstall…"),
+                glyph: .trash,
+                variant: .danger,
+                isEnabled: model.canUninstall(ids),
+                help: app.isSystem
+                    ? VPhoneLocalization.text("System apps cannot be uninstalled")
+                    : VPhoneLocalization.text("Remove the app and its data from the guest"),
+            ) { model.requestUninstall([app]) })
+        }
+    }
+
     // MARK: - Sections
 
     private func bundleSection(_ detail: VPhoneAppDetail) -> some View {
-        VPhoneAppInfoSection(title: "Bundle", error: detail.infoError) {
-            VPhoneAppInfoGrid(rows: [
+        DKSection(VPhoneLocalization.text("Bundle")) {
+            VPhoneAppInfoError(message: detail.infoError)
+            VPhoneAppInfoRows(rows: [
                 ("Version", detail.version),
                 ("Build", detail.build),
                 ("Type", detail.type),
                 ("Signer", detail.signer),
                 ("Minimum OS", detail.minimumOS),
                 ("SDK", detail.sdk),
-                ("Path", detail.bundlePath),
-                ("Executable", detail.executable),
             ])
+            VPhoneAppInfoPathRow(key: "Path", value: detail.bundlePath)
+            VPhoneAppInfoPathRow(key: "Executable", value: detail.executable)
         }
     }
 
     private func containerSection(_ detail: VPhoneAppDetail) -> some View {
-        VPhoneAppInfoSection(title: "Data Container") {
+        DKSection(
+            VPhoneLocalization.text("Data Container"),
+            accessory: detail.dataPath.isEmpty ? nil : DKButtonSpec(VPhoneLocalization.text("Copy Path")) {
+                model.copy([detail.dataPath])
+            },
+        ) {
             if detail.dataPath.isEmpty {
-                placeholder(detail.hasInfo ? "This app has no data container." : "Loading…")
+                VPhoneAppInfoPlaceholder(text: detail.hasInfo ? "This app has no data container." : "Loading…")
             } else {
-                VPhoneAppInfoValue(value: detail.dataPath)
-                HStack(spacing: 8) {
-                    Button("Show in Files") { model.reveal(path: detail.dataPath) }
-                        .help("Open the File Browser at the data container")
-                    Button("Copy Path") { model.copy([detail.dataPath]) }
-                }
-                .controlSize(.small)
+                VPhoneAppInfoPathRow(key: "Path", value: detail.dataPath)
             }
-            if !detail.groupContainers.isEmpty {
-                Text("App Groups")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 4)
+            if detail.groupContainers.isEmpty {
+                if detail.hasInfo {
+                    DKKeyValueRow(DKKeyValue(VPhoneLocalization.text("App Groups"), VPhoneLocalization.text("None")))
+                }
+            } else {
                 ForEach(detail.groupContainers) { group in
-                    VStack(alignment: .leading, spacing: 2) {
-                        VPhoneAppInfoValue(value: group.identifier)
-                        VPhoneAppInfoValue(value: group.path, secondary: true)
-                    }
-                    .contextMenu {
-                        Button("Show in Files") { model.reveal(path: group.path) }
-                        Button("Copy Path") { model.copy([group.path]) }
-                    }
+                    VPhoneAppInfoPathRow(key: group.identifier, value: group.path, localizesKey: false)
+                        .contextMenu {
+                            Button("Show in Files") { model.reveal(path: group.path) }
+                            Button("Copy Path") { model.copy([group.path]) }
+                        }
                 }
             }
         }
     }
 
     private func schemeSection(_ detail: VPhoneAppDetail) -> some View {
-        VPhoneAppInfoSection(title: "URL Schemes") {
+        DKSection(VPhoneLocalization.text("URL Schemes")) {
             if detail.urlSchemes.isEmpty {
-                placeholder(detail.hasInfo ? "This app declares no URL schemes." : "Loading…")
+                VPhoneAppInfoPlaceholder(text: detail.hasInfo ? "This app declares no URL schemes." : "Loading…")
             } else {
-                VPhoneAppInfoValue(value: detail.urlSchemes.map { "\($0)://" }.joined(separator: "\n"))
+                ForEach(detail.urlSchemes, id: \.self) { scheme in
+                    VPhoneAppInfoValueRow(value: "\(scheme)://")
+                }
             }
         }
     }
 
     private func binarySection(_ detail: VPhoneAppDetail) -> some View {
-        VPhoneAppInfoSection(title: "Mach-O", error: detail.binaryError) {
-            VPhoneAppInfoGrid(rows: [
-                ("Encrypted", detail.encrypted.map { $0 ? String(localized: "Yes (FairPlay)", bundle: VPhoneLocalization.bundle) : String(localized: "No", bundle: VPhoneLocalization.bundle) } ?? ""),
+        DKSection(VPhoneLocalization.text("Mach-O")) {
+            VPhoneAppInfoError(message: detail.binaryError)
+            VPhoneAppInfoRows(rows: [
+                ("Encrypted", detail.encrypted.map { $0 ? VPhoneLocalization.text("Yes (FairPlay)") : VPhoneLocalization.text("No") } ?? ""),
                 ("Entitlements", detail.hasBinary || detail.hasInfo ? String(detail.entitlements.count) : ""),
             ])
             if let error = detail.signingError {
-                Text(error)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.orange)
-                    .textSelection(.enabled)
+                VPhoneAppInfoError(message: error)
             }
         }
     }
 
     private func entitlementSection(_ detail: VPhoneAppDetail) -> some View {
-        VPhoneAppInfoSection(title: "Entitlements") {
+        DKSection(
+            VPhoneLocalization.text("Entitlements"),
+            accessory: detail.entitlements.isEmpty ? nil : DKButtonSpec(
+                VPhoneLocalization.text("Copy as Property List"),
+                help: VPhoneLocalization.text("Copy the entitlements as an XML property list"),
+            ) { model.copy([detail.entitlementsPlist]) },
+        ) {
             if detail.entitlements.isEmpty {
-                placeholder(detail.hasBinary || detail.hasInfo ? "The binary has no entitlements." : "Loading…")
+                VPhoneAppInfoPlaceholder(text: detail.hasBinary || detail.hasInfo ? "The binary has no entitlements." : "Loading…")
             } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(detail.entitlements) { entitlement in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(entitlement.key)
-                                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            Text(entitlement.value)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .padding(.leading, 8)
-                        }
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                    }
+                ForEach(detail.entitlements) { entitlement in
+                    VPhoneAppInfoPathRow(key: entitlement.key, value: entitlement.value, localizesKey: false, monospacedKey: true)
                 }
-                Button("Copy as Property List") { model.copy([detail.entitlementsPlist]) }
-                    .controlSize(.small)
-                    .help("Copy the entitlements as an XML property list")
             }
         }
     }
 
     private func networkSection(_ detail: VPhoneAppDetail) -> some View {
-        VPhoneAppInfoSection(title: "Network Access", error: detail.networkPolicyError) {
+        DKSection(
+            VPhoneLocalization.text("Network Access"),
+            accessory: detail.networkPolicy.map { policy in
+                DKButtonSpec(
+                    VPhoneLocalization.text("Allow Network"),
+                    isEnabled: !policy.allowed && !model.isBusy && model.control.isConnected,
+                    help: VPhoneLocalization.text("Allow Wi-Fi and cellular data for this app"),
+                ) { Task { await model.repairNetworkPolicy() } }
+            },
+        ) {
+            VPhoneAppInfoError(message: detail.networkPolicyError)
             if let policy = detail.networkPolicy {
-                Label {
-                    Text(policy.allowed ? "Wi-Fi and cellular data allowed" : "Network access is restricted")
-                } icon: {
-                    Image(systemName: policy.allowed ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
-                        .foregroundStyle(policy.allowed ? .green : .orange)
+                DKKeyValueRow(DKKeyValue(
+                    VPhoneLocalization.text("Wi-Fi and cellular data"),
+                    VPhoneLocalization.text(policy.allowed ? "Allowed" : "Restricted"),
+                    tone: policy.allowed ? .success : .warning,
+                ))
+                ForEach(policy.entries) { entry in
+                    DKKeyValueRow(DKKeyValue(entry.title, entry.value))
                 }
-                .font(.system(size: 11))
-                if !policy.entries.isEmpty {
-                    VPhoneAppInfoGrid(rows: policy.entries.map { ($0.title, $0.value) }, localizeTitles: false)
-                }
-                Button("Allow Network") { Task { await model.repairNetworkPolicy() } }
-                    .controlSize(.small)
-                    .disabled(policy.allowed || model.isBusy || !model.control.isConnected)
-                    .help("Allow Wi-Fi and cellular data for this app")
             } else if detail.networkPolicyError == nil {
-                placeholder("Loading…")
+                VPhoneAppInfoPlaceholder(text: "Loading…")
             }
-        }
-    }
-
-    private func placeholder(_ text: LocalizedStringKey) -> some View {
-        Text(text)
-            .font(.system(size: 11))
-            .foregroundStyle(.secondary)
-    }
-}
-
-// MARK: - Section
-
-struct VPhoneAppInfoSection<Content: View>: View {
-    let title: LocalizedStringKey
-    var error: String?
-    @ViewBuilder let content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-            Divider()
-            if let error {
-                Label {
-                    Text(error)
-                        .textSelection(.enabled)
-                } icon: {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                }
-                .font(.system(size: 11))
-            }
-            content
         }
     }
 }
 
-// MARK: - Key-Value Grid
+// MARK: - Rows
 
-/// Label and value rows; empty values are left out.
-struct VPhoneAppInfoGrid: View {
+/// Short key-value rows; empty values are left out.
+struct VPhoneAppInfoRows: View {
     let rows: [(String, String)]
-    var localizeTitles = true
 
     var body: some View {
-        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 8, verticalSpacing: 4) {
-            ForEach(rows.filter { !$0.1.isEmpty }, id: \.0) { title, value in
-                GridRow {
-                    Group {
-                        if localizeTitles {
-                            Text(LocalizedStringKey(title))
-                        } else {
-                            Text(verbatim: title)
-                        }
-                    }
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-                    .gridColumnAlignment(.trailing)
-                    VPhoneAppInfoValue(value: value)
-                }
-            }
+        ForEach(rows.filter { !$0.1.isEmpty }, id: \.0) { key, value in
+            DKKeyValueRow(DKKeyValue(VPhoneLocalization.text(key), value))
         }
     }
 }
 
-/// A selectable monospaced value that wraps long paths instead of clipping.
-struct VPhoneAppInfoValue: View {
+/// A long value, such as a path or an entitlement, under its key, wrapped
+/// instead of clipped. Nothing shows for an empty value.
+struct VPhoneAppInfoPathRow: View {
+    let key: String
     let value: String
-    var secondary = false
+    var localizesKey = true
+    var monospacedKey = false
+
+    var body: some View {
+        if !value.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(localizesKey ? VPhoneLocalization.text(key) : key)
+                    .font(monospacedKey ? DK.Typeface.mono : DK.Typeface.body)
+                    .foregroundStyle(monospacedKey ? DK.Palette.ink : DK.Palette.muted)
+                    .textSelection(.enabled)
+                Text(value)
+                    .font(DK.Typeface.mono)
+                    .foregroundStyle(monospacedKey ? DK.Palette.muted : DK.Palette.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, DK.Space.s2)
+            .accessibilityElement(children: .combine)
+        }
+    }
+}
+
+/// A row holding one monospaced value.
+struct VPhoneAppInfoValueRow: View {
+    let value: String
 
     var body: some View {
         Text(value)
-            .font(.system(size: 11, design: .monospaced))
-            .foregroundStyle(secondary ? .secondary : .primary)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .font(DK.Typeface.mono)
+            .foregroundStyle(DK.Palette.ink)
             .textSelection(.enabled)
+            .frame(maxWidth: .infinity, minHeight: DK.Metric.rowHeight, alignment: .leading)
+            .padding(.horizontal, 14)
+    }
+}
+
+/// A muted row standing in for a value that is loading or absent.
+struct VPhoneAppInfoPlaceholder: View {
+    let text: String
+
+    var body: some View {
+        Text(VPhoneLocalization.text(text))
+            .font(DK.Typeface.body)
+            .foregroundStyle(DK.Palette.muted)
+            .frame(maxWidth: .infinity, minHeight: DK.Metric.rowHeight, alignment: .leading)
+            .padding(.horizontal, 14)
+    }
+}
+
+/// What the guest said when a section could not load.
+struct VPhoneAppInfoError: View {
+    let message: String?
+
+    var body: some View {
+        if let message {
+            HStack(alignment: .firstTextBaseline, spacing: DK.Space.s2) {
+                DKIcon(.warning, size: 13)
+                    .foregroundStyle(DK.Palette.warning)
+                Text(message)
+                    .font(DK.Typeface.caption)
+                    .foregroundStyle(DK.Palette.warningInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, DK.Space.s2)
+        }
+    }
+}
+
+/// Buttons that wrap onto further lines when the pane is narrow.
+struct VPhoneAppInfoFlow: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
+        let rows = arrange(width: proposal.width ?? .infinity, subviews: subviews)
+        let width = rows.map(\.width).max() ?? 0
+        let height = rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(rows.count - 1, 0))
+        return CGSize(width: proposal.width ?? width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
+        var y = bounds.minY
+        for row in arrange(width: bounds.width, subviews: subviews) {
+            var x = bounds.minX
+            for index in row.indices {
+                let size = subviews[index].sizeThatFits(.unspecified)
+                subviews[index].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + spacing
+        }
+    }
+
+    private struct Row {
+        var indices: [Int] = []
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+    }
+
+    private func arrange(width: CGFloat, subviews: Subviews) -> [Row] {
+        var rows: [Row] = []
+        var row = Row()
+        for index in subviews.indices {
+            let size = subviews[index].sizeThatFits(.unspecified)
+            let needed = row.indices.isEmpty ? size.width : row.width + spacing + size.width
+            if !row.indices.isEmpty, needed > width {
+                rows.append(row)
+                row = Row()
+            }
+            row.width = row.indices.isEmpty ? size.width : row.width + spacing + size.width
+            row.height = max(row.height, size.height)
+            row.indices.append(index)
+        }
+        if !row.indices.isEmpty {
+            rows.append(row)
+        }
+        return rows
     }
 }

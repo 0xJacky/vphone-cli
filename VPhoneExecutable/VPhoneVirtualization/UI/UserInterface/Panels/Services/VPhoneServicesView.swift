@@ -1,23 +1,26 @@
 import SwiftUI
+import VPhoneDesignKit
 
 struct VPhoneServicesView: View {
     @Bindable var model: VPhoneServicesModel
+    @FocusState private var searchFocused: Bool
+    /// Which columns show. Domains starts hidden; the detail bar shows it.
+    @AppStorage("vphone-services-columns") private var columnData = Data()
 
     var body: some View {
         VStack(spacing: 0) {
-            filterBar
-            Divider()
+            header
+            VPhoneSystemPageBanner(status: model.status)
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Divider()
-            VPhoneGuestToolStatusBar(
+            VPhoneSystemPageStatusBar(
                 isConnected: model.isConnected,
                 activity: model.activity,
                 status: model.status,
+                detail: model.hasLoaded ? countText : nil,
             )
         }
-        .searchable(text: $model.searchText, placement: .toolbar, prompt: Text("Label or Program"))
-        .toolbar { toolbar }
+        .background(DK.Palette.window)
         .guestToolShortcuts(shortcuts)
         .confirmationDialog(
             model.pendingAction.map { $0.action.confirmationTitle($0.label) } ?? "",
@@ -36,34 +39,62 @@ struct VPhoneServicesView: View {
         .task(id: model.selection) { await model.loadDetail() }
     }
 
-    // MARK: - Toolbar
+    // MARK: - Header
 
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
-            let row = model.selectedRow
-            Button("Start", systemImage: VPhoneServiceAction.start.systemImage) { request(.start) }
-                .help("Start the selected service")
-                .disabled(!model.canPerform(.start, on: row))
-            Button("Stop", systemImage: VPhoneServiceAction.stop.systemImage) { request(.stop) }
-                .help("Stop the selected service")
-                .disabled(!model.canPerform(.stop, on: row))
-            Button("Restart", systemImage: VPhoneServiceAction.restart.systemImage) { request(.restart) }
-                .help("Stop the selected service, then start it again")
-                .disabled(!model.canPerform(.restart, on: row))
-            Menu {
-                if let row {
-                    actionItems(for: row, includeStartStop: false)
-                }
-            } label: {
-                Label("More Actions", systemImage: "ellipsis.circle")
+    private var header: some View {
+        let row = model.selectedRow
+        return DKPageHeader(VPhoneLocalization.text("Services"), subtitle: model.hasLoaded ? countText : nil) {
+            DKSegmented(
+                VPhoneLocalization.text("Filter"),
+                selection: $model.filter,
+                options: VPhoneServicesModel.Filter.allCases.map { DKSegmentOption($0.title, value: $0) },
+            )
+            .help(VPhoneLocalization.text("Show all, running, stopped, or disabled services (⌘1–⌘4)"))
+            DKButton(DKButtonSpec(
+                VPhoneLocalization.text("Start"),
+                glyph: .play,
+                isEnabled: model.canPerform(.start, on: row),
+                help: VPhoneLocalization.text("Start the selected service"),
+            ) { request(.start) })
+            DKButton(DKButtonSpec(
+                VPhoneLocalization.text("Stop"),
+                glyph: .stop,
+                isEnabled: model.canPerform(.stop, on: row),
+                help: VPhoneLocalization.text("Stop the selected service"),
+            ) { request(.stop) })
+            DKButton(DKButtonSpec(
+                VPhoneLocalization.text("Restart"),
+                glyph: .restart,
+                isEnabled: model.canPerform(.restart, on: row),
+                help: VPhoneLocalization.text("Stop the selected service, then start it again"),
+            ) { request(.restart) })
+            VPhoneSystemMenuButton(
+                label: VPhoneLocalization.text("More Actions"),
+                glyph: .ellipsis,
+                size: .icon,
+                isEnabled: row != nil && !model.isBusy && model.isConnected,
+                help: VPhoneLocalization.text("Enable, disable, signal, or remove the selected service"),
+            ) {
+                model.selectedRow.map(moreActionItems) ?? []
             }
-            .help("Enable, disable, signal, or remove the selected service")
-            .disabled(row == nil || model.isBusy || !model.isConnected)
-            Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
-                .help("Reload the service list (⌘R)")
-                .disabled(model.isBusy || !model.isConnected)
+            DKButton(DKButtonSpec(
+                VPhoneLocalization.text("Refresh"),
+                glyph: .refresh,
+                size: .icon,
+                isEnabled: !model.isBusy && model.isConnected,
+                help: VPhoneLocalization.text("Reload the service list (⌘R)"),
+            ) { Task { await model.refresh() } })
+            VPhoneSystemSearchField(
+                placeholder: VPhoneLocalization.text("Label or Program"),
+                text: $model.searchText,
+                width: 160,
+                focus: $searchFocused,
+            )
         }
+    }
+
+    private var countText: String {
+        String(localized: "\(model.visibleRows.count) of \(model.rows.count) services, \(model.runningCount) running", bundle: VPhoneLocalization.bundle)
     }
 
     private var shortcuts: [VPhoneGuestToolShortcut] {
@@ -71,6 +102,7 @@ struct VPhoneServicesView: View {
             VPhoneGuestToolShortcut(key: "r", isEnabled: !model.isBusy && model.isConnected) {
                 Task { await model.refresh() }
             },
+            VPhoneGuestToolShortcut(key: "f") { searchFocused = true },
         ]
         for (index, filter) in VPhoneServicesModel.Filter.allCases.enumerated() {
             shortcuts.append(VPhoneGuestToolShortcut(key: KeyEquivalent(Character(String(index + 1)))) {
@@ -78,33 +110,6 @@ struct VPhoneServicesView: View {
             })
         }
         return shortcuts
-    }
-
-    // MARK: - Filter
-
-    private var filterBar: some View {
-        HStack(spacing: 8) {
-            Picker("Filter", selection: $model.filter) {
-                ForEach(VPhoneServicesModel.Filter.allCases) { filter in
-                    Text(filter.title).tag(filter)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .help("Show all, running, stopped, or disabled services (⌘1–⌘4)")
-
-            Spacer(minLength: 8)
-
-            if model.hasLoaded {
-                Text("\(model.visibleRows.count) of \(model.rows.count) services, \(model.runningCount) running")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
     }
 
     // MARK: - Content
@@ -140,64 +145,71 @@ struct VPhoneServicesView: View {
                     .frame(minHeight: 160, maxHeight: .infinity)
                     .layoutPriority(1)
                 VPhoneServiceDetailView(model: model)
-                    .frame(minHeight: 190, idealHeight: 230)
+                    .frame(minHeight: 240, idealHeight: 320)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .clipped()
             }
         }
     }
 
     private var table: some View {
-        Table(model.visibleRows, selection: $model.selection, sortOrder: $model.sortOrder) {
+        Table(
+            model.visibleRows,
+            selection: $model.selection,
+            sortOrder: $model.sortOrder,
+            columnCustomization: columnCustomization,
+        ) {
             TableColumn("Label", value: \.label) { row in
-                VPhonePanelMonoText(row.label)
+                VPhoneSystemCell(.mono(row.label), help: row.label)
             }
-            .width(min: 160, ideal: 180)
+            .width(min: 160, ideal: 220)
+            .customizationID("label")
 
             TableColumn("State", value: \.stateRank) { row in
-                VPhoneServiceStateLabel(isRunning: row.isRunning)
-                    .font(.system(size: 11, design: .monospaced))
+                VPhoneSystemCell(Self.stateCell(row))
             }
-            .width(min: 72, ideal: 72, max: 88)
+            .width(min: 80, ideal: 90, max: 110)
+            .customizationID("state")
 
             TableColumn("PID", value: \.pidValue) { row in
-                VPhonePanelMonoText(row.pidText, secondary: row.pid == nil)
+                VPhoneSystemCell(.mono(row.pidText), alignment: .trailing)
             }
-            .width(min: 44, ideal: 48, max: 64)
+            .width(min: 44, ideal: 52, max: 72)
+            .customizationID("pid")
 
             TableColumn("Last Exit", value: \.lastExitValue) { row in
-                let exit = row.lastExit
-                Text(exit.text)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(exit.isAbnormal ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-                    .lineLimit(1)
-                    .help(exit.help)
+                VPhoneSystemCell(Self.lastExitCell(row), help: row.lastExit.help)
             }
-            .width(min: 56, ideal: 60, max: 84)
+            .width(min: 64, ideal: 80, max: 120)
+            .customizationID("last-exit")
 
             TableColumn("Disabled", value: \.disabledRank) { row in
-                Text(row.disabledText)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(row.disabled == true ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-                    .lineLimit(1)
+                VPhoneSystemCell(Self.disabledCell(row))
             }
-            .width(min: 56, ideal: 60, max: 72)
+            .width(min: 60, ideal: 70, max: 90)
+            .customizationID("disabled")
 
             TableColumn("Domains", value: \.domainText) { row in
-                VPhonePanelMonoText(row.domainText, secondary: true)
+                VPhoneSystemCell(.mono(row.domainText))
             }
-            .width(min: 64, ideal: 88, max: 110)
+            .width(min: 64, ideal: 88, max: 140)
+            .customizationID("domains")
+            .defaultVisibility(.hidden)
 
             TableColumn("Program", value: \.programText) { row in
-                VPhonePanelMonoText(row.program ?? "—", secondary: row.program == nil)
+                VPhoneSystemCell(row.program.map(DKTableCell.mono) ?? .muted("—"), help: row.program)
             }
-            .width(min: 100, ideal: 120)
+            .width(min: 120, ideal: 260)
+            .customizationID("program")
         }
+        .systemPageTable()
         .contextMenu(forSelectionType: VPhoneServiceRow.ID.self) { labels in
             if let label = labels.first, let row = model.row(label) {
                 Button("Copy Label") { model.copy(row.label) }
                 Button("Copy Program Path") { model.copy(row.program ?? "") }
                     .disabled(row.program == nil)
                 Divider()
-                actionItems(for: row, includeStartStop: true)
+                actionItems(for: row)
             }
         }
         .overlay {
@@ -212,19 +224,42 @@ struct VPhoneServicesView: View {
         .accessibilityLabel("launchd services")
     }
 
+    private var columnCustomization: Binding<TableColumnCustomization<VPhoneServiceRow>> {
+        Binding(
+            get: { (try? JSONDecoder().decode(TableColumnCustomization<VPhoneServiceRow>.self, from: columnData)) ?? .init() },
+            set: { columnData = (try? JSONEncoder().encode($0)) ?? Data() },
+        )
+    }
+
+    // MARK: - Cells
+
+    static func stateCell(_ row: VPhoneServiceRow) -> DKTableCell {
+        row.isRunning
+            ? .status(.success, VPhoneLocalization.text("Running"))
+            : .status(.idle, VPhoneLocalization.text("Stopped"))
+    }
+
+    /// A clean exit in plain figures; an exit code or signal as a badge.
+    static func lastExitCell(_ row: VPhoneServiceRow) -> DKTableCell {
+        let exit = row.lastExit
+        return exit.isAbnormal ? .badge(.warning, exit.text) : .mono(exit.text)
+    }
+
+    static func disabledCell(_ row: VPhoneServiceRow) -> DKTableCell {
+        row.disabled == true ? .badge(.warning, row.disabledText) : .muted(row.disabledText)
+    }
+
     // MARK: - Actions
 
     @ViewBuilder
-    private func actionItems(for row: VPhoneServiceRow, includeStartStop: Bool) -> some View {
-        if includeStartStop {
-            Button("Start") { model.request(.start, on: row.label) }
-                .disabled(!model.canPerform(.start, on: row))
-            Button("Stop…") { model.request(.stop, on: row.label) }
-                .disabled(!model.canPerform(.stop, on: row))
-            Button("Restart…") { model.request(.restart, on: row.label) }
-                .disabled(!model.canPerform(.restart, on: row))
-            Divider()
-        }
+    private func actionItems(for row: VPhoneServiceRow) -> some View {
+        Button("Start") { model.request(.start, on: row.label) }
+            .disabled(!model.canPerform(.start, on: row))
+        Button("Stop…") { model.request(.stop, on: row.label) }
+            .disabled(!model.canPerform(.stop, on: row))
+        Button("Restart…") { model.request(.restart, on: row.label) }
+            .disabled(!model.canPerform(.restart, on: row))
+        Divider()
         Button("Enable") { model.request(.enable, on: row.label) }
             .disabled(!model.canPerform(.enable, on: row))
         Button("Disable…") { model.request(.disable, on: row.label) }
@@ -244,6 +279,31 @@ struct VPhoneServicesView: View {
             .disabled(!model.canPerform(.remove, on: row))
     }
 
+    /// The More Actions menu: the context menu's actions after Start, Stop
+    /// and Restart, which have their own buttons.
+    private func moreActionItems(for row: VPhoneServiceRow) -> [DKMenuItem] {
+        let label = row.label
+        return [
+            DKMenuItem(VPhoneLocalization.text("Enable"), isEnabled: model.canPerform(.enable, on: row)) {
+                model.request(.enable, on: label)
+            },
+            DKMenuItem(VPhoneLocalization.text("Disable…"), isEnabled: model.canPerform(.disable, on: row)) {
+                model.request(.disable, on: label)
+            },
+            .submenu(
+                VPhoneLocalization.text("Send Signal"),
+                isEnabled: model.canPerform(.signal(.term), on: row),
+                items: VPhoneServiceSignal.allCases.map { signal in
+                    DKMenuItem("\(signal.title)…") { model.request(.signal(signal), on: label) }
+                },
+            ),
+            .separator,
+            DKMenuItem(VPhoneLocalization.text("Remove…"), isEnabled: model.canPerform(.remove, on: row), isDestructive: true) {
+                model.request(.remove, on: label)
+            },
+        ]
+    }
+
     private func request(_ action: VPhoneServiceAction) {
         guard let label = model.selection else { return }
         model.request(action, on: label)
@@ -258,23 +318,5 @@ struct VPhoneServicesView: View {
                 }
             },
         )
-    }
-}
-
-// MARK: - State Label
-
-/// Running or Stopped with a small status dot.
-struct VPhoneServiceStateLabel: View {
-    let isRunning: Bool
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Circle()
-                .fill(isRunning ? AnyShapeStyle(.green) : AnyShapeStyle(.secondary))
-                .frame(width: 6, height: 6)
-            Text(isRunning ? "Running" : "Stopped")
-                .foregroundStyle(isRunning ? .primary : .secondary)
-                .lineLimit(1)
-        }
     }
 }

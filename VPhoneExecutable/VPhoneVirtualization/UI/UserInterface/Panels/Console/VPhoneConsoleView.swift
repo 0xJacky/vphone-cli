@@ -1,31 +1,36 @@
 import SwiftUI
+import VPhoneDesignKit
 
 struct VPhoneConsoleView: View {
     @Bindable var model: VPhoneConsoleModel
     @FocusState private var searchFocused: Bool
+    /// Which columns show. Category starts hidden; the detail bar shows it.
+    @AppStorage("vphone-console-columns") private var columnData = Data()
 
     var body: some View {
         VStack(spacing: 0) {
-            if model.visibleEntries.isEmpty {
-                emptyState
-            } else {
-                VSplitView {
-                    table
-                        .frame(minHeight: 120, idealHeight: 420, maxHeight: .infinity)
-                        .layoutPriority(1)
-                    detail
-                        .frame(minHeight: 64, idealHeight: 120, maxHeight: 360)
+            header
+            VPhoneSystemPageBanner(status: model.status)
+            Group {
+                if model.visibleEntries.isEmpty {
+                    emptyState
+                } else {
+                    VSplitView {
+                        table
+                            .frame(minHeight: 120, idealHeight: 420, maxHeight: .infinity)
+                            .layoutPriority(1)
+                        detail
+                            .frame(minHeight: 140, idealHeight: 180, maxHeight: 420)
+                    }
                 }
             }
-            Divider()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             statusBar
         }
-        .toolbar { toolbar }
-        .searchable(text: $model.searchText, placement: .toolbar, prompt: Text("Search"))
-        .searchFocused($searchFocused)
+        .background(DK.Palette.window)
         .guestToolShortcuts([
             VPhoneGuestToolShortcut(key: "p") { model.toggleRunning() },
-            VPhoneGuestToolShortcut(key: "r", isEnabled: !model.isRunning && !model.isCapturing && model.control.isConnected) {
+            VPhoneGuestToolShortcut(key: "r", isEnabled: canCapture) {
                 Task { await model.captureOnce() }
             },
             VPhoneGuestToolShortcut(key: "k", isEnabled: !model.entries.isEmpty) { model.clear() },
@@ -35,59 +40,75 @@ struct VPhoneConsoleView: View {
         .task { await model.run() }
     }
 
-    // MARK: - Toolbar
+    private var canCapture: Bool {
+        !model.isRunning && !model.isCapturing && model.control.isConnected
+    }
 
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .navigation) {
-            Button {
-                model.toggleRunning()
-            } label: {
-                if model.isRunning {
-                    Label("Pause", systemImage: "pause.fill")
-                } else {
-                    Label("Start", systemImage: "play.fill")
-                }
-            }
-            .help(model.isRunning ? "Pause streaming (⌘P)" : "Start streaming (⌘P)")
+    // MARK: - Header
 
-            Button("Refresh", systemImage: "arrow.clockwise") {
-                Task { await model.captureOnce() }
-            }
-            .help("Capture 2 seconds of log while paused (⌘R)")
-            .disabled(model.isRunning || model.isCapturing || !model.control.isConnected)
-
-            Button("Clear", systemImage: "trash") { model.clear() }
-                .help("Clear all loaded entries (⌘K)")
-                .disabled(model.entries.isEmpty)
-        }
-
-        ToolbarItemGroup(placement: .primaryAction) {
-            TextField("Process", text: $model.processFilter, prompt: Text("Process"))
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: 11, design: .monospaced))
+    private var header: some View {
+        DKPageHeader(VPhoneLocalization.text("Console"), subtitle: subtitle) {
+            DKButton(DKButtonSpec(
+                VPhoneLocalization.text(model.isRunning ? "Pause" : "Start"),
+                glyph: model.isRunning ? .pause : .play,
+                variant: .primary,
+                help: VPhoneLocalization.text(model.isRunning ? "Pause streaming (⌘P)" : "Start streaming (⌘P)"),
+            ) { model.toggleRunning() })
+            DKButton(DKButtonSpec(
+                VPhoneLocalization.text("Refresh"),
+                glyph: .refresh,
+                size: .icon,
+                isEnabled: canCapture,
+                help: VPhoneLocalization.text("Capture 2 seconds of log while paused (⌘R)"),
+            ) { Task { await model.captureOnce() } })
+            DKButton(DKButtonSpec(
+                VPhoneLocalization.text("Clear"),
+                glyph: .trash,
+                size: .icon,
+                isEnabled: !model.entries.isEmpty,
+                help: VPhoneLocalization.text("Clear all loaded entries (⌘K)"),
+            ) { model.clear() })
+            TextField(VPhoneLocalization.text("Process"), text: $model.processFilter, prompt: Text(VPhoneLocalization.text("Process")))
+                .textFieldStyle(DKFieldStyle(mono: true))
                 .frame(width: 104)
-                .help("Capture only processes whose name contains this text. Applies to the next capture.")
-
-            Picker("Level", selection: $model.levelFilter) {
-                ForEach(VPhoneConsoleLevelFilter.allCases) { filter in
-                    Text(filter.title).tag(filter)
-                }
-            }
-            .pickerStyle(.menu)
-            .fixedSize()
-            .help("Show all levels, errors and faults, or faults only")
-
-            Toggle(isOn: $model.autoScroll) {
-                Label("Auto-Scroll", systemImage: "arrow.down.to.line")
-            }
-            .toggleStyle(.button)
-            .help("Keep the newest entry visible")
-
-            Button("Save…", systemImage: "square.and.arrow.down") { model.save() }
-                .help("Save the shown entries as a plain-text log (⌘S)")
-                .disabled(model.visibleEntries.isEmpty)
+                .help(VPhoneLocalization.text("Capture only processes whose name contains this text. Applies to the next capture."))
+            DKSegmented(
+                VPhoneLocalization.text("Level"),
+                selection: $model.levelFilter,
+                options: VPhoneConsoleLevelFilter.allCases.map { DKSegmentOption($0.title, value: $0) },
+            )
+            .help(VPhoneLocalization.text("Show all levels, errors and faults, or faults only"))
+            VPhoneSystemToggleButton(
+                label: VPhoneLocalization.text("Auto-Scroll"),
+                glyph: .download,
+                isOn: $model.autoScroll,
+                size: .icon,
+                help: VPhoneLocalization.text("Keep the newest entry visible"),
+            )
+            DKButton(DKButtonSpec(
+                VPhoneLocalization.text("Save…"),
+                glyph: .download,
+                size: .icon,
+                isEnabled: !model.visibleEntries.isEmpty,
+                help: VPhoneLocalization.text("Save the shown entries as a plain-text log (⌘S)"),
+            ) { model.save() })
+            VPhoneSystemSearchField(
+                placeholder: VPhoneLocalization.text("Search"),
+                text: $model.searchText,
+                width: 140,
+                focus: $searchFocused,
+            )
         }
+    }
+
+    private var subtitle: String {
+        guard model.isRunning else {
+            return VPhoneLocalization.text("Streaming paused")
+        }
+        let process = model.processFilter.trimmingCharacters(in: .whitespacesAndNewlines)
+        return process.isEmpty
+            ? VPhoneLocalization.text("Streaming the guest unified log")
+            : String(localized: "Streaming the guest unified log for “\(process)”", bundle: VPhoneLocalization.bundle)
     }
 
     // MARK: - Table
@@ -123,49 +144,59 @@ struct VPhoneConsoleView: View {
 
     private var table: some View {
         ScrollViewReader { proxy in
-            Table(model.visibleEntries, selection: $model.selection, sortOrder: $model.sortOrder) {
+            Table(
+                model.visibleEntries,
+                selection: $model.selection,
+                sortOrder: $model.sortOrder,
+                columnCustomization: columnCustomization,
+            ) {
                 TableColumn("Time", value: \.id) { entry in
-                    VPhonePanelMonoText(entry.time, secondary: true)
+                    VPhoneSystemCell(.mono(entry.time))
                 }
-                .width(min: 88, ideal: 92, max: 120)
+                .width(min: 88, ideal: 96, max: 120)
+                .customizationID("time")
 
                 TableColumn("Level", value: \.level) { entry in
-                    VPhoneConsoleLevelLabel(level: entry.level)
+                    VPhoneSystemCell(.status(entry.level.tone, entry.level.title))
                 }
-                .width(min: 56, ideal: 60, max: 84)
+                .width(min: 70, ideal: 86, max: 100)
+                .customizationID("level")
 
                 TableColumn("Process", value: \.process) { entry in
-                    VPhonePanelMonoText(entry.process)
+                    VPhoneSystemCell(.text(entry.process), help: entry.process)
                 }
-                .width(min: 72, ideal: 100, max: 240)
+                .width(min: 72, ideal: 110, max: 240)
+                .customizationID("process")
 
                 TableColumn("PID", value: \.pid) { entry in
-                    Text(verbatim: "\(entry.pid)")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    VPhoneSystemCell(.mono(String(entry.pid)), alignment: .trailing)
                 }
                 .width(min: 40, ideal: 48, max: 72)
+                .customizationID("pid")
 
                 TableColumn("Subsystem", value: \.subsystem) { entry in
-                    VPhonePanelMonoText(entry.subsystem, secondary: true)
+                    VPhoneSystemCell(.mono(entry.subsystem), help: entry.subsystem)
                 }
-                .width(min: 72, ideal: 116, max: 320)
+                .width(min: 72, ideal: 150, max: 320)
+                .customizationID("subsystem")
 
                 TableColumn("Category", value: \.category) { entry in
-                    VPhonePanelMonoText(entry.category, secondary: true)
+                    VPhoneSystemCell(.mono(entry.category))
                 }
-                .width(min: 56, ideal: 72, max: 200)
+                .width(min: 56, ideal: 80, max: 200)
+                .customizationID("category")
+                .defaultVisibility(.hidden)
 
                 TableColumn("Message", value: \.message) { entry in
-                    Text(entry.summary)
-                        .font(.system(size: 11, design: .monospaced))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .help(entry.message.count > 2000 ? String(entry.message.prefix(2000)) + "…" : entry.message)
+                    VPhoneSystemCell(
+                        .mono(entry.summary),
+                        help: entry.message.count > 2000 ? String(entry.message.prefix(2000)) + "…" : entry.message,
+                    )
                 }
-                .width(min: 140)
+                .width(min: 160)
+                .customizationID("message")
             }
+            .systemPageTable()
             .contextMenu(forSelectionType: VPhoneConsoleEntry.ID.self) { ids in
                 contextMenu(ids)
             }
@@ -174,6 +205,13 @@ struct VPhoneConsoleView: View {
             .onAppear { scrollToNewest(proxy) }
             .accessibilityLabel("Guest log entries")
         }
+    }
+
+    private var columnCustomization: Binding<TableColumnCustomization<VPhoneConsoleEntry>> {
+        Binding(
+            get: { (try? JSONDecoder().decode(TableColumnCustomization<VPhoneConsoleEntry>.self, from: columnData)) ?? .init() },
+            set: { columnData = (try? JSONEncoder().encode($0)) ?? Data() },
+        )
     }
 
     @ViewBuilder
@@ -201,71 +239,48 @@ struct VPhoneConsoleView: View {
     @ViewBuilder
     private var detail: some View {
         if let entry = model.selectedEntry {
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 8) {
-                    VPhoneConsoleLevelLabel(level: entry.level)
-                    Text(verbatim: model.fullDate(entry))
-                    Text(verbatim: "\(entry.process)[\(entry.pid)]")
-                    if let origin = entry.origin {
-                        Text(verbatim: origin)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                }
-                .font(.system(size: 11, design: .monospaced))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                Divider()
-                ScrollView {
-                    Text(entry.message)
-                        .font(.system(size: 11, design: .monospaced))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                }
+            DKDetailBar(
+                entry.process.isEmpty ? "—" : entry.process,
+                subtitle: "[\(entry.pid)] · \(entry.level.title)",
+                note: ([model.fullDate(entry)] + [entry.subsystem, entry.category].filter { !$0.isEmpty }).joined(separator: " · "),
+            ) {
+                VPhoneSystemTextLog(
+                    text: entry.message,
+                    tone: entry.level.lineTone,
+                    label: VPhoneLocalization.text("Selected entry"),
+                    minHeight: 48,
+                )
+                .frame(maxHeight: .infinity)
             }
-            .background(Color(nsColor: .textBackgroundColor))
+            .frame(maxHeight: .infinity)
         } else {
             Text(model.selection.count > 1 ? "\(model.selection.count) entries selected." : "Select an entry to see its full message.")
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .font(DK.Typeface.caption)
+                .foregroundStyle(DK.Palette.muted)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(nsColor: .textBackgroundColor))
+                .background(DK.Palette.surfaceRaised)
         }
     }
 
     // MARK: - Status
 
     private var statusBar: some View {
-        HStack(spacing: 0) {
-            VPhoneGuestToolStatusBar(
-                isConnected: model.control.isConnected,
-                activity: model.isRunning && model.control.isConnected && model.status == nil
-                    ? String(localized: "Streaming…", bundle: VPhoneLocalization.bundle)
-                    : nil,
-                status: model.status,
-            )
-            HStack(spacing: 8) {
-                if model.lastCaptureTruncated {
-                    Text("Truncated")
-                        .foregroundStyle(.orange)
-                        .help("The last capture reached \(VPhoneConsoleModel.captureMaxLines) entries; the guest dropped the rest.")
-                }
-                Text(countText)
-                    .foregroundStyle(.secondary)
-                Text(model.isRunning ? "Running" : "Paused")
-                    .foregroundStyle(model.isRunning ? .green : .secondary)
-            }
-            .font(.system(size: 11, design: .monospaced))
-            .lineLimit(1)
-            .fixedSize()
-            .padding(.horizontal, 8)
-            .frame(height: 24)
-            .background(.bar)
+        var items: [DKStatusItem] = []
+        if model.lastCaptureTruncated {
+            items.append(DKStatusItem(
+                VPhoneLocalization.text("Truncated"),
+                glyph: .warning,
+                title: String(localized: "The last capture reached \(VPhoneConsoleModel.captureMaxLines) entries; the guest dropped the rest.", bundle: VPhoneLocalization.bundle),
+            ))
         }
+        return VPhoneSystemPageStatusBar(
+            isConnected: model.control.isConnected,
+            activity: nil,
+            status: model.status,
+            idleText: model.isRunning ? VPhoneLocalization.text("Streaming…") : nil,
+            items: items,
+            detail: "\(countText) · \(VPhoneLocalization.text(model.isRunning ? "Running" : "Paused"))",
+        )
     }
 
     private var countText: String {
@@ -277,21 +292,25 @@ struct VPhoneConsoleView: View {
     }
 }
 
-// MARK: - Level Label
+// MARK: - Level Style
 
-/// A colored dot and the level name: fault red, error orange, others secondary.
-struct VPhoneConsoleLevelLabel: View {
-    let level: VPhoneConsoleLevel
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(level.color)
-                .frame(width: 6, height: 6)
-            Text(level.title)
-                .foregroundStyle(level >= .error ? level.color : .secondary)
+extension VPhoneConsoleLevel {
+    /// The status dot of the Level column: fault red, error amber, others idle.
+    var tone: DKTone {
+        switch self {
+        case .fault: .danger
+        case .error: .warning
+        default: .idle
         }
-        .font(.system(size: 11, design: .monospaced))
-        .lineLimit(1)
+    }
+
+    /// The color of the selected entry's message.
+    var lineTone: DKLogLine.Tone {
+        switch self {
+        case .fault: .error
+        case .error: .warning
+        case .debug: .dim
+        default: .plain
+        }
     }
 }

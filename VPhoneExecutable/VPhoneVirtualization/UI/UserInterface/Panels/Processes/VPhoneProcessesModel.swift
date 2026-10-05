@@ -62,29 +62,6 @@ final class VPhoneProcessesModel {
         !isBusy && !selectedRows.isEmpty
     }
 
-    /// The status bar text: the last result, or the process count and memory
-    /// pressure once loaded. The view shows the connection state instead
-    /// while the guest is disconnected.
-    var displayedStatus: VPhoneGuestToolStatus? {
-        if let status {
-            return status
-        }
-        guard hasLoaded else { return nil }
-        let query = trimmedSearch
-        var parts = [
-            query.isEmpty
-                ? String(localized: "\(rows.count) processes", bundle: VPhoneLocalization.bundle)
-                : String(localized: "\(visibleRows.count) of \(rows.count) processes", bundle: VPhoneLocalization.bundle),
-        ]
-        if let summary = memory?.summary {
-            parts.append(String(localized: "memory pressure: \(summary)", bundle: VPhoneLocalization.bundle))
-        }
-        if let total = memory?.totalBytes {
-            parts.append(String(localized: "\(VPhonePanelFormat.bytes(total)) RAM", bundle: VPhoneLocalization.bundle))
-        }
-        return VPhoneGuestToolStatus(message: parts.joined(separator: " · "), isError: false)
-    }
-
     // MARK: - Refresh
 
     /// Reloads the process list and memory summary. A manual refresh shows

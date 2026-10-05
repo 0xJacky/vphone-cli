@@ -1,26 +1,30 @@
 import AppKit
 import SwiftUI
+import VPhoneDesignKit
 
 struct VPhoneCrashLogsView: View {
     @Bindable var model: VPhoneCrashLogsModel
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
+            header
+            VPhoneSystemPageBanner(status: model.status)
             HSplitView {
                 listPane
-                    .frame(minWidth: 470, maxHeight: .infinity)
+                    .frame(minWidth: 400, maxHeight: .infinity)
                 detailPane
-                    .frame(minWidth: 340, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: 380, maxWidth: .infinity, maxHeight: .infinity)
             }
-            Divider()
-            VPhoneGuestToolStatusBar(
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            VPhoneSystemPageStatusBar(
                 isConnected: model.control.isConnected,
                 activity: model.activity?.title,
                 status: model.status,
+                detail: model.hasLoaded ? countText : nil,
             )
         }
-        .toolbar { toolbar }
-        .searchable(text: $model.searchText, placement: .toolbar, prompt: Text("Filter by process or name"))
+        .background(DK.Palette.window)
         .guestToolShortcuts([
             VPhoneGuestToolShortcut(key: "r", isEnabled: !model.isBusy) {
                 Task { await model.refresh() }
@@ -40,21 +44,47 @@ struct VPhoneCrashLogsView: View {
         }
     }
 
-    // MARK: - Toolbar
+    // MARK: - Header
 
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
-            Button("Copy", systemImage: "doc.on.doc") { model.copyFocusedReport() }
-                .help("Copy the full report text (⇧⌘C)")
-                .disabled(!model.canCopy)
-            Button("Export…", systemImage: "square.and.arrow.up") { export(model.selection) }
-                .help("Save the selected reports to the Mac (⌘S)")
-                .disabled(!model.canExport)
-            Button("Refresh", systemImage: "arrow.clockwise") { Task { await model.refresh() } }
-                .help("Reload the list of crash reports (⌘R)")
-                .disabled(model.isBusy)
+    private var header: some View {
+        DKPageHeader(VPhoneLocalization.text("Crash Logs"), subtitle: model.hasLoaded ? subtitle : nil) {
+            DKButton(DKButtonSpec(
+                VPhoneLocalization.text("Copy"),
+                glyph: .copy,
+                isEnabled: model.canCopy,
+                help: VPhoneLocalization.text("Copy the full report text (⇧⌘C)"),
+            ) { model.copyFocusedReport() })
+            DKButton(DKButtonSpec(
+                VPhoneLocalization.text("Export…"),
+                glyph: .upload,
+                isEnabled: model.canExport,
+                help: VPhoneLocalization.text("Save the selected reports to the Mac (⌘S)"),
+            ) { export(model.selection) })
+            DKButton(DKButtonSpec(
+                VPhoneLocalization.text("Refresh"),
+                glyph: .refresh,
+                size: .icon,
+                isEnabled: !model.isBusy,
+                help: VPhoneLocalization.text("Reload the list of crash reports (⌘R)"),
+            ) { Task { await model.refresh() } })
+            VPhoneSystemSearchField(
+                placeholder: VPhoneLocalization.text("Filter by process or name"),
+                text: $model.searchText,
+                width: 200,
+                focus: $searchFocused,
+            )
         }
+    }
+
+    private var subtitle: String {
+        String(localized: "\(model.reports.count) reports in CrashReporter and DiagnosticReports", bundle: VPhoneLocalization.bundle)
+    }
+
+    private var countText: String {
+        let visible = model.visibleReports.count
+        return visible == model.reports.count
+            ? String(localized: "\(visible) reports", bundle: VPhoneLocalization.bundle)
+            : String(localized: "\(visible) of \(model.reports.count) reports", bundle: VPhoneLocalization.bundle)
     }
 
     // MARK: - List
@@ -99,30 +129,29 @@ struct VPhoneCrashLogsView: View {
     private func table(_ rows: [VPhoneCrashReport]) -> some View {
         Table(rows, selection: $model.selection, sortOrder: $model.sortOrder) {
             TableColumn("Date", value: \.mtime) { report in
-                VPhonePanelMonoText(report.dateText)
+                VPhoneSystemCell(.muted(report.dateText))
             }
-            .width(134)
+            .width(min: 110, ideal: 134, max: 160)
 
             TableColumn("Process", value: \.process) { report in
-                VPhonePanelMonoText(report.process)
+                VPhoneSystemCell(
+                    model.selection.contains(report.id) ? .strong(report.process) : .text(report.process),
+                    help: report.process,
+                )
             }
-            .width(min: 72, ideal: 88)
+            .width(min: 80, ideal: 120)
 
             TableColumn("Type", value: \.kindTitle) { report in
-                Text(report.kindTitle)
-                    .font(.system(size: 11))
-                    .lineLimit(1)
-                    .foregroundStyle(.secondary)
-                    .help(report.name)
+                VPhoneSystemCell(.muted(report.kindTitle), help: report.name)
             }
-            .width(min: 76, ideal: 80, max: 130)
+            .width(min: 80, ideal: 110, max: 140)
 
             TableColumn("File Size", value: \.size) { report in
-                VPhonePanelMonoText(report.sizeText, secondary: true)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                VPhoneSystemCell(.mono(report.sizeText), alignment: .trailing)
             }
-            .width(60)
+            .width(min: 56, ideal: 64, max: 90)
         }
+        .systemPageTable()
         .contextMenu(forSelectionType: VPhoneCrashReport.ID.self) { ids in
             if !ids.isEmpty {
                 let reports = model.reports(for: ids)
@@ -141,10 +170,19 @@ struct VPhoneCrashLogsView: View {
     @ViewBuilder
     private var detailPane: some View {
         if let report = model.focusedReport {
-            VStack(alignment: .leading, spacing: 0) {
-                detailHeader(report, content: model.contents[report.path])
-                Divider()
+            let content = model.contents[report.path]
+            VStack(spacing: 0) {
+                DKDetailBar(
+                    report.name,
+                    note: report.path,
+                    facts: facts(content?.header),
+                ) {
+                    detailControls(content)
+                }
                 detailBody(report)
+                    .padding(.vertical, DK.Space.s3)
+                    .padding(.horizontal, DK.Space.s4)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         } else if model.selection.count > 1 {
             VPhonePanelEmptyState(
@@ -161,79 +199,37 @@ struct VPhoneCrashLogsView: View {
         }
     }
 
-    private func detailHeader(_ report: VPhoneCrashReport, content: VPhoneCrashReportContent?) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(report.name)
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .textSelection(.enabled)
-                        .help(report.name)
-                    Text(report.path)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.head)
-                        .textSelection(.enabled)
-                        .help(report.path)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .layoutPriority(1)
+    private func facts(_ header: VPhoneCrashReportContent.Header?) -> [DKKeyValue] {
+        guard let header else { return [] }
+        let values: [(String, String?)] = [
+            ("App", header.appName),
+            ("Bug Type", header.bugType),
+            ("OS Version", header.osVersion),
+            ("Timestamp", header.timestamp),
+            ("Incident ID", header.incidentID),
+        ]
+        return values.compactMap { key, value in
+            value.map { DKKeyValue(VPhoneLocalization.text(key), $0) }
+        }
+    }
 
-                Toggle("Wrap Lines", isOn: $model.wrapLines)
-                    .toggleStyle(.checkbox)
-                    .fixedSize()
-                    .help("Wrap long lines to the width of the pane")
+    private func detailControls(_ content: VPhoneCrashReportContent?) -> some View {
+        HStack(spacing: DK.Space.s3) {
+            HStack(spacing: DK.Space.s2) {
+                Text(VPhoneLocalization.text("Wrap Lines"))
+                    .font(DK.Typeface.body)
+                DKSwitch(VPhoneLocalization.text("Wrap Lines"), isOn: $model.wrapLines)
             }
-
-            if let header = content?.header {
-                summary(header)
-            }
-
+            .help(VPhoneLocalization.text("Wrap long lines to the width of the pane"))
             if content?.truncated == true {
-                Label("The guest sent only part of this report.", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                HStack(spacing: DK.Space.s1) {
+                    DKIcon(.warning, size: 13)
+                        .foregroundStyle(DK.Palette.warning)
+                    Text(VPhoneLocalization.text("The guest sent only part of this report."))
+                        .font(DK.Typeface.caption)
+                        .foregroundStyle(DK.Palette.warningInk)
+                }
             }
-        }
-        .padding(12)
-    }
-
-    private func summary(_ header: VPhoneCrashReportContent.Header) -> some View {
-        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 2) {
-            if let value = header.appName {
-                summaryRow("App", value)
-            }
-            if let value = header.bugType {
-                summaryRow("Bug Type", value)
-            }
-            if let value = header.osVersion {
-                summaryRow("OS Version", value)
-            }
-            if let value = header.timestamp {
-                summaryRow("Timestamp", value)
-            }
-            if let value = header.incidentID {
-                summaryRow("Incident ID", value)
-            }
-        }
-    }
-
-    private func summaryRow(_ title: LocalizedStringKey, _ value: String) -> some View {
-        GridRow {
-            Text(title, bundle: VPhoneLocalization.bundle)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .gridColumnAlignment(.trailing)
-            Text(value)
-                .font(.system(size: 11, design: .monospaced))
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .textSelection(.enabled)
-                .help(value)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -241,22 +237,25 @@ struct VPhoneCrashLogsView: View {
     private func detailBody(_ report: VPhoneCrashReport) -> some View {
         if let content = model.contents[report.path] {
             VPhoneCrashReportTextView(identity: content.path, text: content.displayText, wrapLines: model.wrapLines)
+                .clipShape(RoundedRectangle(cornerRadius: DK.Radius.card, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: DK.Radius.card, style: .continuous)
+                        .strokeBorder(DK.Palette.line, lineWidth: DK.Metric.hairline)
+                }
         } else if let message = model.loadErrors[report.path], !model.loadingPaths.contains(report.path) {
-            ContentUnavailableView {
-                Label("Unable to Load Report", systemImage: "exclamationmark.triangle")
-            } description: {
-                Text(message)
-            } actions: {
-                Button("Try Again") { model.retryFocusedReport() }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            DKBanner(
+                String(localized: "Unable to load the report. \(message)", bundle: VPhoneLocalization.bundle),
+                tone: .warning,
+                actionLabel: VPhoneLocalization.text("Try Again"),
+            ) { model.retryFocusedReport() }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         } else {
             VStack(spacing: 8) {
                 ProgressView()
                     .controlSize(.small)
-                Text("Loading report…")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                Text(VPhoneLocalization.text("Loading report…"))
+                    .font(DK.Typeface.monoSmall)
+                    .foregroundStyle(DK.Palette.muted)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }

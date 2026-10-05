@@ -1,10 +1,12 @@
 import AppKit
 import SwiftUI
+import VPhoneDesignKit
 
 /// A read-only, selectable monospace text view for report text. AppKit's
 /// text system lays out only what is visible, so reports of several
 /// megabytes open without stalling the window, and lines scroll sideways
-/// unless `wrapLines` is on.
+/// unless `wrapLines` is on. It draws in the terminal colors of `DKLog`,
+/// which lays out every line and suits shorter text.
 struct VPhoneCrashReportTextView: NSViewRepresentable {
     /// Identifies the text; the view replaces its contents only when this changes.
     let identity: String
@@ -34,13 +36,13 @@ struct VPhoneCrashReportTextView: NSViewRepresentable {
         textView.isRichText = false
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
-        textView.textContainerInset = NSSize(width: 8, height: 8)
+        textView.textContainerInset = NSSize(width: 10, height: 10)
         textView.minSize = .zero
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
         textView.autoresizingMask = [.width]
         textView.drawsBackground = true
-        textView.backgroundColor = .textBackgroundColor
+        textView.backgroundColor = NSColor(DK.Palette.terminalBackground)
         textView.setAccessibilityLabel(VPhoneLocalization.text("Report text"))
 
         let scrollView = NSScrollView()
@@ -48,7 +50,7 @@ struct VPhoneCrashReportTextView: NSViewRepresentable {
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = true
-        scrollView.backgroundColor = .textBackgroundColor
+        scrollView.backgroundColor = NSColor(DK.Palette.terminalBackground)
         scrollView.documentView = textView
         return scrollView
     }
@@ -65,8 +67,8 @@ struct VPhoneCrashReportTextView: NSViewRepresentable {
         if coordinator.identity != identity {
             coordinator.identity = identity
             let attributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-                .foregroundColor: NSColor.textColor,
+                .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
+                .foregroundColor: NSColor(DK.Palette.terminalForeground),
             ]
             textView.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: attributes))
             textView.setSelectedRange(NSRange(location: 0, length: 0))
