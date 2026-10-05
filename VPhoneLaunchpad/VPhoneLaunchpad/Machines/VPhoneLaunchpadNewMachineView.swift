@@ -715,7 +715,8 @@ struct VPhoneLaunchpadCreationView: View {
 
     private func formatState(_ step: Step) -> VPhoneLaunchpadMachineFormat.StepState {
         switch stepStatus(step) {
-        case .done: .done
+        // Creation never skips a step; a skipped one counts as finished.
+        case .done, .skipped: .done
         case .active: .active
         case .failed: .failed
         case .pending: .pending
@@ -804,6 +805,7 @@ struct VPhoneLaunchpadCreationView: View {
         case .active: DK.Palette.muted
         case .pending: DK.Palette.inkDisabled
         case .failed: DK.Palette.danger
+        case .skipped: DK.Palette.muted
         }
     }
 
