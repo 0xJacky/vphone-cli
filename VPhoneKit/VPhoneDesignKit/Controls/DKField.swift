@@ -26,7 +26,9 @@ private struct DKFieldChrome<Content: View>: View {
         let shape = RoundedRectangle(cornerRadius: DK.Radius.field, style: .continuous)
         content
             .font(DKFieldMetrics.font(mono: mono))
-            .foregroundStyle(isEnabled ? DK.Palette.ink : DK.Palette.inkDisabled)
+            // Only a disabled field is recolored: a foreground style on an enabled
+            // field would also paint its placeholder in ink, so it reads as a value.
+            .modifier(DKFieldDisabledInk(isEnabled: isEnabled))
             .padding(.horizontal, DKFieldMetrics.horizontalPadding)
             .frame(minHeight: DKFieldMetrics.height)
             .background(shape.fill(DK.Palette.window))
@@ -296,4 +298,17 @@ private struct DKFieldPreview: View {
 
 #Preview("Fields, dark") {
     DKFieldPreview().preferredColorScheme(.dark)
+}
+
+/// Dims a disabled field's text and leaves an enabled field's to the system.
+struct DKFieldDisabledInk: ViewModifier {
+    let isEnabled: Bool
+
+    func body(content: Content) -> some View {
+        if isEnabled {
+            content
+        } else {
+            content.foregroundStyle(DK.Palette.inkDisabled)
+        }
+    }
 }

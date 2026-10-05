@@ -34,7 +34,7 @@ public enum DKGlyph: String, Sendable, CaseIterable, Hashable {
         case .key: "key"
         case .list: "list.bullet"
         case .clipboard: "doc.on.clipboard"
-        case .warning: "exclamationmark.triangle.fill"
+        case .warning: "exclamationmark.triangle"
         case .check: "checkmark.circle.fill"
         case .play: "play.fill"
         case .stop: "stop.fill"

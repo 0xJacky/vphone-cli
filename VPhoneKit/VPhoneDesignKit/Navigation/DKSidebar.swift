@@ -251,12 +251,15 @@ struct DKSidebarRow<ID: Hashable & Sendable>: View {
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
     }
 
+    /// The design marks the current row with the neutral selection fill, not the
+    /// accent (its glyph already carries the accent); hover is a lighter wash.
     private var background: Color {
         if isSelected {
-            return DK.Palette.accentTint
+            return DK.Palette.selectionNeutral
         }
-        return isHovered && item.isEnabled ? DK.Palette.selectionNeutral : .clear
+        return isHovered && item.isEnabled ? DKSidebarFill.hover : .clear
     }
+
 }
 
 /// A status dot at a size other than the 8pt of `DKStatusDot`, for sidebar meta, footers and tabs.
@@ -398,4 +401,9 @@ private struct DKSidebarPreview: View {
 
 #Preview("Sidebar, dark") {
     DKSidebarPreview().preferredColorScheme(.dark)
+}
+
+/// Cached sidebar fills, kept out of the generic row type.
+enum DKSidebarFill {
+    static let hover = DK.Palette.dynamic(0x000000, 0xFFFFFF, lightAlpha: 0.035, darkAlpha: 0.05)
 }
