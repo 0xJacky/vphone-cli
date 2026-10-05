@@ -12,7 +12,6 @@ public struct DKProgress: View {
     public var label: String?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var phase = false
 
     /// - Parameters:
     ///   - value: The fraction done. Values outside 0...1, and NaN, are clamped.
@@ -68,20 +67,23 @@ public struct DKProgress: View {
                 .frame(width: width * value)
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: value)
         } else {
+            // The sliding segment runs on Core Animation (see DKMotion.swift): a
+            // SwiftUI `repeatForever` would redraw the whole window every frame
+            // for as long as the bar is on screen.
             let segment = width * Self.indeterminateFraction
-            Rectangle()
-                .fill(Self.fillColor(for: tone))
-                .frame(width: segment)
-                .offset(x: reduceMotion ? 0 : (phase ? width - segment : 0))
-                .onAppear {
-                    guard !reduceMotion else {
-                        return
-                    }
-                    withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
-                        phase = true
-                    }
-                }
+            DKMotionShape(
+                color: Self.fillColor(for: tone),
+                content: .fill(cornerRadius: nil, size: CGSize(width: segment, height: Self.height(thin: thin))),
+                motion: reduceMotion ? nil : Self.indeterminateMotion(width: width),
+            )
         }
+    }
+
+    /// The indeterminate segment's slide from the leading edge to the trailing
+    /// one and back.
+    static func indeterminateMotion(width: CGFloat) -> DKMotion {
+        let travel = max(0, width - width * indeterminateFraction)
+        return DKMotion(translationX: DKMotionRamp(from: 0, to: travel), duration: 0.9, autoreverses: true, timing: .easeInEaseOut)
     }
 
     // MARK: - Geometry and color

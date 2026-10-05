@@ -19,6 +19,10 @@ public struct DKSidebarItem<ID: Hashable & Sendable>: Identifiable, Hashable, Se
     public var count: Int?
     /// Read by VoiceOver after the label when the row shows the warning glyph.
     public var warningLabel: String
+    /// A disabled row is dimmed, cannot be selected, and arrow keys skip it.
+    public var isEnabled: Bool
+    /// Why a disabled row is unavailable: its tooltip, and read by VoiceOver.
+    public var disabledReason: String?
 
     public init(
         id: ID,
@@ -30,6 +34,8 @@ public struct DKSidebarItem<ID: Hashable & Sendable>: Identifiable, Hashable, Se
         isWarning: Bool = false,
         count: Int? = nil,
         warningLabel: String = "Needs attention",
+        isEnabled: Bool = true,
+        disabledReason: String? = nil,
     ) {
         self.id = id
         self.label = label
@@ -40,6 +46,8 @@ public struct DKSidebarItem<ID: Hashable & Sendable>: Identifiable, Hashable, Se
         self.isWarning = isWarning
         self.count = count
         self.warningLabel = warningLabel
+        self.isEnabled = isEnabled
+        self.disabledReason = disabledReason
     }
 
     /// The trailing text the row shows: the meta text, else the count, else nothing.
@@ -54,8 +62,9 @@ public struct DKSidebarItem<ID: Hashable & Sendable>: Identifiable, Hashable, Se
     /// What VoiceOver reads for the row: the label, the trailing text, and the
     /// warning when there is one.
     public var accessibilityText: String {
-        [label, trailingText, isWarning ? warningLabel : nil]
+        [label, trailingText, isWarning ? warningLabel : nil, isEnabled ? nil : disabledReason]
             .compactMap(\.self)
+            .filter { !$0.isEmpty }
             .joined(separator: ", ")
     }
 }
@@ -83,16 +92,27 @@ public extension Array {
         flatMap(\.items)
     }
 
-    /// The item `offset` rows away from `id` across sections, for arrow-key
-    /// navigation. With no current item, moving down picks the first row and
-    /// moving up the last. Stops at the ends instead of wrapping.
+    /// The item `offset` enabled rows away from `id` across sections, for
+    /// arrow-key navigation. Disabled rows are skipped. With no current item,
+    /// moving down picks the first enabled row and moving up the last. Stops at
+    /// the ends instead of wrapping.
     func sidebarItemID<ID>(from id: ID?, offset: Int) -> ID? where Element == DKSidebarSection<ID> {
-        let ids = allSidebarItems().map(\.id)
+        let items = allSidebarItems()
+        let ids = items.filter(\.isEnabled).map(\.id)
         guard !ids.isEmpty else {
             return nil
         }
-        guard let id, let index = ids.firstIndex(of: id) else {
+        guard let id, let current = items.firstIndex(where: { $0.id == id }) else {
             return offset >= 0 ? ids.first : ids.last
+        }
+        guard let index = ids.firstIndex(of: id) else {
+            // The current row is disabled: step to the nearest enabled row in the direction of travel.
+            let before = items[..<current].filter(\.isEnabled).map(\.id)
+            let after = items[(current + 1)...].filter(\.isEnabled).map(\.id)
+            if offset >= 0 {
+                return after.isEmpty ? before.last : after[Swift.min(Swift.max(offset - 1, 0), after.count - 1)]
+            }
+            return before.isEmpty ? after.first : before[Swift.max(before.count + offset, 0)]
         }
         return ids[Swift.min(Swift.max(index + offset, 0), ids.count - 1)]
     }

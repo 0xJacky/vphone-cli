@@ -78,32 +78,50 @@ struct DKSectionsFlexGrow: LayoutValueKey {
     static let defaultValue: CGFloat = 0
 }
 
-extension View {
-    /// The item's flex basis (its ideal width when nil) and grow factor inside a
-    /// `DKSectionsFlexLayout`.
-    func dkSectionsFlex(basis: CGFloat? = nil, grow: CGFloat = 0) -> some View {
+public extension View {
+    /// This view's flex basis and grow factor inside a `DKFlowLayout`, as CSS
+    /// `flex: grow 1 basis` sets them: the width it starts from (its ideal width
+    /// when nil) and its share of the width a line has left over.
+    func dkFlowItem(basis: CGFloat? = nil, grow: CGFloat = 0) -> some View {
         layoutValue(key: DKSectionsFlexBasis.self, value: basis)
             .layoutValue(key: DKSectionsFlexGrow.self, value: grow)
     }
 }
 
-/// A row that wraps its items onto further lines when they do not fit, each line
-/// centered vertically. Without a width it lays everything out on one line at
-/// ideal widths.
-struct DKSectionsFlexLayout: Layout {
-    var horizontalSpacing: CGFloat
-    var verticalSpacing: CGFloat
+extension View {
+    func dkSectionsFlex(basis: CGFloat? = nil, grow: CGFloat = 0) -> some View {
+        dkFlowItem(basis: basis, grow: grow)
+    }
+}
 
-    init(horizontalSpacing: CGFloat, verticalSpacing: CGFloat) {
+/// A row that wraps its items onto further lines when they do not fit, each
+/// line centered vertically: tags, a legend, a toolbar that folds on a narrow
+/// window. Items keep their ideal widths unless `dkFlowItem(basis:grow:)` gives
+/// them a basis and a share of the spare width.
+///
+/// ```swift
+/// DKFlowLayout(horizontalSpacing: DK.Space.s6, verticalSpacing: DK.Space.s2) {
+///     ForEach(parts) { LegendEntry($0) }
+/// }
+/// ```
+///
+/// Without a width to fit it lays everything out on one line. Measured at zero
+/// width, as a hosting view does to find its minimum size, it reports zero wide
+/// and one line tall rather than stacking every item a character wide.
+public struct DKFlowLayout: Layout {
+    public var horizontalSpacing: CGFloat
+    public var verticalSpacing: CGFloat
+
+    public init(horizontalSpacing: CGFloat = DK.Space.s2, verticalSpacing: CGFloat = DK.Space.s2) {
         self.horizontalSpacing = horizontalSpacing
         self.verticalSpacing = verticalSpacing
     }
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
+    public func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
         arrange(width: proposal.width, subviews: subviews).size
     }
 
-    func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
+    public func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
         for placement in arrange(width: bounds.width, subviews: subviews).placements {
             subviews[placement.index].place(
                 at: CGPoint(x: bounds.minX + placement.frame.minX, y: bounds.minY + placement.frame.minY),
@@ -123,7 +141,11 @@ struct DKSectionsFlexLayout: Layout {
             return (.zero, [])
         }
         let ideals = subviews.map { $0.sizeThatFits(.unspecified) }
-        guard let width, width.isFinite else {
+        guard let width, width.isFinite, width > 0 else {
+            // No width (nil or infinite): one line at ideal widths. Zero: the
+            // minimum-size probe, answered with that same line but zero wide;
+            // wrapping at zero would measure text one character per line and
+            // report a height that grows the window.
             let height = ideals.map(\.height).max() ?? 0
             var x: CGFloat = 0
             var placements: [Placement] = []
@@ -131,7 +153,8 @@ struct DKSectionsFlexLayout: Layout {
                 placements.append(Placement(index: index, frame: CGRect(x: x, y: (height - ideal.height) / 2, width: ideal.width, height: ideal.height)))
                 x += ideal.width + horizontalSpacing
             }
-            return (CGSize(width: max(x - horizontalSpacing, 0), height: height), placements)
+            let lineWidth = max(x - horizontalSpacing, 0)
+            return (CGSize(width: width == nil || width?.isInfinite == true ? lineWidth : 0, height: height), placements)
         }
         let items = subviews.indices.map { index in
             DKSectionsFlexItem(
@@ -154,6 +177,33 @@ struct DKSectionsFlexLayout: Layout {
             y += height + verticalSpacing
         }
         return (CGSize(width: min(usedWidth, width), height: max(y - verticalSpacing, 0)), placements)
+    }
+}
+
+/// The layout behind the sections' wrapping rows.
+typealias DKSectionsFlexLayout = DKFlowLayout
+
+// MARK: - Zero-width probe
+
+/// Passes its one child every proposal but a zero width, which it answers with
+/// the child's height at its ideal width and a width of zero. A hosting view
+/// finds its minimum size by measuring at zero width; text that wraps
+/// (`fixedSize(horizontal: false, vertical: true)`) measured there stacks one
+/// character per line and reports a height of a thousand points or more, which
+/// becomes the window's minimum height.
+struct DKZeroWidthProbeLayout: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache _: inout ()) -> CGSize {
+        guard let child = subviews.first else {
+            return .zero
+        }
+        if let width = proposal.width, width <= 0 {
+            return CGSize(width: 0, height: child.sizeThatFits(ProposedViewSize(width: nil, height: proposal.height)).height)
+        }
+        return child.sizeThatFits(proposal)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal _: ProposedViewSize, subviews: Subviews, cache _: inout ()) {
+        subviews.first?.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(bounds.size))
     }
 }
 

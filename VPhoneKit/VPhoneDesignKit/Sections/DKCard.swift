@@ -26,10 +26,12 @@ public enum DKCardLayout: String, Sendable, CaseIterable, Hashable {
 /// ```
 ///
 /// Inside a sheet the card takes the window color instead; set it with
-/// `dkCardFill(_:)`.
+/// `dkCardFill(_:)`. A card that reports a state takes its tone's border:
+/// `DKCard(tone: .warning) { … }`.
 public struct DKCard<Content: View>: View {
     let layout: DKCardLayout
     let fillsHeight: Bool
+    let tone: DKTone?
     let content: Content
 
     @Environment(\.dkCardFill) private var fill
@@ -37,9 +39,12 @@ public struct DKCard<Content: View>: View {
     /// - Parameters:
     ///   - layout: Divided rows (the default) or padded free content.
     ///   - fillsHeight: Stretch to the height offered, as a growing section's card does.
-    public init(_ layout: DKCardLayout = .rows, fillsHeight: Bool = false, @ViewBuilder content: () -> Content) {
+    ///   - tone: Draws the border in the tone's line color (`DKTone.line`); nil
+    ///     keeps the plain line.
+    public init(_ layout: DKCardLayout = .rows, fillsHeight: Bool = false, tone: DKTone? = nil, @ViewBuilder content: () -> Content) {
         self.layout = layout
         self.fillsHeight = fillsHeight
+        self.tone = tone
         self.content = content()
     }
 
@@ -49,7 +54,12 @@ public struct DKCard<Content: View>: View {
             .frame(maxWidth: .infinity, maxHeight: fillsHeight ? .infinity : nil, alignment: .topLeading)
             .background(fill)
             .clipShape(shape)
-            .overlay(shape.strokeBorder(DK.Palette.line, lineWidth: DK.Metric.hairline))
+            .overlay(shape.strokeBorder(Self.border(for: tone), lineWidth: DK.Metric.hairline))
+    }
+
+    /// The border for a tone: the tone's line, or the plain card line.
+    nonisolated static func border(for tone: DKTone?) -> Color {
+        tone?.line ?? DK.Palette.line
     }
 
     @ViewBuilder

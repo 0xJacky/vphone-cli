@@ -10,14 +10,22 @@ public enum DKLaunchpadDestination: String, Sendable, CaseIterable, Hashable, Id
         self
     }
 
+    /// The page's name, from the host app's string catalog (see `title(bundle:)`).
     public var title: String {
+        title(bundle: .main)
+    }
+
+    /// The page's name, looked up in `bundle`'s string catalog. DesignKit is a
+    /// static library without resources of its own, so the keys live in the
+    /// catalog of the app that links it; a missing key reads as the English name.
+    public func title(bundle: Bundle) -> String {
         switch self {
-        case .machines: "Machines"
-        case .firmwares: "Firmwares"
-        case .disks: "Disks"
-        case .bundles: "Bundles"
-        case .network: "Network"
-        case .hostSetup: "Host Setup"
+        case .machines: String(localized: "Machines", bundle: bundle, comment: "Launchpad sidebar page")
+        case .firmwares: String(localized: "Firmwares", bundle: bundle, comment: "Launchpad sidebar page")
+        case .disks: String(localized: "Disks", bundle: bundle, comment: "Launchpad sidebar page")
+        case .bundles: String(localized: "Bundles", bundle: bundle, comment: "Launchpad sidebar page")
+        case .network: String(localized: "Network", bundle: bundle, comment: "Launchpad sidebar page")
+        case .hostSetup: String(localized: "Host Setup", bundle: bundle, comment: "Launchpad sidebar page")
         }
     }
 
@@ -48,10 +56,16 @@ public enum DKLaunchpadSection: String, Sendable, CaseIterable, Hashable, Identi
         self
     }
 
+    /// The section's title, from the host app's string catalog (see `title(bundle:)`).
     public var title: String {
+        title(bundle: .main)
+    }
+
+    /// The section's title, looked up in `bundle`'s string catalog.
+    public func title(bundle: Bundle) -> String {
         switch self {
-        case .library: "Library"
-        case .system: "System"
+        case .library: String(localized: "Library", bundle: bundle, comment: "Launchpad sidebar section")
+        case .system: String(localized: "System", bundle: bundle, comment: "Launchpad sidebar section")
         }
     }
 
@@ -78,6 +92,8 @@ public struct DKLaunchpadSidebar: View {
     ///   - firmwareCount: Firmwares in the library, shown as a count.
     ///   - bundleVersion: The default bundle's version, in monospace.
     ///   - hostSetupNeedsAttention: Shows the warning glyph on Host Setup.
+    ///   - bundlesNeedAttention: Shows the warning glyph on Bundles, as when the
+    ///     guest environment and the host programs come from different bundles.
     ///   - helperStatus: The footer's first line ("Helper 2.6.0 ready").
     ///   - helperTone: The dot before `helperStatus`.
     ///   - libraryPath: The footer's second line, in monospace ("~/VPhone").
@@ -88,6 +104,7 @@ public struct DKLaunchpadSidebar: View {
         firmwareCount: Int? = nil,
         bundleVersion: String? = nil,
         hostSetupNeedsAttention: Bool = false,
+        bundlesNeedAttention: Bool = false,
         helperStatus: String? = nil,
         helperTone: DKTone = .success,
         libraryPath: String? = nil,
@@ -99,6 +116,7 @@ public struct DKLaunchpadSidebar: View {
             firmwareCount: firmwareCount,
             bundleVersion: bundleVersion,
             hostSetupNeedsAttention: hostSetupNeedsAttention,
+            bundlesNeedAttention: bundlesNeedAttention,
         )
         footerLines = Self.footerLines(helperStatus: helperStatus, helperTone: helperTone, libraryPath: libraryPath)
     }
@@ -124,6 +142,7 @@ public struct DKLaunchpadSidebar: View {
         firmwareCount: Int? = nil,
         bundleVersion: String? = nil,
         hostSetupNeedsAttention: Bool = false,
+        bundlesNeedAttention: Bool = false,
     ) -> [DKSidebarSection<DKLaunchpadDestination>] {
         DKLaunchpadSection.allCases.map { section in
             DKSidebarSection(section.title, items: section.destinations.map { destination in
@@ -141,6 +160,7 @@ public struct DKLaunchpadSidebar: View {
                 case .bundles:
                     item.meta = bundleVersion
                     item.isMetaMonospaced = true
+                    item.isWarning = bundlesNeedAttention
                 case .hostSetup:
                     item.isWarning = hostSetupNeedsAttention
                 case .disks, .network:

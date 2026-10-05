@@ -47,7 +47,13 @@ public extension DK {
         public static let accent = dynamic(0x007AFF, 0x0A84FF)
         public static let accentSoft = dynamic(0x8EC5FF, 0x3A6EA8)
         public static let accentTint = dynamic(0x007AFF, 0x0A84FF, lightAlpha: 0.12, darkAlpha: 0.24)
+        /// A primary button's fill while it is pressed.
+        public static let accentPressed = dynamic(0x007AFF, 0x0A84FF, lightAlpha: 0.85, darkAlpha: 0.85)
         public static let onAccent = dynamic(0xFFFFFF, 0xFFFFFF)
+        /// Secondary text on an accent fill, such as a selected row of a focused table.
+        public static let onAccentMuted = dynamic(0xFFFFFF, 0xFFFFFF, lightAlpha: 0.78, darkAlpha: 0.78)
+        /// Tracks and badge grounds on an accent fill.
+        public static let onAccentTint = dynamic(0xFFFFFF, 0xFFFFFF, lightAlpha: 0.24, darkAlpha: 0.24)
         public static let link = dynamic(0x0071E3, 0x4EA1FF)
         public static let selectionNeutral = dynamic(0x000000, 0xFFFFFF, lightAlpha: 0.07, darkAlpha: 0.10)
 
@@ -56,6 +62,8 @@ public extension DK {
         public static let success = dynamic(0x28B44A, 0x30D158)
         public static let successInk = dynamic(0x1A7F37, 0x5FE08A)
         public static let successSurface = dynamic(0x30D158, 0x30D158, lightAlpha: 0.14, darkAlpha: 0.18)
+        /// The border of a success container: the success color at 35%.
+        public static let successLine = dynamic(0x28B44A, 0x30D158, lightAlpha: 0.35, darkAlpha: 0.35)
         public static let warning = dynamic(0xE0A000, 0xFFD60A)
         public static let warningInk = dynamic(0x8A6100, 0xFFE066)
         public static let warningSurface = dynamic(0xFFF8E1, 0x2B2714)
@@ -97,12 +105,33 @@ public extension DK {
         public static let tagArchive = dynamic(0xE0A359, 0xE0A359)
 
         /// A color with a light and a dark value, resolved by the appearance it is drawn in.
+        ///
+        /// Call it once and keep the result, as the tokens above do: never in a
+        /// `body` or a computed property. A SwiftUI `Color` made from an
+        /// `NSColor` compares equal only to the same `NSColor` instance, so a
+        /// color built afresh on every read makes every view that stores it
+        /// differ from its previous value, and SwiftUI can no longer skip the
+        /// subtree when nothing changed. The same goes for `.opacity(_:)` on a
+        /// token: give the faded color a token of its own.
         public static func dynamic(_ light: UInt32, _ dark: UInt32, lightAlpha: CGFloat = 1, darkAlpha: CGFloat = 1) -> Color {
-            Color(nsColor: NSColor(name: nil) { appearance in
-                let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-                return NSColor(rgb: isDark ? dark : light, alpha: isDark ? darkAlpha : lightAlpha)
-            })
+            Color(nsColor: dynamicNSColor(light, dark, lightAlpha: lightAlpha, darkAlpha: darkAlpha))
         }
+
+        /// The `NSColor` behind `dynamic(_:_:lightAlpha:darkAlpha:)`, for AppKit views.
+        ///
+        /// Both branches are built once, outside the provider, which runs on every
+        /// resolution. Dark is decided with `bestMatch(from:)`, never by comparing
+        /// the appearance's name: menus and popovers draw in Vibrant Dark, whose
+        /// name is not Dark Aqua.
+        public static func dynamicNSColor(_ light: UInt32, _ dark: UInt32, lightAlpha: CGFloat = 1, darkAlpha: CGFloat = 1) -> NSColor {
+            let lightColor = NSColor(rgb: light, alpha: lightAlpha)
+            let darkColor = NSColor(rgb: dark, alpha: darkAlpha)
+            return NSColor(name: nil) { appearance in
+                appearance.bestMatch(from: appearanceNames) == .darkAqua ? darkColor : lightColor
+            }
+        }
+
+        private static let appearanceNames: [NSAppearance.Name] = [.aqua, .darkAqua]
     }
 }
 

@@ -58,12 +58,15 @@ public struct DKStatusItem: Identifiable, Hashable, Sendable {
 /// The bar along the bottom of a Guest Tools panel or a VM window: connection
 /// state at the leading end, then metric items, then trailing detail text.
 /// Everything is set in small monospaced type, so numbers line up as they change.
+/// A `textTone` colors the leading text, for a result that should stand out:
+/// an error in the danger ink, a finished copy in the success ink.
 public struct DKStatusBar: View {
     public var connection: DKConnectionState
     public var text: String?
     public var items: [DKStatusItem]
     public var detail: String?
     public var compact: Bool
+    public var textTone: DKTone?
 
     public init(
         connection: DKConnectionState = .connected,
@@ -71,12 +74,14 @@ public struct DKStatusBar: View {
         items: [DKStatusItem] = [],
         detail: String? = nil,
         compact: Bool = false,
+        textTone: DKTone? = nil,
     ) {
         self.connection = connection
         self.text = text
         self.items = items
         self.detail = detail
         self.compact = compact
+        self.textTone = textTone
     }
 
     public init(
@@ -85,8 +90,14 @@ public struct DKStatusBar: View {
         items: [DKStatusItem] = [],
         detail: String? = nil,
         compact: Bool = false,
+        textTone: DKTone? = nil,
     ) {
-        self.init(connection: DKConnectionState(isConnected: isConnected), text: text, items: items, detail: detail, compact: compact)
+        self.init(connection: DKConnectionState(isConnected: isConnected), text: text, items: items, detail: detail, compact: compact, textTone: textTone)
+    }
+
+    /// The leading text's color: the tone's text color, or the bar's muted ink.
+    nonisolated static func textColor(for tone: DKTone?) -> Color {
+        tone?.text ?? DK.Palette.muted
     }
 
     /// The bar's height: `DK.Metric.statusBarHeight`, or 22pt when compact.
@@ -99,6 +110,7 @@ public struct DKStatusBar: View {
             HStack(spacing: DK.Space.s2) {
                 DKStatusDot(connection.tone)
                 Text(text ?? connection.defaultText)
+                    .foregroundStyle(Self.textColor(for: textTone))
                     .lineLimit(1)
             }
             .accessibilityElement(children: .ignore)

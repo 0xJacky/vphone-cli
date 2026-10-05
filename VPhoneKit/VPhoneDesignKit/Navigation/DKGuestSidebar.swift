@@ -13,19 +13,27 @@ public enum DKGuestTool: String, Sendable, CaseIterable, Hashable, Identifiable 
         self
     }
 
+    /// The tool's name, from the host app's string catalog (see `title(bundle:)`).
     public var title: String {
+        title(bundle: .main)
+    }
+
+    /// The tool's name, looked up in `bundle`'s string catalog. DesignKit is a
+    /// static library without resources of its own, so the keys live in the
+    /// catalog of the app that links it; a missing key reads as the English name.
+    public func title(bundle: Bundle) -> String {
         switch self {
-        case .deviceInfo: "Device Info"
-        case .controls: "Controls"
-        case .apps: "Apps"
-        case .processes: "Processes"
-        case .services: "Services"
-        case .files: "Files"
-        case .keychain: "Keychain"
-        case .preferences: "Preferences"
-        case .clipboard: "Clipboard"
-        case .console: "Console"
-        case .crashLogs: "Crash Logs"
+        case .deviceInfo: String(localized: "Device Info", bundle: bundle, comment: "Guest Tools sidebar page")
+        case .controls: String(localized: "Controls", bundle: bundle, comment: "Guest Tools sidebar page")
+        case .apps: String(localized: "Apps", bundle: bundle, comment: "Guest Tools sidebar page")
+        case .processes: String(localized: "Processes", bundle: bundle, comment: "Guest Tools sidebar page")
+        case .services: String(localized: "Services", bundle: bundle, comment: "Guest Tools sidebar page")
+        case .files: String(localized: "Files", bundle: bundle, comment: "Guest Tools sidebar page")
+        case .keychain: String(localized: "Keychain", bundle: bundle, comment: "Guest Tools sidebar page")
+        case .preferences: String(localized: "Preferences", bundle: bundle, comment: "Guest Tools sidebar page")
+        case .clipboard: String(localized: "Clipboard", bundle: bundle, comment: "Guest Tools sidebar page")
+        case .console: String(localized: "Console", bundle: bundle, comment: "Guest Tools sidebar page")
+        case .crashLogs: String(localized: "Crash Logs", bundle: bundle, comment: "Guest Tools sidebar page")
         }
     }
 
@@ -63,12 +71,18 @@ public enum DKGuestToolSection: String, Sendable, CaseIterable, Hashable, Identi
         self
     }
 
+    /// The section's title, from the host app's string catalog (see `title(bundle:)`).
     public var title: String {
+        title(bundle: .main)
+    }
+
+    /// The section's title, looked up in `bundle`'s string catalog.
+    public func title(bundle: Bundle) -> String {
         switch self {
-        case .device: "Device"
-        case .software: "Software"
-        case .data: "Data"
-        case .logs: "Logs"
+        case .device: String(localized: "Device", bundle: bundle, comment: "Guest Tools sidebar section")
+        case .software: String(localized: "Software", bundle: bundle, comment: "Guest Tools sidebar section")
+        case .data: String(localized: "Data", bundle: bundle, comment: "Guest Tools sidebar section")
+        case .logs: String(localized: "Logs", bundle: bundle, comment: "Guest Tools sidebar section")
         }
     }
 
@@ -97,6 +111,9 @@ public struct DKGuestSidebar: View {
     ///   - iOSVersion: The guest's iOS version; omitted when nil.
     ///   - address: The guest's address, in monospace; omitted when nil.
     ///   - counts: A count to show after a tool ("Crash Logs 3").
+    ///   - unavailable: Tools that cannot be used now, each with the reason its
+    ///     row shows as a tooltip ("Needs vphoned 2.6"); an empty reason shows
+    ///     none. Their rows are dimmed and cannot be selected.
     public init(
         selection: Binding<DKGuestTool>,
         machineName: String,
@@ -105,13 +122,14 @@ public struct DKGuestSidebar: View {
         iOSVersion: String? = nil,
         address: String? = nil,
         counts: [DKGuestTool: Int] = [:],
+        unavailable: [DKGuestTool: String] = [:],
     ) {
         _selection = selection
         self.machineName = machineName
         self.machineTone = machineTone
         self.stateLabel = stateLabel
         facts = Self.facts(iOSVersion: iOSVersion, address: address)
-        sections = Self.sections(counts: counts)
+        sections = Self.sections(counts: counts, unavailable: unavailable)
     }
 
     public var body: some View {
@@ -123,11 +141,22 @@ public struct DKGuestSidebar: View {
 
     // MARK: Model
 
-    /// The sidebar's sections, with an optional count per tool.
-    public nonisolated static func sections(counts: [DKGuestTool: Int] = [:]) -> [DKSidebarSection<DKGuestTool>] {
+    /// The sidebar's sections, with an optional count per tool and the tools
+    /// that are unavailable, each with its reason.
+    public nonisolated static func sections(
+        counts: [DKGuestTool: Int] = [:],
+        unavailable: [DKGuestTool: String] = [:],
+    ) -> [DKSidebarSection<DKGuestTool>] {
         DKGuestToolSection.allCases.map { section in
             DKSidebarSection(section.title, items: section.tools.map { tool in
-                DKSidebarItem(id: tool, label: tool.title, glyph: tool.glyph, count: counts[tool])
+                DKSidebarItem(
+                    id: tool,
+                    label: tool.title,
+                    glyph: tool.glyph,
+                    count: counts[tool],
+                    isEnabled: unavailable[tool] == nil,
+                    disabledReason: unavailable[tool],
+                )
             })
         }
     }

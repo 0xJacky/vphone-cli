@@ -44,12 +44,46 @@ public enum DKTableRowStyle: String, Sendable, CaseIterable, Hashable {
     case plain
 }
 
+// MARK: - Selection
+
+/// How a `DKDataTable` selects: not at all, one row, or any set of rows.
+enum DKDataTableSelection<ID: Hashable> {
+    case none
+    case single(Binding<ID?>)
+    case multiple(Binding<Set<ID>>)
+
+    var isSelectable: Bool {
+        if case .none = self {
+            return false
+        }
+        return true
+    }
+
+    func contains(_ id: ID) -> Bool {
+        switch self {
+        case .none: false
+        case let .single(binding): binding.wrappedValue == id
+        case let .multiple(binding): binding.wrappedValue.contains(id)
+        }
+    }
+}
+
 // MARK: - Table
 
 /// A lightweight table for panels and sheets: a header of muted column titles, rows
-/// of cells, optional group headers, an accent-tinted single selection that the
-/// up and down arrow keys move while the table has focus, highlighted rows, an empty
-/// state, and sideways scrolling once the panel is narrower than the columns allow.
+/// of cells, optional group headers, an accent-tinted selection of one row or of
+/// many, highlighted rows, an empty state, and sideways scrolling once the panel
+/// is narrower than the columns allow.
+///
+/// A row selects on mouse-down, as a native table's does. In a table of many
+/// selected rows, Command-click toggles a row and Shift-click selects the run
+/// from the last row clicked. While the table has focus the up and down arrow
+/// keys, Home and End move the selection, and with Shift extend it.
+///
+/// A column with a `sortKey` gets a clickable header when the table has a
+/// `sortOrder`; the header shows the primary column's direction and a click
+/// changes the order (`DKTableSortDescriptor.clicking(_:in:)`). The caller sorts
+/// the rows it passes in, as with SwiftUI's `Table`.
 ///
 /// For the main lists of a window use SwiftUI's `Table` with `DKTableCellView`
 /// inside each `TableColumn`; this view is for the smaller tables around it.
@@ -61,7 +95,8 @@ public struct DKDataTable<Row: Identifiable, CellContent: View>: View {
     let label: String
     let columns: [DKTableColumn]
     let groups: [DKTableGroup<Row>]
-    let selection: Binding<Row.ID?>?
+    let selection: DKDataTableSelection<Row.ID>
+    let sortOrder: Binding<[DKTableSortDescriptor]>?
     let roomy: Bool
     let rowStyle: DKTableRowStyle
     let minWidth: CGFloat
@@ -69,42 +104,38 @@ public struct DKDataTable<Row: Identifiable, CellContent: View>: View {
     let emptyText: String
     let background: Color
     let highlight: (Row) -> DKTone?
+    let rowMenu: ((Row) -> [DKMenuItem])?
     let cell: (Row, Int) -> CellContent
 
     @State private var viewportWidth: CGFloat = 0
+    @State private var tracker = DKRowTracker()
+    /// Where Shift extends a multiple selection from, and the row the last
+    /// click or arrow key landed on.
+    @State private var anchor: Row.ID?
+    @State private var cursor: Row.ID?
     @FocusState private var isFocused: Bool
 
-    /// A table of grouped rows.
-    ///
-    /// - Parameters:
-    ///   - label: The table's accessibility label ("Machines").
-    ///   - selection: The selected row; rows are not selectable when nil.
-    ///   - roomy: Two-line rows (58pt) for title cells with subtitles.
-    ///   - minWidth: The narrowest the table lays out before it scrolls sideways;
-    ///     never less than the columns' minimum widths.
-    ///   - scrollsVertically: Scroll the rows under a pinned header. When false the
-    ///     table is as tall as its rows, for sheets that size to their content.
-    ///   - background: The table's ground, also behind the pinned header. Match the card it sits on.
-    ///   - highlight: The tone a row is highlighted in, or nil.
-    ///   - cell: The view for a row's column, by column index.
-    public init(
-        _ label: String,
+    init(
+        label: String,
         columns: [DKTableColumn],
         groups: [DKTableGroup<Row>],
-        selection: Binding<Row.ID?>? = nil,
-        roomy: Bool = false,
-        rowStyle: DKTableRowStyle = .inset,
-        minWidth: CGFloat = 0,
-        scrollsVertically: Bool = true,
-        emptyText: String = "Nothing to show.",
-        background: Color = DK.Palette.surfaceRaised,
-        highlight: @escaping (Row) -> DKTone? = { _ in nil },
-        @ViewBuilder cell: @escaping (Row, Int) -> CellContent,
+        selection: DKDataTableSelection<Row.ID>,
+        sortOrder: Binding<[DKTableSortDescriptor]>?,
+        roomy: Bool,
+        rowStyle: DKTableRowStyle,
+        minWidth: CGFloat,
+        scrollsVertically: Bool,
+        emptyText: String,
+        background: Color,
+        highlight: @escaping (Row) -> DKTone?,
+        rowMenu: ((Row) -> [DKMenuItem])?,
+        cell: @escaping (Row, Int) -> CellContent,
     ) {
         self.label = label
         self.columns = columns
         self.groups = groups
         self.selection = selection
+        self.sortOrder = sortOrder
         self.roomy = roomy
         self.rowStyle = rowStyle
         self.minWidth = minWidth
@@ -112,7 +143,73 @@ public struct DKDataTable<Row: Identifiable, CellContent: View>: View {
         self.emptyText = emptyText
         self.background = background
         self.highlight = highlight
+        self.rowMenu = rowMenu
         self.cell = cell
+    }
+
+    /// A table of grouped rows.
+    ///
+    /// - Parameters:
+    ///   - label: The table's accessibility label ("Machines").
+    ///   - selection: The selected row; rows are not selectable when nil.
+    ///   - sortOrder: The sort order the sortable headers show and change.
+    ///   - roomy: Two-line rows (58pt) for title cells with subtitles.
+    ///   - minWidth: The narrowest the table lays out before it scrolls sideways;
+    ///     never less than the columns' minimum widths.
+    ///   - scrollsVertically: Scroll the rows under a pinned header. When false the
+    ///     table is as tall as its rows, for sheets that size to their content.
+    ///   - background: The table's ground, also behind the pinned header. Match the card it sits on.
+    ///   - highlight: The tone a row is highlighted in, or nil.
+    ///   - contextMenu: The menu a row shows on a secondary click, or nil for none.
+    ///   - cell: The view for a row's column, by column index.
+    public init(
+        _ label: String,
+        columns: [DKTableColumn],
+        groups: [DKTableGroup<Row>],
+        selection: Binding<Row.ID?>? = nil,
+        sortOrder: Binding<[DKTableSortDescriptor]>? = nil,
+        roomy: Bool = false,
+        rowStyle: DKTableRowStyle = .inset,
+        minWidth: CGFloat = 0,
+        scrollsVertically: Bool = true,
+        emptyText: String = "Nothing to show.",
+        background: Color = DK.Palette.surfaceRaised,
+        highlight: @escaping (Row) -> DKTone? = { _ in nil },
+        contextMenu: ((Row) -> [DKMenuItem])? = nil,
+        @ViewBuilder cell: @escaping (Row, Int) -> CellContent,
+    ) {
+        self.init(
+            label: label, columns: columns, groups: groups,
+            selection: selection.map { .single($0) } ?? .none,
+            sortOrder: sortOrder, roomy: roomy, rowStyle: rowStyle, minWidth: minWidth,
+            scrollsVertically: scrollsVertically, emptyText: emptyText, background: background,
+            highlight: highlight, rowMenu: contextMenu, cell: cell,
+        )
+    }
+
+    /// A table of grouped rows where any set of rows can be selected.
+    public init(
+        _ label: String,
+        columns: [DKTableColumn],
+        groups: [DKTableGroup<Row>],
+        selection: Binding<Set<Row.ID>>,
+        sortOrder: Binding<[DKTableSortDescriptor]>? = nil,
+        roomy: Bool = false,
+        rowStyle: DKTableRowStyle = .inset,
+        minWidth: CGFloat = 0,
+        scrollsVertically: Bool = true,
+        emptyText: String = "Nothing to show.",
+        background: Color = DK.Palette.surfaceRaised,
+        highlight: @escaping (Row) -> DKTone? = { _ in nil },
+        contextMenu: ((Row) -> [DKMenuItem])? = nil,
+        @ViewBuilder cell: @escaping (Row, Int) -> CellContent,
+    ) {
+        self.init(
+            label: label, columns: columns, groups: groups, selection: .multiple(selection),
+            sortOrder: sortOrder, roomy: roomy, rowStyle: rowStyle, minWidth: minWidth,
+            scrollsVertically: scrollsVertically, emptyText: emptyText, background: background,
+            highlight: highlight, rowMenu: contextMenu, cell: cell,
+        )
     }
 
     /// A table of rows without group headers.
@@ -121,6 +218,7 @@ public struct DKDataTable<Row: Identifiable, CellContent: View>: View {
         columns: [DKTableColumn],
         rows: [Row],
         selection: Binding<Row.ID?>? = nil,
+        sortOrder: Binding<[DKTableSortDescriptor]>? = nil,
         roomy: Bool = false,
         rowStyle: DKTableRowStyle = .inset,
         minWidth: CGFloat = 0,
@@ -128,21 +226,40 @@ public struct DKDataTable<Row: Identifiable, CellContent: View>: View {
         emptyText: String = "Nothing to show.",
         background: Color = DK.Palette.surfaceRaised,
         highlight: @escaping (Row) -> DKTone? = { _ in nil },
+        contextMenu: ((Row) -> [DKMenuItem])? = nil,
         @ViewBuilder cell: @escaping (Row, Int) -> CellContent,
     ) {
         self.init(
-            label,
-            columns: columns,
-            groups: [DKTableGroup(rows: rows)],
-            selection: selection,
-            roomy: roomy,
-            rowStyle: rowStyle,
-            minWidth: minWidth,
-            scrollsVertically: scrollsVertically,
-            emptyText: emptyText,
-            background: background,
-            highlight: highlight,
-            cell: cell,
+            label: label, columns: columns, groups: [DKTableGroup(rows: rows)],
+            selection: selection.map { .single($0) } ?? .none,
+            sortOrder: sortOrder, roomy: roomy, rowStyle: rowStyle, minWidth: minWidth,
+            scrollsVertically: scrollsVertically, emptyText: emptyText, background: background,
+            highlight: highlight, rowMenu: contextMenu, cell: cell,
+        )
+    }
+
+    /// A table of rows without group headers where any set of rows can be selected.
+    public init(
+        _ label: String,
+        columns: [DKTableColumn],
+        rows: [Row],
+        selection: Binding<Set<Row.ID>>,
+        sortOrder: Binding<[DKTableSortDescriptor]>? = nil,
+        roomy: Bool = false,
+        rowStyle: DKTableRowStyle = .inset,
+        minWidth: CGFloat = 0,
+        scrollsVertically: Bool = true,
+        emptyText: String = "Nothing to show.",
+        background: Color = DK.Palette.surfaceRaised,
+        highlight: @escaping (Row) -> DKTone? = { _ in nil },
+        contextMenu: ((Row) -> [DKMenuItem])? = nil,
+        @ViewBuilder cell: @escaping (Row, Int) -> CellContent,
+    ) {
+        self.init(
+            label: label, columns: columns, groups: [DKTableGroup(rows: rows)], selection: .multiple(selection),
+            sortOrder: sortOrder, roomy: roomy, rowStyle: rowStyle, minWidth: minWidth,
+            scrollsVertically: scrollsVertically, emptyText: emptyText, background: background,
+            highlight: highlight, rowMenu: contextMenu, cell: cell,
         )
     }
 
@@ -169,9 +286,14 @@ public struct DKDataTable<Row: Identifiable, CellContent: View>: View {
                     }
                 }
                 .frame(width: contentWidth, alignment: .leading)
+                .dkRowTracking(tracker, tracksHover: false, onPointerDown: selection.isSelectable ? { id, modifiers in
+                    if let id = id.base as? Row.ID {
+                        click(id, modifiers: modifiers)
+                    }
+                } : nil)
             }
             .scrollBounceBehavior(.basedOnSize, axes: [.horizontal, .vertical])
-            .focusable(selection != nil)
+            .focusable(selection.isSelectable)
             .focused($isFocused)
             .focusEffectDisabled()
             .onKeyPress(keys: [.upArrow, .downArrow, .home, .end]) { press in
@@ -181,7 +303,7 @@ public struct DKDataTable<Row: Identifiable, CellContent: View>: View {
                 case .home: .first
                 default: .last
                 }
-                return moveSelection(move, proxy: proxy)
+                return moveSelection(move, extending: press.modifiers.contains(.shift), proxy: proxy)
             }
         }
         .onGeometryChange(for: CGFloat.self) { geometry in
@@ -199,13 +321,8 @@ public struct DKDataTable<Row: Identifiable, CellContent: View>: View {
     private func header(widths: [CGFloat], metrics: DKDataTableMetrics) -> some View {
         HStack(spacing: metrics.columnSpacing) {
             ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
-                Text(column.title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(DK.Palette.muted)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                headerCell(column)
                     .frame(width: widths[index], alignment: column.alignment.frameAlignment)
-                    .accessibilityAddTraits(.isHeader)
             }
         }
         .padding(.horizontal, metrics.contentInset)
@@ -214,6 +331,37 @@ public struct DKDataTable<Row: Identifiable, CellContent: View>: View {
         .background(background)
         .overlay(alignment: .bottom) {
             Rectangle().fill(DK.Palette.divider).frame(height: DK.Metric.hairline)
+        }
+    }
+
+    @ViewBuilder
+    private func headerCell(_ column: DKTableColumn) -> some View {
+        let title = Text(column.title)
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(DK.Palette.muted)
+            .lineLimit(1)
+            .truncationMode(.tail)
+        if let key = column.sortKey, let sortOrder {
+            let primary = sortOrder.wrappedValue.first.flatMap { $0.key == key ? $0 : nil }
+            Button {
+                sortOrder.wrappedValue = DKTableSortDescriptor.clicking(key, in: sortOrder.wrappedValue)
+            } label: {
+                HStack(spacing: DK.Space.s1) {
+                    title
+                    if let primary {
+                        Image(systemName: primary.ascending ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(DK.Palette.muted)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityValue(primary.map { $0.ascending ? "Sorted ascending" : "Sorted descending" } ?? "")
+            .accessibilityHint("Sorts by this column")
+        } else {
+            title.accessibilityAddTraits(.isHeader)
         }
     }
 
@@ -276,7 +424,7 @@ public struct DKDataTable<Row: Identifiable, CellContent: View>: View {
     }
 
     private func rowView(_ row: Row, widths: [CGFloat], metrics: DKDataTableMetrics) -> some View {
-        let isSelected = selection.map { $0.wrappedValue == row.id } ?? false
+        let isSelected = selection.contains(row.id)
         return HStack(spacing: metrics.columnSpacing) {
             ForEach(Array(columns.enumerated()), id: \.offset) { index, column in
                 cell(row, index)
@@ -289,35 +437,97 @@ public struct DKDataTable<Row: Identifiable, CellContent: View>: View {
         .frame(maxWidth: .infinity, minHeight: metrics.rowHeight, alignment: .leading)
         .background(DKTableRowBackground(tone: highlight(row), isSelected: isSelected, cornerRadius: metrics.cornerRadius))
         .contentShape(Rectangle())
-        .onTapGesture {
-            guard let selection else {
-                return
-            }
-            selection.wrappedValue = row.id
-            isFocused = true
-        }
+        .dkTrackedRow(selection.isSelectable ? tracker : nil, id: row.id)
+        .modifier(DKDataTableRowMenu(items: rowMenu.map { menu in { menu(row) } }))
         .padding(.horizontal, metrics.outerInset)
         .padding(.vertical, metrics.rowGap / 2)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
-        .accessibilityAddTraits(selection == nil ? [] : [.isButton])
+        .accessibilityAddTraits(selection.isSelectable ? [.isButton] : [])
+        .accessibilityAction {
+            click(row.id, modifiers: [])
+        }
     }
 
-    // MARK: Keyboard
+    // MARK: Selection
 
     private var selectableIDs: [Row.ID] {
         groups.flatMap { $0.rows.map(\.id) }
     }
 
-    private func moveSelection(_ move: DKTableSelectionMove, proxy: ScrollViewProxy) -> KeyPress.Result {
-        guard let selection,
-              let target = DKTableSelection.target(of: move, from: selection.wrappedValue, in: selectableIDs)
-        else {
-            return .ignored
+    private func click(_ id: Row.ID, modifiers: NSEvent.ModifierFlags) {
+        switch selection {
+        case .none:
+            return
+        case let .single(binding):
+            if binding.wrappedValue != id {
+                binding.wrappedValue = id
+            }
+        case let .multiple(binding):
+            let next = DKTableSelection.click(
+                id,
+                extending: modifiers.contains(.shift),
+                toggling: modifiers.contains(.command),
+                selection: binding.wrappedValue,
+                anchor: anchor,
+                in: selectableIDs,
+            )
+            if binding.wrappedValue != next.selection {
+                binding.wrappedValue = next.selection
+            }
+            anchor = next.anchor
         }
-        selection.wrappedValue = target
-        proxy.scrollTo(target)
-        return .handled
+        cursor = id
+        isFocused = true
+    }
+
+    private func moveSelection(_ move: DKTableSelectionMove, extending: Bool, proxy: ScrollViewProxy) -> KeyPress.Result {
+        switch selection {
+        case .none:
+            return .ignored
+        case let .single(binding):
+            guard let target = DKTableSelection.target(of: move, from: binding.wrappedValue, in: selectableIDs) else {
+                return .ignored
+            }
+            binding.wrappedValue = target
+            proxy.scrollTo(target)
+            return .handled
+        case let .multiple(binding):
+            let from = cursor.flatMap { binding.wrappedValue.contains($0) ? $0 : nil }
+                ?? selectableIDs.last { binding.wrappedValue.contains($0) }
+            guard let next = DKTableSelection.move(
+                move,
+                extending: extending,
+                selection: binding.wrappedValue,
+                anchor: anchor ?? from,
+                cursor: from,
+                in: selectableIDs,
+            ) else {
+                return .ignored
+            }
+            binding.wrappedValue = next.selection
+            anchor = next.anchor
+            cursor = next.cursor
+            if let target = next.cursor {
+                proxy.scrollTo(target)
+            }
+            return .handled
+        }
+    }
+}
+
+/// A row's context menu, built from the table's hook when the row has one.
+private struct DKDataTableRowMenu: ViewModifier {
+    let items: (() -> [DKMenuItem])?
+
+    func body(content: Content) -> some View {
+        if let items {
+            content.contextMenu {
+                DKMenuContent(items())
+            }
+        } else {
+            content
+        }
     }
 }
 
@@ -330,28 +540,45 @@ public extension DKDataTable where CellContent == DKTableCellView {
         columns: [DKTableColumn],
         groups: [DKTableGroup<DKTableRow<ID>>],
         selection: Binding<ID?>? = nil,
+        sortOrder: Binding<[DKTableSortDescriptor]>? = nil,
         roomy: Bool = false,
         rowStyle: DKTableRowStyle = .inset,
         minWidth: CGFloat = 0,
         scrollsVertically: Bool = true,
         emptyText: String = "Nothing to show.",
         background: Color = DK.Palette.surfaceRaised,
+        contextMenu: ((DKTableRow<ID>) -> [DKMenuItem])? = nil,
     ) where Row == DKTableRow<ID> {
         self.init(
-            label,
-            columns: columns,
-            groups: groups,
-            selection: selection,
-            roomy: roomy,
-            rowStyle: rowStyle,
-            minWidth: minWidth,
-            scrollsVertically: scrollsVertically,
-            emptyText: emptyText,
-            background: background,
-            highlight: \.highlight,
-        ) { row, column in
-            DKTableCellView(column < row.cells.count ? row.cells[column] : .text(""))
-        }
+            label: label, columns: columns, groups: groups,
+            selection: selection.map { .single($0) } ?? .none,
+            sortOrder: sortOrder, roomy: roomy, rowStyle: rowStyle, minWidth: minWidth,
+            scrollsVertically: scrollsVertically, emptyText: emptyText, background: background,
+            highlight: \.highlight, rowMenu: contextMenu, cell: Self.tableRowCell,
+        )
+    }
+
+    /// A grouped table of `DKTableRow`s where any set of rows can be selected.
+    init<ID: Hashable & Sendable>(
+        _ label: String,
+        columns: [DKTableColumn],
+        groups: [DKTableGroup<DKTableRow<ID>>],
+        selection: Binding<Set<ID>>,
+        sortOrder: Binding<[DKTableSortDescriptor]>? = nil,
+        roomy: Bool = false,
+        rowStyle: DKTableRowStyle = .inset,
+        minWidth: CGFloat = 0,
+        scrollsVertically: Bool = true,
+        emptyText: String = "Nothing to show.",
+        background: Color = DK.Palette.surfaceRaised,
+        contextMenu: ((DKTableRow<ID>) -> [DKMenuItem])? = nil,
+    ) where Row == DKTableRow<ID> {
+        self.init(
+            label: label, columns: columns, groups: groups, selection: .multiple(selection),
+            sortOrder: sortOrder, roomy: roomy, rowStyle: rowStyle, minWidth: minWidth,
+            scrollsVertically: scrollsVertically, emptyText: emptyText, background: background,
+            highlight: \.highlight, rowMenu: contextMenu, cell: Self.tableRowCell,
+        )
     }
 
     /// A table of `DKTableRow`s without group headers; each row's highlight is its own.
@@ -360,25 +587,48 @@ public extension DKDataTable where CellContent == DKTableCellView {
         columns: [DKTableColumn],
         rows: [DKTableRow<ID>],
         selection: Binding<ID?>? = nil,
+        sortOrder: Binding<[DKTableSortDescriptor]>? = nil,
         roomy: Bool = false,
         rowStyle: DKTableRowStyle = .inset,
         minWidth: CGFloat = 0,
         scrollsVertically: Bool = true,
         emptyText: String = "Nothing to show.",
         background: Color = DK.Palette.surfaceRaised,
+        contextMenu: ((DKTableRow<ID>) -> [DKMenuItem])? = nil,
     ) where Row == DKTableRow<ID> {
         self.init(
-            label,
-            columns: columns,
-            groups: [DKTableGroup(rows: rows)],
-            selection: selection,
-            roomy: roomy,
-            rowStyle: rowStyle,
-            minWidth: minWidth,
-            scrollsVertically: scrollsVertically,
-            emptyText: emptyText,
-            background: background,
+            label, columns: columns, groups: [DKTableGroup(rows: rows)], selection: selection,
+            sortOrder: sortOrder, roomy: roomy, rowStyle: rowStyle, minWidth: minWidth,
+            scrollsVertically: scrollsVertically, emptyText: emptyText, background: background,
+            contextMenu: contextMenu,
         )
+    }
+
+    /// A table of `DKTableRow`s without group headers where any set of rows can be selected.
+    init<ID: Hashable & Sendable>(
+        _ label: String,
+        columns: [DKTableColumn],
+        rows: [DKTableRow<ID>],
+        selection: Binding<Set<ID>>,
+        sortOrder: Binding<[DKTableSortDescriptor]>? = nil,
+        roomy: Bool = false,
+        rowStyle: DKTableRowStyle = .inset,
+        minWidth: CGFloat = 0,
+        scrollsVertically: Bool = true,
+        emptyText: String = "Nothing to show.",
+        background: Color = DK.Palette.surfaceRaised,
+        contextMenu: ((DKTableRow<ID>) -> [DKMenuItem])? = nil,
+    ) where Row == DKTableRow<ID> {
+        self.init(
+            label, columns: columns, groups: [DKTableGroup(rows: rows)], selection: selection,
+            sortOrder: sortOrder, roomy: roomy, rowStyle: rowStyle, minWidth: minWidth,
+            scrollsVertically: scrollsVertically, emptyText: emptyText, background: background,
+            contextMenu: contextMenu,
+        )
+    }
+
+    private static func tableRowCell<ID: Hashable & Sendable>(_ row: DKTableRow<ID>, _ column: Int) -> DKTableCellView {
+        DKTableCellView(column < row.cells.count ? row.cells[column] : .text(""))
     }
 }
 

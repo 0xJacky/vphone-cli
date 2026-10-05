@@ -234,3 +234,40 @@ private struct DKSystemTablePreview: View {
     )
     .frame(width: 400, height: 160)
 }
+
+// MARK: - Sorting and multiple selection
+
+private struct DKSortableTablePreview: View {
+    @State private var selection: Set<String> = ["vm-2"]
+    @State private var order = [DKTableSortDescriptor("name")]
+
+    private let columns = [
+        DKTableColumn("Name", width: .flexible(min: 140), sortKey: "name"),
+        DKTableColumn("Disk", width: .flexible(min: 160), sortKey: "disk"),
+        DKTableColumn("Note", width: .flexible(min: 100)),
+    ]
+
+    private let rows: [DKTableRow<String>] = [
+        DKTableRow(id: "vm-10", cells: [.title("vm-10"), .bar(0.9, value: "58 GB"), .muted("restored")]),
+        DKTableRow(id: "vm-2", cells: [.title("vm-2"), .bar(0.2, value: "13 GB"), .muted("fresh")]),
+        DKTableRow(id: "vm-1", cells: [.title("vm-1"), .bar(0.5, value: "32 GB"), .muted("patched")]),
+    ]
+
+    var body: some View {
+        DKDataTable(
+            "Machines",
+            columns: columns,
+            rows: rows.sorted(by: order, columns: columns),
+            selection: $selection,
+            sortOrder: $order,
+            contextMenu: { row in
+                [DKMenuItem("Reveal \(row.id)") {}, DKMenuItem.separator, DKMenuItem("Delete…") {}.destructive()]
+            },
+        )
+        .frame(width: 560, height: 200)
+    }
+}
+
+#Preview("Sorting and multiple selection") {
+    DKSortableTablePreview()
+}

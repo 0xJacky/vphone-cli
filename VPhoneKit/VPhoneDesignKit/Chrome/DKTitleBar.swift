@@ -219,11 +219,15 @@ public extension DKTitleBar where Accessory == EmptyView {
 private struct DKTitleBarTrafficLights: View {
     var body: some View {
         HStack(spacing: DK.Space.s2) {
-            Circle().fill(Color(nsColor: NSColor(rgb: 0xFF5F57, alpha: 1)))
-            Circle().fill(Color(nsColor: NSColor(rgb: 0xFEBC2E, alpha: 1)))
-            Circle().fill(Color(nsColor: NSColor(rgb: 0x28C840, alpha: 1)))
+            Circle().fill(Self.close)
+            Circle().fill(Self.minimize)
+            Circle().fill(Self.zoom)
         }
         .frame(width: 52, height: 12)
         .accessibilityHidden(true)
     }
+
+    private static let close = Color(nsColor: NSColor(rgb: 0xFF5F57, alpha: 1))
+    private static let minimize = Color(nsColor: NSColor(rgb: 0xFEBC2E, alpha: 1))
+    private static let zoom = Color(nsColor: NSColor(rgb: 0x28C840, alpha: 1))
 }

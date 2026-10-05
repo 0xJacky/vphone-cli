@@ -28,7 +28,8 @@ public struct DKLog: View {
     /// - Parameters:
     ///   - lines: The lines, oldest first.
     ///   - following: `true` to follow new lines (the view stops and resumes as the
-    ///     user scrolls); `false` for a static log with no cursor.
+    ///     user scrolls); `false` for a static log with no cursor. A later change
+    ///     takes effect: turning it on scrolls to the newest line and follows.
     ///   - flush: Drops the border and rounded corners, for a log that fills a panel.
     ///   - wrapsLines: Wraps long lines instead of scrolling sideways.
     ///   - minHeight: The least height the log takes.
@@ -120,6 +121,13 @@ public struct DKLog: View {
         .onChange(of: isFollowing) { _, following in
             if following {
                 scrollToNewest()
+            }
+        }
+        .onChange(of: canFollow) { _, follows in
+            // `DKLog(_:following:)` with a Bool the caller changes later: the
+            // initial value only seeded the state, so carry the change over.
+            if externalFollowing == nil {
+                localFollowing = follows
             }
         }
         .frame(minHeight: minHeight)

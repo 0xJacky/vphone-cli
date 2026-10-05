@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 // MARK: - Metrics
@@ -37,7 +38,10 @@ private struct DKFieldChrome<Content: View>: View {
 
 /// Styles a `TextField` as a DesignKit form field. Typing, selection, focus and
 /// submit stay native; the field draws its own accent border when focused in place
-/// of the system focus ring.
+/// of the system focus ring. The whole field takes the click: the AppKit text
+/// field inside is only a line of text tall and stops short of the padding, so a
+/// click on the field's edge would otherwise land on nothing and seem to need a
+/// second try.
 ///
 ///     TextField("Name", text: $name).textFieldStyle(DKFieldStyle())
 ///     TextField("Address", text: $address).textFieldStyle(DKFieldStyle(mono: true))
@@ -62,6 +66,8 @@ private struct DKFieldTextFieldModifier: ViewModifier {
         self.mono = mono
     }
 
+    @Environment(\.isEnabled) private var isEnabled
+
     func body(content: Content) -> some View {
         DKFieldChrome(
             mono: mono,
@@ -69,8 +75,135 @@ private struct DKFieldTextFieldModifier: ViewModifier {
             content: content
                 .textFieldStyle(.plain)
                 .focused($isFocused)
-                .focusEffectDisabled(),
+                .focusEffectDisabled()
+                .clipShape(DKInputContentClip(verticalOutset: DKFieldMetrics.height / 2)),
         )
+        .contentShape(RoundedRectangle(cornerRadius: DK.Radius.field, style: .continuous))
+        .onTapGesture {
+            if isEnabled {
+                isFocused = true
+            }
+        }
+    }
+}
+
+// MARK: - Focus out on an outside click
+
+public extension View {
+    /// Ends editing when the user clicks anywhere outside this view.
+    ///
+    /// A text field on macOS keeps the field editor until another responder
+    /// takes it; a click on empty space, a row or a card does not, so the caret
+    /// and the focus border stay. Apply this to the field, bound to its
+    /// `@FocusState`.
+    ///
+    /// The check runs after the click has been dispatched, not when the event
+    /// monitor first sees it. Clearing the focus at once would land on the next
+    /// update, after the click had already focused another field, and take that
+    /// focus away too: the other field would need a second click. By then the
+    /// first responder shows what the click did; the focus is cleared only if it
+    /// is still on this field. Ported from uAppKit's `UDInputFocusDismissMonitor`.
+    func dkDismissFocusOnOutsideClick(_ isFocused: FocusState<Bool>.Binding) -> some View {
+        overlay(DKInputFocusDismissMonitor(isFocused: isFocused))
+    }
+}
+
+enum DKInputFocusDismissal {
+    /// Whether a click at `location` should end the editing of an input whose
+    /// frame is `inputFrame`: only a click in the input's own window, outside it.
+    static func shouldDismissFocus(eventWindow: NSWindow?, inputWindow: NSWindow?, location: NSPoint, inputFrame: NSRect) -> Bool {
+        guard let eventWindow, let inputWindow, eventWindow === inputWindow else {
+            return false
+        }
+        return !inputFrame.contains(location)
+    }
+
+    /// The view behind the first responder: the text field a field editor works for.
+    @MainActor
+    static func responderView(of window: NSWindow) -> NSView? {
+        guard let responder = window.firstResponder as? NSView else {
+            return nil
+        }
+        if let editor = responder as? NSTextView, editor.isFieldEditor {
+            return editor.delegate as? NSView ?? editor
+        }
+        return responder
+    }
+}
+
+struct DKInputFocusDismissMonitor: NSViewRepresentable {
+    var isFocused: FocusState<Bool>.Binding
+
+    func makeNSView(context _: Context) -> MonitorView {
+        MonitorView()
+    }
+
+    func updateNSView(_ view: MonitorView, context _: Context) {
+        view.isFocused = isFocused.wrappedValue
+        view.onDismiss = { isFocused.wrappedValue = false }
+        view.updateMonitor()
+    }
+
+    static func dismantleNSView(_ view: MonitorView, coordinator _: ()) {
+        view.removeMonitor()
+    }
+
+    final class MonitorView: NSView {
+        var isFocused = false
+        var onDismiss: () -> Void = {}
+        private var monitor: Any?
+
+        override func hitTest(_: NSPoint) -> NSView? {
+            nil
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            updateMonitor()
+        }
+
+        func updateMonitor() {
+            if window != nil, isFocused {
+                guard monitor == nil else {
+                    return
+                }
+                monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+                    self?.mouseDownSeen(event)
+                    return event
+                }
+            } else {
+                removeMonitor()
+            }
+        }
+
+        func removeMonitor() {
+            if let monitor {
+                NSEvent.removeMonitor(monitor)
+                self.monitor = nil
+            }
+        }
+
+        private func mouseDownSeen(_ event: NSEvent) {
+            guard isFocused, let window else {
+                return
+            }
+            let frame = convert(bounds, to: nil)
+            guard DKInputFocusDismissal.shouldDismissFocus(eventWindow: event.window, inputWindow: window, location: event.locationInWindow, inputFrame: frame) else {
+                return
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self, isFocused, let window = self.window else {
+                    return
+                }
+                // Another view took the focus: leave it alone.
+                if let taken = DKInputFocusDismissal.responderView(of: window), taken.window === window,
+                   !taken.convert(taken.bounds, to: nil).intersects(convert(bounds, to: nil))
+                {
+                    return
+                }
+                onDismiss()
+            }
+        }
     }
 }
 

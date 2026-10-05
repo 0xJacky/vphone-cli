@@ -85,6 +85,26 @@ public enum DKTableCell: Hashable, Sendable {
         }
     }
 
+    /// How this cell orders against another when its column is sorted: bars by
+    /// their fraction, everything else by its text as Finder sorts names, so
+    /// "9 GB" comes before "10 GB".
+    public func compare(_ other: DKTableCell) -> ComparisonResult {
+        if case let .bar(lhs, _, _) = self, case let .bar(rhs, _, _) = other {
+            let left = Self.clampedFraction(lhs)
+            let right = Self.clampedFraction(rhs)
+            return left == right ? .orderedSame : (left < right ? .orderedAscending : .orderedDescending)
+        }
+        return sortText.localizedStandardCompare(other.sortText)
+    }
+
+    /// The text a sort compares: the shown text, without a warning's message.
+    var sortText: String {
+        if case let .warned(cell, _) = self {
+            return cell.sortText
+        }
+        return accessibilityText
+    }
+
     /// `fraction` limited to 0...1; NaN reads as empty.
     public static func clampedFraction(_ fraction: Double) -> Double {
         guard !fraction.isNaN else {
@@ -99,22 +119,90 @@ public enum DKTableCell: Hashable, Sendable {
     }
 }
 
+// MARK: - On-accent ink
+
+public extension EnvironmentValues {
+    /// Whether `DKTableCellView`s below draw on an accent fill. nil, the
+    /// default, follows `backgroundProminence`: a system `Table` raises it to
+    /// `.increased` on the selected rows while the table has focus, where the
+    /// row fills with the accent color and dark ink would not read.
+    @Entry var dkTableCellOnAccent: Bool? = nil
+}
+
+public extension View {
+    /// Draws the `DKTableCellView`s below in the colors for an accent fill (white
+    /// ink, translucent white tracks), or forces the normal colors with false.
+    /// Without it, cells follow `backgroundProminence` on their own.
+    func dkTableCellOnAccent(_ isOnAccent: Bool = true) -> some View {
+        environment(\.dkTableCellOnAccent, isOnAccent)
+    }
+}
+
+/// The colors a cell draws with, on a plain row or on an accent fill.
+struct DKTableCellInk: Equatable {
+    var isOnAccent: Bool
+
+    static let standard = DKTableCellInk(isOnAccent: false)
+    static let onAccent = DKTableCellInk(isOnAccent: true)
+
+    var primary: Color {
+        isOnAccent ? DK.Palette.onAccent : DK.Palette.ink
+    }
+
+    var secondary: Color {
+        isOnAccent ? DK.Palette.onAccentMuted : DK.Palette.inkSecondary
+    }
+
+    var muted: Color {
+        isOnAccent ? DK.Palette.onAccentMuted : DK.Palette.muted
+    }
+
+    var track: Color {
+        isOnAccent ? DK.Palette.onAccentTint : DK.Palette.track
+    }
+
+    /// A toned glyph or fill. On the accent, accent and info tones would vanish
+    /// into the fill, so they and untoned glyphs take the on-accent white;
+    /// status tones keep their color.
+    func tone(_ tone: DKTone?) -> Color {
+        guard let tone else {
+            return primary
+        }
+        if isOnAccent, tone == .accent || tone == .info || tone == .neutral {
+            return DK.Palette.onAccent
+        }
+        return tone.color
+    }
+}
+
 // MARK: - View
 
 /// Draws one `DKTableCell`. Text truncates at the tail; the cell fills the width
 /// its column gives it only as far as its content needs, so align it with a frame
 /// (`DKDataTable` does).
+///
+/// On the selected row of a focused system `Table` the cell switches to white
+/// ink by itself; see `dkTableCellOnAccent(_:)` to force either look.
 public struct DKTableCellView: View {
     public let cell: DKTableCell
+
+    @Environment(\.backgroundProminence) private var prominence
+    @Environment(\.dkTableCellOnAccent) private var onAccent
 
     public init(_ cell: DKTableCell) {
         self.cell = cell
     }
 
     public var body: some View {
-        DKTableCellContent(cell: cell)
+        DKTableCellContent(cell: cell, ink: Self.ink(onAccent: onAccent, prominence: prominence))
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(cell.accessibilityText)
+    }
+
+    /// The explicit choice when there is one, else white ink on an increased
+    /// background prominence.
+    nonisolated static func ink(onAccent: Bool?, prominence: BackgroundProminence) -> DKTableCellInk {
+        (onAccent ?? (prominence == .increased)) ? .onAccent : .standard
     }
 }
 
@@ -122,17 +210,18 @@ public struct DKTableCellView: View {
 /// warned cell can draw the cell it wraps.
 struct DKTableCellContent: View {
     let cell: DKTableCell
+    var ink: DKTableCellInk = .standard
 
     var body: some View {
         switch cell {
         case let .text(text):
-            line(text, font: DK.Typeface.body, color: DK.Palette.ink)
+            line(text, font: DK.Typeface.body, color: ink.primary)
         case let .mono(text):
-            line(text, font: DK.Typeface.mono, color: DK.Palette.ink)
+            line(text, font: DK.Typeface.mono, color: ink.primary)
         case let .muted(text):
-            line(text, font: DK.Typeface.body, color: DK.Palette.inkSecondary)
+            line(text, font: DK.Typeface.body, color: ink.secondary)
         case let .strong(text):
-            line(text, font: DK.Typeface.bodyStrong, color: DK.Palette.ink)
+            line(text, font: DK.Typeface.bodyStrong, color: ink.primary)
         case let .title(title, subtitle, subtitleMonospaced, leading, strong):
             DKTableTitleCell(
                 title: title,
@@ -140,29 +229,41 @@ struct DKTableCellContent: View {
                 subtitleMonospaced: subtitleMonospaced,
                 leading: leading,
                 strong: strong,
+                ink: ink,
             )
         case let .status(tone, text, progress):
-            DKTableStatusCell(tone: tone, text: text, progress: progress)
+            DKTableStatusCell(tone: tone, text: text, progress: progress, ink: ink)
         case let .badge(tone, text):
-            DKBadge(text, tone: tone)
+            if ink.isOnAccent {
+                Text(text)
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .foregroundStyle(DK.Palette.onAccent)
+                    .background(Capsule().fill(DK.Palette.onAccentTint))
+                    .fixedSize()
+            } else {
+                DKBadge(text, tone: tone)
+            }
         case let .icon(glyph, tone, label):
             DKIcon(glyph, size: 15)
-                .foregroundStyle(tone?.color ?? DK.Palette.ink)
+                .foregroundStyle(ink.tone(tone))
                 .help(label)
         case let .bar(fraction, tone, value):
             HStack(spacing: 10) {
-                DKTableMeter(fraction: fraction, tone: tone, height: 6)
+                DKTableMeter(fraction: fraction, tone: tone, height: 6, ink: ink)
                     .frame(minWidth: 40)
                 Text(value)
                     .font(DK.Typeface.body)
                     .monospacedDigit()
-                    .foregroundStyle(DK.Palette.ink)
+                    .foregroundStyle(ink.primary)
                     .lineLimit(1)
                     .frame(width: 48, alignment: .trailing)
             }
         case let .warned(inner, warning):
             HStack(spacing: DK.Space.s1) {
-                DKTableCellContent(cell: inner)
+                DKTableCellContent(cell: inner, ink: ink)
                 DKIcon(.warning, size: 13)
                     .foregroundStyle(DK.Palette.warning)
                     .help(warning)
@@ -187,13 +288,14 @@ struct DKTableTitleCell: View {
     let subtitleMonospaced: Bool
     let leading: DKTableCellLeading?
     let strong: Bool
+    var ink: DKTableCellInk = .standard
 
     var body: some View {
         HStack(spacing: DK.Space.s3) {
             switch leading {
             case let .glyph(glyph, tone):
                 DKIcon(glyph, size: 18)
-                    .foregroundStyle(tone?.color ?? DK.Palette.ink)
+                    .foregroundStyle(ink.tone(tone))
             case let .dot(tone):
                 DKStatusDot(tone)
             case nil:
@@ -202,13 +304,13 @@ struct DKTableTitleCell: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(strong ? DK.Typeface.bodyStrong : DK.Typeface.body)
-                    .foregroundStyle(DK.Palette.ink)
+                    .foregroundStyle(ink.primary)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 if let subtitle, !subtitle.isEmpty {
                     Text(subtitle)
                         .font(subtitleMonospaced ? DK.Typeface.mono : DK.Typeface.caption)
-                        .foregroundStyle(DK.Palette.muted)
+                        .foregroundStyle(ink.muted)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -221,6 +323,7 @@ struct DKTableStatusCell: View {
     let tone: DKTone
     let text: String
     let progress: Double?
+    var ink: DKTableCellInk = .standard
 
     var body: some View {
         VStack(alignment: .leading, spacing: DK.Space.s1) {
@@ -228,12 +331,12 @@ struct DKTableStatusCell: View {
                 DKStatusDot(tone)
                 Text(text)
                     .font(DK.Typeface.body)
-                    .foregroundStyle(DK.Palette.ink)
+                    .foregroundStyle(ink.primary)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
             if let progress {
-                DKTableMeter(fraction: progress, tone: tone, height: 4)
+                DKTableMeter(fraction: progress, tone: tone, height: 4, ink: ink)
             }
         }
     }
@@ -244,15 +347,16 @@ struct DKTableMeter: View {
     let fraction: Double
     let tone: DKTone
     let height: CGFloat
+    var ink: DKTableCellInk = .standard
 
     var body: some View {
         let fill = DKTableCell.clampedFraction(fraction)
         Capsule()
-            .fill(DK.Palette.track)
+            .fill(ink.track)
             .overlay(alignment: .leading) {
                 GeometryReader { proxy in
                     Capsule()
-                        .fill(tone.color)
+                        .fill(ink.tone(tone))
                         .frame(width: proxy.size.width * fill)
                 }
             }

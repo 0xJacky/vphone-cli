@@ -57,7 +57,9 @@ public enum DKDetailBarLayout: String, Sendable, CaseIterable, Hashable {
 /// ```
 ///
 /// Facts are identifiers and figures, so their values are always monospaced; a
-/// fact with a tone gets a status dot.
+/// fact with a tone gets a status dot. With no title, a note alone still shows,
+/// as the hint of a bar with nothing selected:
+/// `DKDetailBar(note: "Select an item to copy, reveal, edit or delete it.")`.
 public struct DKDetailBar<Content: View>: View {
     let title: String?
     let subtitle: String?
@@ -94,8 +96,10 @@ public struct DKDetailBar<Content: View>: View {
     }
 
     public var body: some View {
-        arranged
-            .font(DK.Typeface.body)
+        DKZeroWidthProbeLayout {
+            arranged
+        }
+        .font(DK.Typeface.body)
             .foregroundStyle(DK.Palette.ink)
             .padding(.vertical, 14)
             .padding(.horizontal, DK.Space.s4)
@@ -142,8 +146,9 @@ public struct DKDetailBar<Content: View>: View {
         }
     }
 
+    /// A note alone makes a head too: the hint a bar shows with nothing selected.
     private var hasHead: Bool {
-        !(title ?? "").isEmpty
+        !(title ?? "").isEmpty || !(note ?? "").isEmpty
     }
 
     private var hasContent: Bool {
@@ -152,15 +157,17 @@ public struct DKDetailBar<Content: View>: View {
 
     private var head: some View {
         VStack(alignment: .leading, spacing: 2) {
-            DKSectionsFlexLayout(horizontalSpacing: 10, verticalSpacing: DK.Space.s1) {
-                Text(title ?? "")
-                    .font(DK.Typeface.bodyStrong)
-                    .textSelection(.enabled)
-                if let subtitle, !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(DK.Typeface.mono)
-                        .foregroundStyle(DK.Palette.muted)
+            if let title, !title.isEmpty {
+                DKSectionsFlexLayout(horizontalSpacing: 10, verticalSpacing: DK.Space.s1) {
+                    Text(title)
+                        .font(DK.Typeface.bodyStrong)
                         .textSelection(.enabled)
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(subtitle)
+                            .font(DK.Typeface.mono)
+                            .foregroundStyle(DK.Palette.muted)
+                            .textSelection(.enabled)
+                    }
                 }
             }
             if let note, !note.isEmpty {
@@ -191,6 +198,14 @@ public struct DKDetailBar<Content: View>: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .textSelection(.enabled)
+                            .help(fact.help ?? "")
+                        if let action = fact.action {
+                            DKButton(DKListRow.small(action))
+                        }
+                    }
+                    if let progress = fact.visibleProgress {
+                        DKProgress(value: progress, tone: fact.tone ?? .accent, thin: true, label: fact.key)
+                            .padding(.top, 2)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

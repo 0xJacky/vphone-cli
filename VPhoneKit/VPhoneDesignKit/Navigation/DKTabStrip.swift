@@ -7,10 +7,12 @@ import SwiftUI
 /// button, and a trailing "+" when `onNewTab` is set. Scrolls sideways when the
 /// tabs overflow and keeps the selected tab in view.
 ///
-/// The strip edits `tabs` and `selection` itself: clicking selects, the close
-/// button removes the tab and selects its neighbor, double-clicking a
-/// transient tab keeps it. `onClose` runs after a tab is removed, for cleanup
-/// such as ending its session.
+/// The strip edits `tabs` and `selection` itself: pressing a tab selects it on
+/// mouse-down, as native tabs do, the close button removes the tab and selects
+/// its neighbor, double-clicking a transient tab keeps it. `onClose` runs after
+/// a tab is removed, for cleanup such as ending its session. Hover is tracked
+/// once for the whole strip (see `DKRowTracker`) and holds still while the strip
+/// scrolls.
 public struct DKTabStrip<ID: Hashable & Sendable>: View {
     @Binding var tabs: [DKTab<ID>]
     @Binding var selection: ID?
@@ -18,6 +20,9 @@ public struct DKTabStrip<ID: Hashable & Sendable>: View {
     let newTabLabel: String
     let onNewTab: (() -> Void)?
     let onClose: ((ID) -> Void)?
+
+    @State private var tabTracker = DKRowTracker()
+    @State private var closeTracker = DKRowTracker()
 
     /// - Parameters:
     ///   - label: What VoiceOver calls the strip ("Terminal tabs").
@@ -49,6 +54,8 @@ public struct DKTabStrip<ID: Hashable & Sendable>: View {
                             DKTabView(
                                 tab: tab,
                                 isSelected: tab.id == selection,
+                                tabTracker: tabTracker,
+                                closeTracker: closeTracker,
                                 select: { selection = tab.id },
                                 keep: { tabs.keepTab(tab.id) },
                                 close: { close(tab.id) },
@@ -57,6 +64,17 @@ public struct DKTabStrip<ID: Hashable & Sendable>: View {
                         }
                     }
                     .frame(maxHeight: .infinity)
+                    .dkRowTracking(tabTracker) { id, _ in
+                        // A press on a close button closes; it does not select first.
+                        guard closeTracker.hoveredID != id, let id = id.base as? ID,
+                              selection != id, tabs.contains(where: { $0.id == id })
+                        else {
+                            return
+                        }
+                        selection = id
+                    }
+                    .dkRowTracking(closeTracker)
+                    .dkScrollHoverGate()
                 }
                 .scrollIndicators(.never)
                 .onChange(of: selection) { _, selected in
@@ -95,6 +113,8 @@ public struct DKTabStrip<ID: Hashable & Sendable>: View {
 struct DKTabView<ID: Hashable & Sendable>: View {
     let tab: DKTab<ID>
     let isSelected: Bool
+    var tabTracker: DKRowTracker?
+    var closeTracker: DKRowTracker?
     let select: () -> Void
     let keep: () -> Void
     let close: () -> Void
@@ -137,7 +157,7 @@ struct DKTabView<ID: Hashable & Sendable>: View {
             .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
 
             if tab.isClosable {
-                DKTabCloseButton(title: tab.title, action: close)
+                DKTabCloseButton(title: tab.title, id: tab.id, tracker: closeTracker, action: close)
                     .padding(.trailing, 7)
             }
         }
@@ -152,7 +172,7 @@ struct DKTabView<ID: Hashable & Sendable>: View {
         .overlay(alignment: .trailing) {
             Rectangle().fill(DK.Palette.divider).frame(width: DK.Metric.hairline)
         }
-        .onHover { isHovered = $0 }
+        .dkTrackedRow(tabTracker, id: tab.id) { isHovered = $0 }
         .help(tab.help ?? tab.title)
         .contextMenu {
             if tab.isTransient {
@@ -172,8 +192,10 @@ struct DKTabView<ID: Hashable & Sendable>: View {
     }
 }
 
-struct DKTabCloseButton: View {
+struct DKTabCloseButton<ID: Hashable & Sendable>: View {
     let title: String
+    let id: ID
+    var tracker: DKRowTracker?
     let action: () -> Void
 
     @State private var isHovered = false
@@ -192,7 +214,7 @@ struct DKTabCloseButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
+        .dkTrackedRow(tracker, id: id) { isHovered = $0 }
         .help("Close Tab")
         .accessibilityLabel("Close \(title)")
     }

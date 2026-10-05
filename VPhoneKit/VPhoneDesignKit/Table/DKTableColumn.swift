@@ -47,16 +47,94 @@ public enum DKTableColumnWidth: Hashable, Sendable {
     }
 }
 
-/// One column of a `DKDataTable`: a header title, a width and an alignment.
+/// One column of a `DKDataTable`: a header title, a width, an alignment and,
+/// for a sortable column, the key its sort descriptors use.
 public struct DKTableColumn: Hashable, Sendable {
     public var title: String
     public var width: DKTableColumnWidth
     public var alignment: DKTableAlignment
+    /// Makes the header clickable to sort by this column; nil leaves it fixed.
+    public var sortKey: String?
 
-    public init(_ title: String, width: DKTableColumnWidth = .flexible(), alignment: DKTableAlignment = .leading) {
+    public init(_ title: String, width: DKTableColumnWidth = .flexible(), alignment: DKTableAlignment = .leading, sortKey: String? = nil) {
         self.title = title
         self.width = width
         self.alignment = alignment
+        self.sortKey = sortKey
+    }
+}
+
+// MARK: - Sorting
+
+/// One key of a table's sort order, as `NSSortDescriptor` is for `NSTableView`.
+/// The table only draws the order and changes it when a header is clicked;
+/// the caller sorts its rows, with `DKTableSortDescriptor.sort(_:by:comparators:)`
+/// or, for `DKTableRow`s, `sorted(by:columns:)`.
+public struct DKTableSortDescriptor: Hashable, Sendable {
+    public var key: String
+    public var ascending: Bool
+
+    public init(_ key: String, ascending: Bool = true) {
+        self.key = key
+        self.ascending = ascending
+    }
+
+    /// The order after a click on the header of the column sorted by `key`:
+    /// the primary column flips direction; any other column becomes primary,
+    /// ascending, ahead of the others.
+    public static func clicking(_ key: String, in order: [DKTableSortDescriptor]) -> [DKTableSortDescriptor] {
+        if let first = order.first, first.key == key {
+            var order = order
+            order[0].ascending.toggle()
+            return order
+        }
+        return [DKTableSortDescriptor(key)] + order.filter { $0.key != key }
+    }
+
+    /// `rows` in `order`: by the first descriptor, ties broken by the next, and
+    /// rows that tie on every key keep their order. Keys without a comparator
+    /// are skipped.
+    public static func sort<Row>(
+        _ rows: [Row],
+        by order: [DKTableSortDescriptor],
+        comparators: [String: (Row, Row) -> ComparisonResult],
+    ) -> [Row] {
+        let keys = order.compactMap { descriptor in
+            comparators[descriptor.key].map { (compare: $0, ascending: descriptor.ascending) }
+        }
+        guard !keys.isEmpty else {
+            return rows
+        }
+        return rows.enumerated().sorted { lhs, rhs in
+            for key in keys {
+                switch key.compare(lhs.element, rhs.element) {
+                case .orderedAscending: return key.ascending
+                case .orderedDescending: return !key.ascending
+                case .orderedSame: continue
+                }
+            }
+            return lhs.offset < rhs.offset
+        }
+        .map(\.element)
+    }
+}
+
+public extension Array {
+    /// `DKTableRow`s in `order`, comparing the cells of the column each
+    /// descriptor names (see `DKTableCell.compare(_:)`). Unknown keys are skipped.
+    func sorted<ID>(by order: [DKTableSortDescriptor], columns: [DKTableColumn]) -> [DKTableRow<ID>] where Element == DKTableRow<ID> {
+        var comparators: [String: (DKTableRow<ID>, DKTableRow<ID>) -> ComparisonResult] = [:]
+        for (index, column) in columns.enumerated() {
+            guard let key = column.sortKey else {
+                continue
+            }
+            comparators[key] = { lhs, rhs in
+                let left = index < lhs.cells.count ? lhs.cells[index] : .text("")
+                let right = index < rhs.cells.count ? rhs.cells[index] : .text("")
+                return left.compare(right)
+            }
+        }
+        return DKTableSortDescriptor.sort(self, by: order, comparators: comparators)
     }
 }
 
@@ -151,8 +229,67 @@ public enum DKTableSelectionMove: Sendable, Hashable {
     case previous, next, first, last
 }
 
-/// Where the selection lands after a keyboard move, kept free of views so it can be tested.
+/// Where the selection lands after a click or a keyboard move, kept free of
+/// views so it can be tested.
 public enum DKTableSelection {
+    /// The selection of a multiple-selection table after a click on `id`, and
+    /// the new anchor that Shift extends from.
+    ///
+    /// - A plain click selects only `id`.
+    /// - Command toggles `id` and leaves the rest.
+    /// - Shift selects the run from the anchor to `id`; with Command too, the
+    ///   run is added to the selection. Without an anchor in `ids` it acts as a
+    ///   plain click. The anchor stays where it was.
+    public static func click<ID: Hashable>(
+        _ id: ID,
+        extending: Bool,
+        toggling: Bool,
+        selection: Set<ID>,
+        anchor: ID?,
+        in ids: [ID],
+    ) -> (selection: Set<ID>, anchor: ID?) {
+        if extending, let anchor, let range = run(from: anchor, to: id, in: ids) {
+            return (toggling ? selection.union(range) : Set(range), anchor)
+        }
+        if toggling {
+            var selection = selection
+            if selection.remove(id) == nil {
+                selection.insert(id)
+            }
+            return (selection, id)
+        }
+        return ([id], id)
+    }
+
+    /// The selection of a multiple-selection table after a keyboard move from
+    /// `cursor`, the row the last move or click landed on. Without `extending`
+    /// the target row alone is selected and becomes the anchor; with it
+    /// (Shift), the run from the anchor to the target is.
+    public static func move<ID: Hashable>(
+        _ move: DKTableSelectionMove,
+        extending: Bool,
+        selection _: Set<ID>,
+        anchor: ID?,
+        cursor: ID?,
+        in ids: [ID],
+    ) -> (selection: Set<ID>, anchor: ID?, cursor: ID?)? {
+        guard let target = target(of: move, from: cursor, in: ids) else {
+            return nil
+        }
+        if extending, let anchor, let range = run(from: anchor, to: target, in: ids) {
+            return (Set(range), anchor, target)
+        }
+        return ([target], target, target)
+    }
+
+    /// The rows from `start` to `end`, both included, in display order.
+    static func run<ID: Hashable>(from start: ID, to end: ID, in ids: [ID]) -> ArraySlice<ID>? {
+        guard let a = ids.firstIndex(of: start), let b = ids.firstIndex(of: end) else {
+            return nil
+        }
+        return ids[min(a, b) ... max(a, b)]
+    }
+
     /// The row `move` selects, given the current selection and the selectable rows
     /// in display order. With nothing selected (or the selection no longer listed),
     /// `next` and `first` pick the first row and `previous` and `last` the last.

@@ -7,8 +7,10 @@ import SwiftUI
 /// the sidebar ground with a divider on its trailing edge.
 ///
 /// Row glyphs take the accent; the selected row gets the accent tint behind it
-/// and a semibold label. With keyboard focus, the up and down arrow keys move
-/// the selection.
+/// and a semibold label. A row selects on mouse-down, as a source list does.
+/// With keyboard focus, the up and down arrow keys move the selection, past
+/// disabled rows. One tracker serves the hover of every row (see `DKRowTracker`),
+/// and hover holds still while the sidebar scrolls.
 ///
 /// ```swift
 /// DKSidebar(sections: sections, selection: $selection) {
@@ -26,6 +28,8 @@ public struct DKSidebar<ID: Hashable & Sendable, Header: View, Footer: View>: Vi
     @Binding var selection: ID?
     let header: Header
     let footer: Footer
+
+    @State private var tracker = DKRowTracker()
 
     public init(
         sections: [DKSidebarSection<ID>],
@@ -60,9 +64,13 @@ public struct DKSidebar<ID: Hashable & Sendable, Header: View, Footer: View>: Vi
                             .padding(.bottom, 6)
                     }
                     ForEach(sections) { section in
-                        DKSidebarSectionView(section: section, selection: $selection)
+                        DKSidebarSectionView(section: section, selection: $selection, tracker: tracker)
                     }
                 }
+                .dkRowTracking(tracker) { id, _ in
+                    select(id)
+                }
+                .dkScrollHoverGate()
                 .padding(.horizontal, 10)
                 .padding(.top, 14)
                 .padding(.bottom, DK.Space.s3)
@@ -101,6 +109,18 @@ public struct DKSidebar<ID: Hashable & Sendable, Header: View, Footer: View>: Vi
     private func move(by offset: Int) {
         if let next = sections.sidebarItemID(from: selection, offset: offset) {
             selection = next
+        }
+    }
+
+    /// Selects the row pressed, if it is an enabled row of this sidebar.
+    private func select(_ id: AnyHashable) {
+        guard let id = id.base as? ID,
+              sections.allSidebarItems().contains(where: { $0.id == id && $0.isEnabled })
+        else {
+            return
+        }
+        if selection != id {
+            selection = id
         }
     }
 }
@@ -156,6 +176,7 @@ public extension DKSidebar where Header == EmptyView, Footer == EmptyView {
 struct DKSidebarSectionView<ID: Hashable & Sendable>: View {
     let section: DKSidebarSection<ID>
     @Binding var selection: ID?
+    var tracker: DKRowTracker?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
@@ -168,7 +189,7 @@ struct DKSidebarSectionView<ID: Hashable & Sendable>: View {
                     .accessibilityAddTraits(.isHeader)
             }
             ForEach(section.items) { item in
-                DKSidebarRow(item: item, isSelected: item.id == selection) {
+                DKSidebarRow(item: item, isSelected: item.id == selection, tracker: tracker) {
                     selection = item.id
                 }
             }
@@ -179,6 +200,7 @@ struct DKSidebarSectionView<ID: Hashable & Sendable>: View {
 struct DKSidebarRow<ID: Hashable & Sendable>: View {
     let item: DKSidebarItem<ID>
     let isSelected: Bool
+    var tracker: DKRowTracker?
     let action: () -> Void
 
     @State private var isHovered = false
@@ -187,10 +209,10 @@ struct DKSidebarRow<ID: Hashable & Sendable>: View {
         Button(action: action) {
             HStack(spacing: 9) {
                 DKIcon(item.glyph, size: 16)
-                    .foregroundStyle(DK.Palette.accent)
+                    .foregroundStyle(item.isEnabled ? DK.Palette.accent : DK.Palette.inkDisabled)
                 Text(item.label)
                     .font(isSelected ? DK.Typeface.bodyStrong : DK.Typeface.body)
-                    .foregroundStyle(DK.Palette.ink)
+                    .foregroundStyle(item.isEnabled ? DK.Palette.ink : DK.Palette.inkDisabled)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -221,7 +243,9 @@ struct DKSidebarRow<ID: Hashable & Sendable>: View {
         }
         .buttonStyle(.plain)
         .focusable(false)
-        .onHover { isHovered = $0 }
+        .disabled(!item.isEnabled)
+        .help(item.isEnabled ? "" : item.disabledReason ?? "")
+        .dkTrackedRow(tracker, id: item.id) { isHovered = $0 }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(item.accessibilityText)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
@@ -231,7 +255,7 @@ struct DKSidebarRow<ID: Hashable & Sendable>: View {
         if isSelected {
             return DK.Palette.accentTint
         }
-        return isHovered ? DK.Palette.selectionNeutral : .clear
+        return isHovered && item.isEnabled ? DK.Palette.selectionNeutral : .clear
     }
 }
 

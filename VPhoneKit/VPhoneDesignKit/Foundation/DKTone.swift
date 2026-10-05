@@ -59,7 +59,7 @@ public enum DKTone: String, Sendable, CaseIterable, Hashable {
     public var line: Color {
         switch self {
         case .neutral, .idle: DK.Palette.line
-        case .success: DK.Palette.success.opacity(0.35)
+        case .success: DK.Palette.successLine
         case .warning: DK.Palette.warningLine
         case .danger: DK.Palette.dangerLine
         case .info, .accent: DK.Palette.accentSoft

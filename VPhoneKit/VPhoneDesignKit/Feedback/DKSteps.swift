@@ -3,9 +3,10 @@ import SwiftUI
 // MARK: - Status
 
 /// Where a step stands. A list normally has done steps, then one active step,
-/// then pending ones; a failed step replaces the active one.
+/// then pending ones; a failed step replaces the active one. A skipped step
+/// was passed over without running, as when its work was already done.
 public enum DKStepStatus: String, Sendable, CaseIterable, Hashable {
-    case done, active, pending, failed
+    case done, active, pending, failed, skipped
 
     /// The glyph in the step's leading mark. The active step draws a live
     /// spinner in place of `.spinner`.
@@ -15,6 +16,7 @@ public enum DKStepStatus: String, Sendable, CaseIterable, Hashable {
         case .active: .spinner
         case .pending: .pending
         case .failed: .xCircle
+        case .skipped: .minusCircle
         }
     }
 
@@ -25,6 +27,7 @@ public enum DKStepStatus: String, Sendable, CaseIterable, Hashable {
         case .active: .warning
         case .pending: .idle
         case .failed: .danger
+        case .skipped: .idle
         }
     }
 
@@ -35,6 +38,7 @@ public enum DKStepStatus: String, Sendable, CaseIterable, Hashable {
         case .active: "In progress"
         case .pending: "Pending"
         case .failed: "Failed"
+        case .skipped: "Skipped"
         }
     }
 
@@ -44,6 +48,7 @@ public enum DKStepStatus: String, Sendable, CaseIterable, Hashable {
         case .active: DK.Palette.muted
         case .pending: DK.Palette.inkDisabled
         case .failed: DK.Palette.danger
+        case .skipped: DK.Palette.inkDisabled
         }
     }
 }
@@ -131,20 +136,30 @@ public struct DKStep: Identifiable, Hashable, Sendable {
 // MARK: - Step list
 
 /// The step list of the machine-creation sheet. VoiceOver reads it as a list,
-/// one item per step with its state.
+/// one item per step with its state. Each row can end with an accessory view,
+/// such as a button that shows the step's full command.
 public struct DKSteps: View {
     public var steps: [DKStep]
     public var label: String
+    let accessory: ((DKStep) -> AnyView)?
 
     public init(_ steps: [DKStep], label: String = "Steps") {
         self.steps = steps
         self.label = label
+        accessory = nil
+    }
+
+    /// A step list whose rows end with `accessory`, after the elapsed time.
+    public init(_ steps: [DKStep], label: String = "Steps", @ViewBuilder accessory: @escaping (DKStep) -> some View) {
+        self.steps = steps
+        self.label = label
+        self.accessory = { AnyView(accessory($0)) }
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(steps) { step in
-                DKStepRow(step: step)
+                DKStepRow(step: step, accessory: accessory?(step))
             }
         }
         .accessibilityRepresentation {
@@ -160,6 +175,7 @@ public struct DKSteps: View {
 
 private struct DKStepRow: View {
     let step: DKStep
+    var accessory: AnyView?
 
     var body: some View {
         HStack(alignment: .top, spacing: DK.Space.s3) {
@@ -169,7 +185,7 @@ private struct DKStepRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(step.title)
                     .font(step.status == .active ? DK.Typeface.bodyStrong : DK.Typeface.body)
-                    .foregroundStyle(step.status == .pending ? DK.Palette.muted : DK.Palette.ink)
+                    .foregroundStyle(step.status == .pending || step.status == .skipped ? DK.Palette.muted : DK.Palette.ink)
                 if let command = step.command, !command.isEmpty {
                     Text(command)
                         .font(DK.Typeface.mono)
@@ -195,6 +211,9 @@ private struct DKStepRow: View {
                     .monospacedDigit()
                     .foregroundStyle(DK.Palette.muted)
             }
+            if let accessory {
+                accessory
+            }
         }
         .padding(DK.Space.s2)
         .background {
@@ -208,9 +227,9 @@ private struct DKStepRow: View {
     @ViewBuilder
     private var mark: some View {
         if step.status == .active {
-            ProgressView()
-                .progressViewStyle(.circular)
-                .controlSize(.small)
+            // Core Animation, not `ProgressView`: the system spinner stops when
+            // a row around it redraws, and SwiftUI animation redraws the window.
+            DKSpinner(size: 16, label: step.status.accessibilityText)
         } else {
             DKIcon(step.status.glyph, size: 18)
                 .foregroundStyle(step.status.markColor)
@@ -231,12 +250,14 @@ public struct DKStepSegment: Hashable, Sendable {
     }
 
     /// Segments for a list of steps: done and failed steps fill their segment,
-    /// the active one fills to its progress, pending ones stay empty.
+    /// skipped ones fill it in gray, the active one fills to its progress,
+    /// pending ones stay empty.
     public static func segments(for steps: [DKStep]) -> [DKStepSegment] {
         steps.map { step in
             switch step.status {
             case .done: DKStepSegment(fraction: 1, tone: .success)
             case .failed: DKStepSegment(fraction: 1, tone: .danger)
+            case .skipped: DKStepSegment(fraction: 1, tone: .idle)
             case .active: DKStepSegment(fraction: step.progress ?? 0, tone: .warning)
             case .pending: DKStepSegment(fraction: 0, tone: .warning)
             }

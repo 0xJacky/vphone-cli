@@ -16,7 +16,7 @@ struct DKLogLineTests {
         #expect(DKLogLine.Tone.dim.color == DK.Palette.terminalDim)
         #expect(DKLogLine.Tone.success.color == DK.Palette.terminalGreen)
         #expect(DKLogLine.Tone.error.color == DK.Palette.terminalRed)
-        #expect(DKLogLine.Tone.warning.color == DKLogPalette.yellow)
+        #expect(DKLogLine.Tone.warning.color == DK.Palette.terminalYellow)
     }
 
     @Test

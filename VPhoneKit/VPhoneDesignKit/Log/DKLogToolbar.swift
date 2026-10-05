@@ -44,19 +44,24 @@ public struct DKLogToolbar: View {
     @Binding var level: DKLogLevelFilter
     @Binding var following: Bool
     let searchPrompt: String
+    let isSearchFocused: Binding<Bool>?
     let onClear: () -> Void
 
+    /// - Parameter isSearchFocused: The search field's keyboard focus, for a
+    ///   Find command that focuses it.
     public init(
         searchText: Binding<String>,
         level: Binding<DKLogLevelFilter>,
         following: Binding<Bool>,
         searchPrompt: String = "Search",
+        isSearchFocused: Binding<Bool>? = nil,
         onClear: @escaping () -> Void,
     ) {
         _searchText = searchText
         _level = level
         _following = following
         self.searchPrompt = searchPrompt
+        self.isSearchFocused = isSearchFocused
         self.onClear = onClear
     }
 
@@ -78,8 +83,11 @@ public struct DKLogToolbar: View {
 
             Spacer(minLength: DK.Space.s2)
 
-            DKLogSearchField(text: $searchText, prompt: searchPrompt)
-                .frame(width: 180)
+            if let isSearchFocused {
+                DKSearchField(searchPrompt, text: $searchText, isFocused: isSearchFocused, width: 180)
+            } else {
+                DKSearchField(searchPrompt, text: $searchText, width: 180)
+            }
         }
         .padding(.horizontal, DK.Space.s3)
         .padding(.vertical, DK.Space.s2)
@@ -103,37 +111,6 @@ struct DKLogIconToggleStyle: ToggleStyle {
         .accessibilityLabel(title)
         .accessibilityValue(Text(configuration.isOn ? "On" : "Off"))
         .accessibilityAddTraits(configuration.isOn ? .isSelected : [])
-    }
-}
-
-/// The pill search field of `.dk-search`.
-struct DKLogSearchField: View {
-    @Binding var text: String
-    let prompt: String
-
-    var body: some View {
-        HStack(spacing: 6) {
-            DKIcon(.search, size: 13)
-                .foregroundStyle(DK.Palette.muted)
-            TextField(prompt, text: $text)
-                .textFieldStyle(.plain)
-                .font(DK.Typeface.body)
-                .foregroundStyle(DK.Palette.ink)
-            if !text.isEmpty {
-                Button {
-                    text = ""
-                } label: {
-                    DKIcon(.xCircle, size: 13)
-                        .foregroundStyle(DK.Palette.muted)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear Search")
-            }
-        }
-        .padding(.horizontal, 10)
-        .frame(height: DK.Metric.controlHeight)
-        .background(Capsule().fill(DK.Palette.window))
-        .overlay(Capsule().strokeBorder(DK.Palette.lineStrong, lineWidth: DK.Metric.hairline))
     }
 }
 

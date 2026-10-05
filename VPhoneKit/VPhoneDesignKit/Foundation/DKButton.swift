@@ -127,12 +127,20 @@ struct DKButtonShape: InsettableShape {
 public struct DKButtonStyle: ButtonStyle {
     public var variant: DKButtonVariant
     public var size: DKButtonSize
+    /// Draws the pressed look while true, as a menu button does while its menu is open.
+    var isHighlighted = false
 
     @Environment(\.isEnabled) private var isEnabled
 
     public init(variant: DKButtonVariant = .secondary, size: DKButtonSize = .regular) {
         self.variant = variant
         self.size = size
+    }
+
+    init(variant: DKButtonVariant, size: DKButtonSize, isHighlighted: Bool) {
+        self.variant = variant
+        self.size = size
+        self.isHighlighted = isHighlighted
     }
 
     public func makeBody(configuration: Configuration) -> some View {
@@ -143,7 +151,7 @@ public struct DKButtonStyle: ButtonStyle {
             .padding(.horizontal, horizontalPadding)
             .frame(width: fixedWidth, height: height)
             .frame(maxWidth: size == .tile ? .infinity : nil)
-            .background(shape.fill(background(pressed: configuration.isPressed)))
+            .background(shape.fill(background(pressed: configuration.isPressed || isHighlighted)))
             .overlay(shape.strokeBorder(border, lineWidth: border == .clear ? 0 : 1))
             .contentShape(shape)
     }
@@ -205,7 +213,7 @@ public struct DKButtonStyle: ButtonStyle {
     private func background(pressed: Bool) -> Color {
         switch variant {
         case .primary:
-            return isEnabled ? (pressed ? DK.Palette.accent.opacity(0.85) : DK.Palette.accent) : DK.Palette.surfaceSunken
+            return isEnabled ? (pressed ? DK.Palette.accentPressed : DK.Palette.accent) : DK.Palette.surfaceSunken
         case .recording:
             return DK.Palette.dangerSurface
         case .ghost:

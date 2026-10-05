@@ -25,7 +25,7 @@ public struct DKLogLine: Identifiable, Sendable, Hashable {
             case .command: DK.Palette.terminalBlue
             case .dim: DK.Palette.terminalDim
             case .success: DK.Palette.terminalGreen
-            case .warning: DKLogPalette.yellow
+            case .warning: DK.Palette.terminalYellow
             case .error: DK.Palette.terminalRed
             }
         }
@@ -179,21 +179,13 @@ public extension DKLogColor {
         case .black, .gray: DK.Palette.terminalDim
         case .red: DK.Palette.terminalRed
         case .green: DK.Palette.terminalGreen
-        case .yellow: DKLogPalette.yellow
+        case .yellow: DK.Palette.terminalYellow
         case .blue: DK.Palette.terminalBlue
-        case .magenta: DKLogPalette.magenta
-        case .cyan: DKLogPalette.cyan
+        case .magenta: DK.Palette.terminalMagenta
+        case .cyan: DK.Palette.terminalCyan
         case .white: DK.Palette.terminalForeground
         }
     }
-}
-
-/// Terminal hues the foundation palette does not carry yet, chosen to read on
-/// `DK.Palette.terminalBackground` in both appearances.
-enum DKLogPalette {
-    static let yellow = DK.Palette.dynamic(0x9A6C00, 0xFFD60A)
-    static let magenta = DK.Palette.dynamic(0xAD3DA4, 0xDA70D6)
-    static let cyan = DK.Palette.dynamic(0x0E7C86, 0x5AC8FA)
 }
 
 // MARK: - Timestamps

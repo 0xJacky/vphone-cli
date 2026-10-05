@@ -3,8 +3,8 @@ import SwiftUI
 // MARK: - Section
 
 /// A titled group of a page (`.dk-section`): a 12pt semibold muted title with an
-/// optional note and accessory button on the right, a card body, and an optional
-/// footnote under the card.
+/// optional note, accessory view and accessory button on the right, a card body,
+/// and an optional footnote under the card.
 ///
 /// The body is key-value rows, list items, or any content:
 ///
@@ -16,17 +16,27 @@ import SwiftUI
 /// DKSection("Display") {
 ///     DKFormRow("Scale") { Picker(...) }
 /// }
+///
+/// DKSection("Processes") {
+///     ProcessRows()
+/// } headAccessory: {
+///     DKSegmented("Show", selection: $filter, options: filters)
+/// }
 /// ```
 ///
 /// Custom content goes into a `DKCard` with dividers between its rows; pass
 /// `card: false` to place it bare (a log, a banner, a padded card of your own).
+///
+/// A footnote is plain text, or an `AttributedString` for emphasis and links;
+/// `DKSection.markdown(_:)` builds one from inline Markdown.
 public struct DKSection<Content: View>: View {
     let title: String?
     let note: String?
     let accessory: DKButtonSpec?
-    let footnote: String?
+    let footnote: AttributedString?
     let grow: Bool
     let card: Bool
+    let headAccessory: AnyView?
     let content: Content
 
     /// - Parameters:
@@ -34,6 +44,8 @@ public struct DKSection<Content: View>: View {
     ///   - note: Muted text at the right of the head.
     ///   - accessory: A button at the right of the head, drawn as a plain link: "Change…".
     ///   - footnote: Muted text under the card.
+    ///   - attributedFootnote: Muted styled text under the card, with links in
+    ///     the link color; used in place of `footnote` when both are set.
     ///   - grow: Take the height left in the parent; the card stretches with it.
     ///   - card: Put the content in a divided `DKCard` (the default) or place it bare.
     public init(
@@ -41,6 +53,7 @@ public struct DKSection<Content: View>: View {
         note: String? = nil,
         accessory: DKButtonSpec? = nil,
         footnote: String? = nil,
+        attributedFootnote: AttributedString? = nil,
         grow: Bool = false,
         card: Bool = true,
         @ViewBuilder content: () -> Content,
@@ -48,40 +61,74 @@ public struct DKSection<Content: View>: View {
         self.title = title
         self.note = note
         self.accessory = accessory
-        self.footnote = footnote
+        self.footnote = attributedFootnote ?? footnote.map { AttributedString($0) }
         self.grow = grow
         self.card = card
+        headAccessory = nil
         self.content = content()
     }
 
+    /// A section with a view at the right of its head, before the note and
+    /// the accessory button: a segmented control, a switch, a menu button.
+    public init(
+        _ title: String? = nil,
+        note: String? = nil,
+        accessory: DKButtonSpec? = nil,
+        footnote: String? = nil,
+        attributedFootnote: AttributedString? = nil,
+        grow: Bool = false,
+        card: Bool = true,
+        @ViewBuilder content: () -> Content,
+        @ViewBuilder headAccessory: () -> some View,
+    ) {
+        self.title = title
+        self.note = note
+        self.accessory = accessory
+        self.footnote = attributedFootnote ?? footnote.map { AttributedString($0) }
+        self.grow = grow
+        self.card = card
+        self.headAccessory = AnyView(headAccessory())
+        self.content = content()
+    }
+
+    /// Inline Markdown as a footnote: emphasis, code and links, whitespace kept.
+    /// Text that does not parse comes back as it is.
+    public nonisolated static func markdown(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text, options: AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(text)
+    }
+
     public var body: some View {
-        VStack(alignment: .leading, spacing: DK.Space.s2) {
-            if hasHead {
-                head
-            }
-            if card {
-                DKCard(fillsHeight: grow) {
-                    content
+        DKZeroWidthProbeLayout {
+            VStack(alignment: .leading, spacing: DK.Space.s2) {
+                if hasHead {
+                    head
                 }
-            } else {
-                content
-                    .frame(maxWidth: .infinity, maxHeight: grow ? .infinity : nil, alignment: .topLeading)
-            }
-            if let footnote, !footnote.isEmpty {
-                Text(footnote)
-                    .font(DK.Typeface.caption)
-                    .lineSpacing(3)
-                    .foregroundStyle(DK.Palette.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, DK.Space.s1)
-                    .padding(.top, DK.Space.s1)
+                if card {
+                    DKCard(fillsHeight: grow) {
+                        content
+                    }
+                } else {
+                    content
+                        .frame(maxWidth: .infinity, maxHeight: grow ? .infinity : nil, alignment: .topLeading)
+                }
+                if let footnote, !footnote.characters.isEmpty {
+                    Text(footnote)
+                        .font(DK.Typeface.caption)
+                        .lineSpacing(3)
+                        .foregroundStyle(DK.Palette.muted)
+                        .tint(DK.Palette.link)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, DK.Space.s1)
+                        .padding(.top, DK.Space.s1)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: grow ? .infinity : nil, alignment: .topLeading)
     }
 
     private var hasHead: Bool {
-        !(title ?? "").isEmpty || !(note ?? "").isEmpty || accessory != nil
+        !(title ?? "").isEmpty || !(note ?? "").isEmpty || accessory != nil || headAccessory != nil
     }
 
     private var head: some View {
@@ -91,6 +138,9 @@ public struct DKSection<Content: View>: View {
                 .foregroundStyle(DK.Palette.muted)
                 .accessibilityAddTraits(.isHeader)
                 .dkSectionsFlex(grow: 1)
+            if let headAccessory {
+                headAccessory
+            }
             if let note, !note.isEmpty {
                 Text(note)
                     .font(DK.Typeface.caption)
@@ -118,10 +168,11 @@ public extension DKSection where Content == ForEach<[DKKeyValue], String, DKKeyV
         note: String? = nil,
         accessory: DKButtonSpec? = nil,
         footnote: String? = nil,
+        attributedFootnote: AttributedString? = nil,
         grow: Bool = false,
         rows: [DKKeyValue],
     ) {
-        self.init(title, note: note, accessory: accessory, footnote: footnote, grow: grow) {
+        self.init(title, note: note, accessory: accessory, footnote: footnote, attributedFootnote: attributedFootnote, grow: grow) {
             ForEach(rows) { DKKeyValueRow($0) }
         }
     }
@@ -134,10 +185,11 @@ public extension DKSection where Content == ForEach<[DKListItem], String, DKList
         note: String? = nil,
         accessory: DKButtonSpec? = nil,
         footnote: String? = nil,
+        attributedFootnote: AttributedString? = nil,
         grow: Bool = false,
         items: [DKListItem],
     ) {
-        self.init(title, note: note, accessory: accessory, footnote: footnote, grow: grow) {
+        self.init(title, note: note, accessory: accessory, footnote: footnote, attributedFootnote: attributedFootnote, grow: grow) {
             ForEach(items) { DKListRow($0) }
         }
     }
@@ -146,7 +198,9 @@ public extension DKSection where Content == ForEach<[DKListItem], String, DKList
 // MARK: - Key-value row
 
 /// A key-value row (`.dk-kv__row`): the muted key on the left, the value on the
-/// right, 32pt tall, with a status dot when the row has a tone.
+/// right, 32pt tall, with a status dot when the row has a tone, a thin bar under
+/// the value when it has progress, and a small button after it when it has an
+/// action.
 public struct DKKeyValueRow: View {
     let row: DKKeyValue
 
@@ -161,16 +215,27 @@ public struct DKKeyValueRow: View {
                 .lineLimit(1)
                 .fixedSize()
             Spacer(minLength: 0)
-            HStack(spacing: DK.Space.s2) {
-                if let tone = row.dotTone {
-                    DKStatusDot(tone)
+            VStack(alignment: .trailing, spacing: DK.Space.s1) {
+                HStack(spacing: DK.Space.s2) {
+                    if let tone = row.dotTone {
+                        DKStatusDot(tone)
+                    }
+                    Text(row.value)
+                        .font(row.monospaced ? DK.Typeface.mono : DK.Typeface.body)
+                        .foregroundStyle(row.valueTone?.sectionsTextColor ?? DK.Palette.ink)
+                        .lineLimit(1)
+                        .truncationMode(row.monospaced ? .middle : .tail)
+                        .textSelection(.enabled)
+                        .help(row.help ?? "")
                 }
-                Text(row.value)
-                    .font(row.monospaced ? DK.Typeface.mono : DK.Typeface.body)
-                    .foregroundStyle(row.valueTone?.sectionsTextColor ?? DK.Palette.ink)
-                    .lineLimit(1)
-                    .truncationMode(row.monospaced ? .middle : .tail)
-                    .textSelection(.enabled)
+                if let progress = row.visibleProgress {
+                    DKProgress(value: progress, tone: row.tone ?? .accent, thin: true, label: row.key)
+                        .frame(width: DKKeyValueRow.progressWidth)
+                }
+            }
+            .padding(.vertical, row.visibleProgress == nil ? 0 : 6)
+            if let action = row.action {
+                DKButton(DKListRow.small(action))
             }
         }
         .font(DK.Typeface.body)
@@ -178,6 +243,9 @@ public struct DKKeyValueRow: View {
         .padding(.horizontal, 14)
         .accessibilityElement(children: .combine)
     }
+
+    /// The width of a row's progress bar.
+    static let progressWidth: CGFloat = 140
 }
 
 // MARK: - List row

@@ -8,7 +8,7 @@ public enum DKGlyph: String, Sendable, CaseIterable, Hashable {
     case warning, check, play, stop, pause, restart, plus, minus, sun
     case speakerPlus, speakerMinus, mute, search, refresh, trash, copy, download, upload
     case left, right, sidebar, home, camera, record, ellipsis, timer, bolt, xCircle
-    case send, link, doc, globe, seal, lock, chevron, chevronDown, close, pending, spinner
+    case send, link, doc, globe, seal, lock, chevron, chevronDown, close, pending, spinner, minusCircle
 
     /// The SF Symbol that draws this glyph.
     public var symbolName: String {
@@ -73,6 +73,7 @@ public enum DKGlyph: String, Sendable, CaseIterable, Hashable {
         case .close: "xmark"
         case .pending: "circle.dotted"
         case .spinner: "progress.indicator"
+        case .minusCircle: "minus.circle"
         }
     }
 }

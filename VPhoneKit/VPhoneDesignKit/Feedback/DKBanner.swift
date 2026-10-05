@@ -96,6 +96,20 @@ public struct DKBanner: View {
 
     public var body: some View {
         let shape = RoundedRectangle(cornerRadius: DK.Radius.card, style: .continuous)
+        // The sentence wraps; measured at zero width it would stack a character
+        // per line and grow the window (see DKZeroWidthProbeLayout).
+        DKZeroWidthProbeLayout {
+            content
+        }
+        .padding(.vertical, DK.Space.s3)
+        .padding(.horizontal, 14)
+        .background(shape.fill(tone.surface))
+        .overlay(shape.strokeBorder(tone.line, lineWidth: DK.Metric.hairline))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(tone.accessibilityName)
+    }
+
+    private var content: some View {
         HStack(alignment: .top, spacing: 10) {
             DKIcon(tone.glyph, size: 18)
                 .foregroundStyle(tone.iconColor)
@@ -112,12 +126,6 @@ public struct DKBanner: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.vertical, DK.Space.s3)
-        .padding(.horizontal, 14)
-        .background(shape.fill(tone.surface))
-        .overlay(shape.strokeBorder(tone.line, lineWidth: DK.Metric.hairline))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(tone.accessibilityName)
     }
 }
 
