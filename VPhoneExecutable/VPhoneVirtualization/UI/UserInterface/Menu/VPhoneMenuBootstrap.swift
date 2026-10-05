@@ -6,8 +6,10 @@ import UniformTypeIdentifiers
 /// Installs the Irisin bootstrap in the guest from the Apps menu and shows
 /// vphoned's progress while it downloads, extracts and registers it.
 extension VPhoneMenuController {
-    /// Install and Uninstall, each with an Option alternate.
+    /// The Apps menu's Bootstrap section: Install and Uninstall, each with
+    /// an Option alternate.
     func addBootstrapItems(to menu: NSMenu) {
+        menu.addItem(NSMenuItem.sectionHeader(title: "Bootstrap"))
         let install = makeItem(
             "Install Bootstrap…",
             action: #selector(installBootstrap),
@@ -17,7 +19,7 @@ extension VPhoneMenuController {
         installBootstrapItem = install
         menu.addItem(install)
         let installFromFile = makeItem(
-            "Install Bootstrap from File…",
+            "Install from File…",
             action: #selector(installBootstrapFromFile),
             modifiers: [.option],
             symbol: "doc",
@@ -36,7 +38,7 @@ extension VPhoneMenuController {
         uninstallBootstrapItem = uninstall
         menu.addItem(uninstall)
         let uninstallNoRestart = makeItem(
-            "Uninstall Bootstrap Without Restarting…",
+            "Uninstall Without Restarting…",
             action: #selector(uninstallBootstrapWithoutRestart),
             modifiers: [.option],
             symbol: "trash",
@@ -45,7 +47,10 @@ extension VPhoneMenuController {
         uninstallNoRestart.isEnabled = false
         uninstallBootstrapNoRestartItem = uninstallNoRestart
         menu.addItem(uninstallNoRestart)
+    }
 
+    /// `uicache -a` through the bootstrap; see `rebuildAppRegistrations()`.
+    func makeRebuildAppRegistrationsItem() -> NSMenuItem {
         let rebuild = makeItem(
             "Rebuild App Registrations",
             action: #selector(rebuildAppRegistrations),
@@ -53,7 +58,7 @@ extension VPhoneMenuController {
         )
         rebuild.isEnabled = false
         rebuildAppRegistrationsItem = rebuild
-        menu.addItem(rebuild)
+        return rebuild
     }
 
     func updateBootstrapAvailability(available: Bool) {

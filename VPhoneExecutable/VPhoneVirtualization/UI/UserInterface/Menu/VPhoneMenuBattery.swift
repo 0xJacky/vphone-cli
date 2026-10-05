@@ -4,36 +4,32 @@ import IOKit.ps
 // MARK: - Battery Menu
 
 extension VPhoneMenuController {
-    func buildBatterySubmenu() -> NSMenuItem {
-        let item = NSMenuItem(title: "Battery", action: nil, keyEquivalent: "")
-        item.image = menuSymbol("battery.100")
-        let menu = NSMenu(title: "Battery")
+    /// The Simulate menu's Battery section. Its header carries the state the
+    /// guest was last given.
+    func addBatteryItems(to menu: NSMenu) {
+        let header = NSMenuItem.sectionHeader(title: sectionHeaderTitle("Battery", status: nil))
+        batteryHeaderItem = header
+        menu.addItem(header)
 
-        // Sync toggle
         let syncItem = makeItem("Sync with Host", action: #selector(toggleBatterySync(_:)))
         syncItem.state = .off
         menu.addItem(syncItem)
 
-        // Status line (hidden until sync is active)
-        let statusItem = NSMenuItem(title: "Status: —", action: nil, keyEquivalent: "")
-        statusItem.isEnabled = false
-        statusItem.isHidden = true
-        menu.addItem(statusItem)
-        batterySyncStatusItem = statusItem
-
-        menu.addItem(NSMenuItem.separator())
-
         // Charge level presets
+        let levelItem = NSMenuItem(title: "Level", action: nil, keyEquivalent: "")
+        let levelMenu = NSMenu(title: "Level")
+        levelMenu.autoenablesItems = false
         batteryLevelMenuItems = []
         for level in [100, 75, 50, 25, 10, 5] {
             let mi = makeItem("\(level)%", action: #selector(setBatteryLevel(_:)))
             mi.tag = level
             mi.state = level == 100 ? .on : .off
-            menu.addItem(mi)
+            levelMenu.addItem(mi)
             batteryLevelMenuItems.append(mi)
         }
-
-        menu.addItem(NSMenuItem.separator())
+        levelItem.submenu = levelMenu
+        batteryLevelItem = levelItem
+        menu.addItem(levelItem)
 
         // Connectivity: 1=charging, 2=disconnected
         let charging = makeItem("Charging", action: #selector(setBatteryConnectivity(_:)))
@@ -46,20 +42,20 @@ extension VPhoneMenuController {
         menu.addItem(disconnected)
         batteryConnectivityMenuItems = [charging, disconnected]
 
-        item.submenu = menu
-
         // Enable sync by default
         syncItem.state = .on
         batterySyncEnabled = true
-        batterySyncStatusItem?.isHidden = false
-        batteryLevelMenuItems.forEach { $0.isEnabled = false }
-        batteryConnectivityMenuItems.forEach { $0.isEnabled = false }
+        setManualBatteryControlsEnabled(false)
         syncBatteryFromHost()
         syncLowPowerModeFromHost()
         startPowerSourceMonitoring()
         startLowPowerMonitoring()
+    }
 
-        return item
+    private func setManualBatteryControlsEnabled(_ enabled: Bool) {
+        batteryLevelItem?.isEnabled = enabled
+        batteryLevelMenuItems.forEach { $0.isEnabled = enabled }
+        batteryConnectivityMenuItems.forEach { $0.isEnabled = enabled }
     }
 
     @objc func setBatteryLevel(_ sender: NSMenuItem) {
@@ -67,6 +63,7 @@ extension VPhoneMenuController {
         let charge = Double(sender.tag)
         let connectivity = currentBatteryConnectivity()
         vm?.setBattery(charge: charge, connectivity: connectivity)
+        updateStatusLabel(charge: charge, connectivity: connectivity, lowPowerMode: false)
         print("[battery] set \(sender.tag)%, connectivity=\(connectivity)")
     }
 
@@ -74,6 +71,7 @@ extension VPhoneMenuController {
         batteryConnectivityMenuItems.forEach { $0.state = $0 === sender ? .on : .off }
         let charge = currentBatteryCharge()
         vm?.setBattery(charge: charge, connectivity: sender.tag)
+        updateStatusLabel(charge: charge, connectivity: sender.tag, lowPowerMode: false)
         print("[battery] set \(Int(charge))%, connectivity=\(sender.tag)")
     }
 
@@ -89,10 +87,7 @@ extension VPhoneMenuController {
     @objc func toggleBatterySync(_ sender: NSMenuItem) {
         batterySyncEnabled.toggle()
         sender.state = batterySyncEnabled ? .on : .off
-        batterySyncStatusItem?.isHidden = !batterySyncEnabled
-        let manualEnabled = !batterySyncEnabled
-        batteryLevelMenuItems.forEach { $0.isEnabled = manualEnabled }
-        batteryConnectivityMenuItems.forEach { $0.isEnabled = manualEnabled }
+        setManualBatteryControlsEnabled(!batterySyncEnabled)
 
         if batterySyncEnabled {
             syncBatteryFromHost()
@@ -111,11 +106,15 @@ extension VPhoneMenuController {
     func syncBatteryFromHost() {
         guard batterySyncEnabled else { return }
         guard let (charge, connectivity) = hostBatteryState() else {
-            batterySyncStatusItem?.title = VPhoneLocalization.text("Status: no host battery")
+            batteryHeaderItem?.title = sectionHeaderTitle("Battery", status: VPhoneLocalization.text("no host battery"))
             return
         }
         vm?.setBattery(charge: charge, connectivity: connectivity)
-        updateStatusLabel(charge: charge, connectivity: connectivity)
+        updateStatusLabel(
+            charge: charge,
+            connectivity: connectivity,
+            lowPowerMode: ProcessInfo.processInfo.isLowPowerModeEnabled,
+        )
         print("[battery] sync \(Int(charge))%, connectivity=\(connectivity)")
     }
 
@@ -208,14 +207,16 @@ extension VPhoneMenuController {
 
     // MARK: - Status Label
 
-    private func updateStatusLabel(charge: Double, connectivity: Int) {
-        let connLabel = VPhoneLocalization.text(connectivity == 1 ? "charging" : "not charging")
-        let format =
-            ProcessInfo.processInfo.isLowPowerModeEnabled
-                ? "Status: %@%% (%@, Low Power Mode)" : "Status: %@%% (%@)"
-        batterySyncStatusItem?.title = VPhoneLocalization.format(
-            format, String(Int(charge)), connLabel,
-        )
+    /// "Battery — 75%, charging", with the host's Low Power Mode while synced.
+    private func updateStatusLabel(charge: Double, connectivity: Int, lowPowerMode: Bool) {
+        var parts = [
+            "\(Int(charge))%",
+            VPhoneLocalization.text(connectivity == 1 ? "charging" : "not charging"),
+        ]
+        if lowPowerMode {
+            parts.append(VPhoneLocalization.text("Low Power Mode"))
+        }
+        batteryHeaderItem?.title = sectionHeaderTitle("Battery", status: parts.joined(separator: ", "))
     }
 
     // MARK: - Helpers

@@ -2,8 +2,8 @@ import AppKit
 
 // MARK: - Data Menu
 
-/// Guest data the Mac reads and writes: files, Keychain, preference domains
-/// and the clipboard.
+/// Guest data the Mac reads and writes: files, Keychain and preference
+/// domains. The guest clipboard is a section of the Edit menu.
 extension VPhoneMenuController {
     func buildDataMenu() -> NSMenuItem {
         let item = NSMenuItem(title: "Data", action: nil, keyEquivalent: "")
@@ -21,7 +21,7 @@ extension VPhoneMenuController {
         connectFileBrowserItem = fileBrowser
         menu.addItem(fileBrowser)
 
-        // Control-Command-K: Shift-Command-K is Device > Use Hardware Keyboard,
+        // Control-Command-K: Shift-Command-K is Input > Use Hardware Keyboard,
         // which comes first in the menu bar and would take the key.
         let keychainBrowser = makeItem(
             "Keychain Browser",
@@ -52,36 +52,41 @@ extension VPhoneMenuController {
         settingsSetItem = settingsSet
         menu.addItem(settingsSet)
 
-        menu.addItem(NSMenuItem.separator())
+        item.submenu = menu
+        return item
+    }
 
-        let clipGet = makeItem(
-            "Guest Clipboard",
-            action: #selector(getClipboard),
+    /// The Edit menu's Guest Clipboard section.
+    func addGuestClipboardItems(to menu: NSMenu) {
+        menu.addItem(NSMenuItem.sectionHeader(title: "Guest Clipboard"))
+
+        let clipGet = makeValidatedItem(
+            "Show Guest Clipboard",
             keyEquivalent: "c",
             modifiers: [.command, .shift],
             symbol: "doc.on.clipboard",
+            isEnabled: { [weak self] in self?.clipboardAvailable == true },
+            action: { [weak self] in self?.getClipboard() },
         )
         clipGet.isEnabled = false
         clipboardGetItem = clipGet
         menu.addItem(clipGet)
 
-        let clipSet = makeItem(
+        let clipSet = makeValidatedItem(
             "Set Clipboard Text…",
-            action: #selector(setClipboardText),
             symbol: "character.cursor.ibeam",
+            isEnabled: { [weak self] in self?.clipboardAvailable == true },
+            action: { [weak self] in self?.setClipboardText() },
         )
         clipSet.isEnabled = false
         clipboardSetItem = clipSet
         menu.addItem(clipSet)
 
         menu.addItem(makeItem(
-            "Type ASCII from Mac Clipboard",
+            "Type Mac Clipboard as ASCII",
             action: #selector(typeFromClipboard),
             symbol: "keyboard",
         ))
-
-        item.submenu = menu
-        return item
     }
 
     func updateSettingsAvailability(available: Bool) {
@@ -98,6 +103,7 @@ extension VPhoneMenuController {
     }
 
     func updateClipboardAvailability(available: Bool) {
+        clipboardAvailable = available
         clipboardGetItem?.isEnabled = available
         clipboardSetItem?.isEnabled = available
     }

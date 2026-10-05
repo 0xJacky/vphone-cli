@@ -4,42 +4,37 @@ import UniformTypeIdentifiers
 // MARK: - Camera Menu
 
 extension VPhoneMenuController {
-    func buildCameraSubmenu() -> NSMenuItem {
-        let item = NSMenuItem(title: "Camera", action: nil, keyEquivalent: "")
-        item.image = menuSymbol("camera")
-        let menu = NSMenu(title: "Camera")
+    /// The Simulate menu's Camera section. Its header carries the camera
+    /// server's connection.
+    func addCameraItems(to menu: NSMenu) {
+        let header = NSMenuItem.sectionHeader(title: cameraHeaderTitle(connected: false))
+        cameraStatusItem = header
+        menu.addItem(header)
 
-        let status = NSMenuItem(
-            title: "Camera server: disconnected",
-            action: nil,
-            keyEquivalent: "",
-        )
-        status.isEnabled = false
-        cameraStatusItem = status
-        menu.addItem(status)
+        let sourceItem = NSMenuItem(title: "Source", action: nil, keyEquivalent: "")
+        let sourceMenu = NSMenu(title: "Source")
 
-        menu.addItem(NSMenuItem.separator())
-
-        let off = makeItem("Source: Off", action: #selector(setCameraSourceOff))
+        let off = makeItem("Off", action: #selector(setCameraSourceOff))
         off.state = .on
         cameraSourceOffItem = off
-        menu.addItem(off)
+        sourceMenu.addItem(off)
 
         let testPattern = makeItem(
-            "Source: Test Pattern",
+            "Test Pattern",
             action: #selector(setCameraSourceTestPattern),
         )
         cameraSourceTestPatternItem = testPattern
-        menu.addItem(testPattern)
+        sourceMenu.addItem(testPattern)
 
         let videoFile = makeItem(
-            "Source: Video File…",
+            "Video File…",
             action: #selector(setCameraSourceVideoFile),
         )
         cameraSourceVideoFileItem = videoFile
-        menu.addItem(videoFile)
+        sourceMenu.addItem(videoFile)
 
-        menu.addItem(NSMenuItem.separator())
+        sourceItem.submenu = sourceMenu
+        menu.addItem(sourceItem)
 
         let startStop = makeItem(
             "Start Streaming",
@@ -49,15 +44,15 @@ extension VPhoneMenuController {
         startStop.isEnabled = false
         cameraStartStopItem = startStop
         menu.addItem(startStop)
+    }
 
-        item.submenu = menu
-        return item
+    /// "Camera — connected"
+    private func cameraHeaderTitle(connected: Bool) -> String {
+        sectionHeaderTitle("Camera", status: VPhoneLocalization.text(connected ? "connected" : "disconnected"))
     }
 
     func updateCameraConnectionState(connected: Bool) {
-        cameraStatusItem?.title = VPhoneLocalization.text(
-            connected ? "Camera server: connected" : "Camera server: disconnected",
-        )
+        cameraStatusItem?.title = cameraHeaderTitle(connected: connected)
         cameraStartStopItem?.isEnabled = connected && (cameraServer?.sourceKind ?? .off) != .off
     }
 

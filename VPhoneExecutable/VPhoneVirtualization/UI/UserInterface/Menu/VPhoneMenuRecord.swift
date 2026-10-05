@@ -6,6 +6,7 @@ extension VPhoneMenuController {
     func buildRecordMenu() -> NSMenuItem {
         let item = NSMenuItem(title: "Capture", action: nil, keyEquivalent: "")
         let menu = NSMenu(title: "Capture")
+        menu.autoenablesItems = false
         let toggle = makeItem(
             "Start Recording",
             action: #selector(toggleRecording),
@@ -13,6 +14,7 @@ extension VPhoneMenuController {
             modifiers: [.command, .shift],
             symbol: "record.circle",
         )
+        .command(.toggleRecording)
         recordingItem = toggle
         menu.addItem(toggle)
         menu.addItem(NSMenuItem.separator())
@@ -21,14 +23,16 @@ extension VPhoneMenuController {
         // `VPhoneHostHotKeys`). Control-Command-C is Simulator's Copy Screen;
         // saving is Shift-Command-S, since a plain Command-S is the guest's.
         menu.addItem(makeItem(
-            "Copy Screenshot to Mac Clipboard",
+            "Copy Screenshot",
             action: #selector(copyScreenshotToClipboard),
             keyEquivalent: "c",
             modifiers: [.command, .control],
             symbol: "camera.viewfinder",
-        ))
+        )
+        .command(.copyScreenshot))
+        // No ellipsis: it saves to the Desktop without asking where.
         menu.addItem(makeItem(
-            "Save Screenshot to File",
+            "Save Screenshot",
             action: #selector(saveScreenshotToFile),
             keyEquivalent: "s",
             modifiers: [.command, .shift],
@@ -44,6 +48,7 @@ extension VPhoneMenuController {
                 let url = await screenRecorder?.stopRecording()
                 recordingItem?.title = VPhoneLocalization.text("Start Recording")
                 recordingItem?.image = menuSymbol("record.circle")
+                VPhoneScreenRecordingStatus.post(startedAt: nil)
                 if let url {
                     showRecordingSavedAlert(url: url)
                 }
@@ -61,6 +66,7 @@ extension VPhoneMenuController {
                 try screenRecorder?.startRecording(view: view)
                 recordingItem?.title = VPhoneLocalization.text("Stop Recording")
                 recordingItem?.image = menuSymbol("stop.circle")
+                VPhoneScreenRecordingStatus.post(startedAt: Date())
             } catch {
                 showCaptureAlert(title: "Recording", message: "Unable to start recording. Try again.", style: .warning)
             }

@@ -28,8 +28,6 @@ extension VPhoneMenuController {
         appsOpenURLItem = openURL
         menu.addItem(openURL)
 
-        menu.addItem(NSMenuItem.separator())
-
         let install = makeItem(
             "Install App Package…",
             action: #selector(installIPAFromDisk),
@@ -39,6 +37,8 @@ extension VPhoneMenuController {
         installPackageItem = install
         menu.addItem(install)
 
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(makeRebuildAppRegistrationsItem())
         menu.addItem(NSMenuItem.separator())
         addBootstrapItems(to: menu)
 

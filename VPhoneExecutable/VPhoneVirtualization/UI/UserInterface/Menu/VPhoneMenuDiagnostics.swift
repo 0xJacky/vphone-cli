@@ -3,7 +3,7 @@ import AppKit
 // MARK: - Diagnostics Menu
 
 /// Read-mostly inspection of the running guest. Each panel item opens its
-/// own window; the last three items answer in an alert.
+/// panel; Developer Mode Status and the agent items answer in an alert.
 extension VPhoneMenuController {
     func buildDiagnosticsMenu() -> NSMenuItem {
         let item = NSMenuItem(title: "Diagnostics", action: nil, keyEquivalent: "")
@@ -18,6 +18,13 @@ extension VPhoneMenuController {
         menu.addItem(makePanelItem(.crashLogs, "Crash Logs", keyEquivalent: "c", symbol: "exclamationmark.triangle"))
         menu.addItem(NSMenuItem.separator())
 
+        // Off unless asked for: the display window's status line then carries
+        // the frames the guest presented in the last second.
+        let frameRateItem = makeItem("Show Frame Rate", action: #selector(toggleFrameRateDisplay))
+        frameRateItem.state = VPhoneFrameRateDisplay.isEnabled ? .on : .off
+        frameRateItem.isEnabled = VPhoneFrameRateMeter.isSupported
+        menu.addItem(frameRateItem)
+
         let devModeStatus = makeItem(
             "Developer Mode Status",
             action: #selector(devModeStatus),
@@ -27,23 +34,18 @@ extension VPhoneMenuController {
         connectDevModeStatusItem = devModeStatus
         menu.addItem(devModeStatus)
 
-        let agentItem = NSMenuItem(title: "Guest Agent", action: nil, keyEquivalent: "")
-        agentItem.image = menuSymbol("antenna.radiowaves.left.and.right")
-        let agentMenu = NSMenu(title: "Guest Agent")
-        agentMenu.autoenablesItems = false
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem.sectionHeader(title: "Guest Agent"))
 
         let ping = makeItem("Ping", action: #selector(sendPing), symbol: "dot.radiowaves.left.and.right")
         ping.isEnabled = false
         connectPingItem = ping
-        agentMenu.addItem(ping)
+        menu.addItem(ping)
 
         let guestHash = makeItem("Guest Agent Hash", action: #selector(queryGuestHash), symbol: "number")
         guestHash.isEnabled = false
         connectGuestHashItem = guestHash
-        agentMenu.addItem(guestHash)
-
-        agentItem.submenu = agentMenu
-        menu.addItem(agentItem)
+        menu.addItem(guestHash)
 
         item.submenu = menu
         return item
@@ -69,6 +71,19 @@ extension VPhoneMenuController {
         return item
     }
 
+    /// Window > Guest Tools, which the display window's title bar button
+    /// presses. It opens Guest Tools on Device Info and is available with it.
+    /// The Window menu enables its items itself, so this one validates.
+    func makeGuestToolsItem() -> NSMenuItem {
+        makeValidatedItem(
+            "Guest Tools",
+            symbol: "sidebar.trailing",
+            isEnabled: { [weak self] in self?.panelMenuItems[.deviceInfo]?.isEnabled == true },
+            action: { [weak self] in self?.guestPanelsWindowController.show(.deviceInfo) },
+        )
+        .command(.guestTools)
+    }
+
     /// Enables the panels the connected agent can serve. An empty list, as on
     /// disconnect, disables them all.
     func updatePanelAvailability(capabilities: [String]) {
@@ -83,6 +98,14 @@ extension VPhoneMenuController {
     @objc func openPanel(_ sender: NSMenuItem) {
         guard let panel = sender.representedObject as? VPhoneGuestPanel else { return }
         guestPanelsWindowController.show(panel)
+    }
+
+    /// Shows the guest's frame rate on the display window's status line. Persisted.
+    @objc func toggleFrameRateDisplay(_ sender: NSMenuItem) {
+        let enabled = !VPhoneFrameRateDisplay.isEnabled
+        VPhoneFrameRateDisplay.isEnabled = enabled
+        sender.state = enabled ? .on : .off
+        onFrameRateDisplayChange?(enabled)
     }
 
     @objc func devModeStatus() {

@@ -2,6 +2,7 @@ import AppKit
 import Foundation
 import Virtualization
 import VPhoneCoreKit
+import VPhoneDesignKit
 
 @MainActor
 class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
@@ -9,14 +10,12 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
     private weak var control: VPhoneGuestControl?
     private weak var virtualMachineView: VPhoneVirtualMachineView?
     private(set) var touchIDMonitor: VPhoneTouchIDMonitor?
-    private var homeButton: NSButton?
-    private var subtitleLabel: NSTextField?
+    private let chrome = VPhoneDisplayChromeModel()
+    private weak var content: VPhoneDisplayWindowContentView?
     private var timers: [Timer] = []
     private var keyStateObservers: [NSObjectProtocol] = []
     private var frameRateTimer: Timer?
     private var frameRateSampledAt: CFTimeInterval = 0
-    /// The guest's frame rate over the last second; nil while the display is off.
-    private var frameRate: Int?
 
     var captureView: VPhoneVirtualMachineView? {
         virtualMachineView
@@ -46,17 +45,27 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         let container = VPhoneDisplayContainerView(displayView: view)
         displayContainer = container
 
+        // The guest display opens at one Mac point per panel point; the
+        // window adds the bars and the padding around it.
         let scale = CGFloat(screenScale)
-        let windowSize = NSSize(
+        panelSize = NSSize(
             width: CGFloat(screenWidth) / scale,
             height: CGFloat(screenHeight) / scale,
         )
-        panelSize = windowSize
-        container.panelSize = windowSize
+        container.panelSize = panelSize
+
+        chrome.machineName = name
+        chrome.onHome = { [weak self] in self?.homePressed() }
+        chrome.onGuestTools = { [weak self] in self?.press(.guestTools) }
+        chrome.onRotateLeft = { [weak self] in self?.press(.rotateLeft) }
+        chrome.onCopyScreenshot = { [weak self] in self?.press(.copyScreenshot) }
+        chrome.onToggleRecording = { [weak self] in self?.press(.toggleRecording) }
+        let content = VPhoneDisplayWindowContentView(display: container, chrome: chrome)
+        self.content = content
 
         let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: windowSize),
-            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            contentRect: NSRect(origin: .zero, size: panelSize).outset(by: content.chromeInsets),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView],
             backing: .buffered,
             defer: false,
         )
@@ -65,9 +74,21 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         window.delegate = self
         window.level = .normal
         VPhoneAlert.hostWindow = window
-        window.contentAspectRatio = windowSize
         window.title = name
-        window.contentView = container
+        // The title bar is the content's own; the system one keeps only the
+        // traffic lights. `window.title` and `window.subtitle` are still set
+        // for the Window menu and accessibility.
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
+        // An empty unified toolbar gives the system title bar the height the
+        // traffic lights need to sit centered on the content's title bar.
+        let toolbar = NSToolbar(identifier: "vphone-toolbar")
+        toolbar.displayMode = .iconOnly
+        toolbar.allowsDisplayModeCustomization = false
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
+        window.contentView = content
 
         // The scene belongs to the VM, not to the app: every VM directory keeps
         // its own window frame, and a newly created VM opens centered instead
@@ -79,23 +100,12 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         }
         window.setFrameAutosaveName(sceneName)
         observeKeyState(of: window)
-        // A frame saved while the guest was sideways is turned back: the guest
-        // boots in portrait, and the orientation poll turns it again if not.
+        observeRecording()
+        // A frame saved while the guest was sideways, or before the window
+        // had its bars, is reshaped: the guest boots in portrait, and the
+        // orientation poll turns it again if not.
         applyOrientation(.portrait, to: window, force: true)
-
-        // An empty unified toolbar gives the title bar its full height. The Home
-        // button is a titlebar accessory rather than a toolbar item so that a
-        // narrow window truncates the title instead of moving it to overflow.
-        let toolbar = NSToolbar(identifier: "vphone-toolbar")
-        toolbar.displayMode = .iconOnly
-        toolbar.allowsDisplayModeCustomization = false
-        window.toolbar = toolbar
-        window.toolbarStyle = .unified
-        let homeAccessory = makeHomeAccessory()
-        window.addTitlebarAccessoryViewController(homeAccessory)
-        updateHomeButton(connected: false)
         pinWindowButtons(in: window)
-        installTitle(name, in: window, trailingInset: homeAccessory.view.frame.width)
 
         let controller = NSWindowController(window: window)
         controller.showWindow(nil)
@@ -111,12 +121,12 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         monitor.start(control: control, window: window)
         touchIDMonitor = monitor
 
-        // Poll vphoned status for the Home button and the subtitle
+        // Poll vphoned status for the bars and the subtitle.
+        updateStatus(control: control)
         timers.append(Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self, let control = self.control else { return }
-                self.updateHomeButton(connected: control.isConnected)
-                self.updateSubtitle(control: control)
+                self.updateStatus(control: control)
                 self.captureView?.clipboardSync?.connectionChanged(connected: control.isConnected)
             }
         })
@@ -189,22 +199,84 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         }
     }
 
-    /// Turns the VM view and gives the window the turned panel's aspect
-    /// ratio, in one animation. A windowed VM reshapes around its center; a
+    /// Turns the VM view and gives the guest display the turned panel's
+    /// aspect ratio, in one animation. A windowed VM reshapes around the
+    /// display's center while the bars and padding keep their size; a
     /// full-screen one keeps the screen and letterboxes the turned panel.
     private func applyOrientation(_ orientation: VPhoneDisplayOrientation, to window: NSWindow, force: Bool = false) {
-        guard let container = displayContainer, force || container.orientation != orientation else { return }
-        window.contentAspectRatio = orientation.displayedSize(panel: panelSize)
+        guard let container = displayContainer, let content,
+              force || container.orientation != orientation
+        else { return }
         var frame: NSRect?
         if !window.styleMask.contains(.fullScreen) {
+            let insets = content.chromeInsets
             let current = window.contentRect(forFrameRect: window.frame)
-            let visible = window.screen.map { window.contentRect(forFrameRect: $0.visibleFrame) } ?? .zero
-            let target = orientation.contentRect(from: current, panel: panelSize, within: visible)
+            let visible = window.screen.map { window.contentRect(forFrameRect: $0.visibleFrame).inset(by: insets) }
+            let display = orientation.contentRect(
+                from: current.inset(by: insets),
+                panel: panelSize,
+                within: visible ?? .zero,
+            )
+            let target = display.outset(by: insets)
             if target != current {
                 frame = window.frameRect(forContentRect: target)
             }
         }
         container.turn(to: orientation, windowFrame: frame, animated: !force)
+    }
+
+    // MARK: - Sizing
+
+    /// The guest display's shortest side, so the bars keep room for their buttons.
+    private static let minimumDisplaySide: CGFloat = 260
+
+    /// Keeps the guest display at the panel's aspect ratio while the bars
+    /// and padding keep their size; `contentAspectRatio` would hold the
+    /// whole content, bars included, to the ratio. The side the drag changes
+    /// more leads.
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        guard !sender.styleMask.contains(.fullScreen), let content, let container = displayContainer else {
+            return frameSize
+        }
+        let displayed = container.orientation.displayedSize(panel: panelSize)
+        guard displayed.width > 0, displayed.height > 0 else { return frameSize }
+        let insets = content.chromeInsets
+        let proposed = sender.contentRect(forFrameRect: NSRect(origin: .zero, size: frameSize)).inset(by: insets).size
+        let current = sender.contentRect(forFrameRect: sender.frame).inset(by: insets).size
+        let ratio = displayed.width / displayed.height
+        var size = proposed
+        if abs(proposed.width - current.width) >= abs(proposed.height - current.height) {
+            size.height = size.width / ratio
+        } else {
+            size.width = size.height * ratio
+        }
+        let minimumScale = Self.minimumDisplaySide / min(displayed.width, displayed.height)
+        if size.width < displayed.width * minimumScale {
+            size = NSSize(width: displayed.width * minimumScale, height: displayed.height * minimumScale)
+        }
+        let display = NSRect(origin: .zero, size: NSSize(width: size.width.rounded(), height: size.height.rounded()))
+        return sender.frameRect(forContentRect: display.outset(by: insets)).size
+    }
+
+    /// Zoom gives the guest display the most of the screen it can take at its
+    /// aspect ratio.
+    func windowWillUseStandardFrame(_ window: NSWindow, defaultFrame newFrame: NSRect) -> NSRect {
+        guard let content, let container = displayContainer else { return newFrame }
+        let insets = content.chromeInsets
+        let displayed = container.orientation.displayedSize(panel: panelSize)
+        let available = window.contentRect(forFrameRect: newFrame).inset(by: insets)
+        guard displayed.width > 0, displayed.height > 0, available.width > 0, available.height > 0 else {
+            return newFrame
+        }
+        let scale = min(available.width / displayed.width, available.height / displayed.height)
+        let size = NSSize(width: (displayed.width * scale).rounded(), height: (displayed.height * scale).rounded())
+        let display = NSRect(
+            x: (available.midX - size.width / 2).rounded(),
+            y: available.maxY - size.height,
+            width: size.width,
+            height: size.height,
+        )
+        return window.frameRect(forContentRect: display.outset(by: insets))
     }
 
     // MARK: - Mac Shortcuts
@@ -239,26 +311,23 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         })
     }
 
-    // MARK: - Title
-
-    /// The title bar uses one gap everywhere: before the close button, between
-    /// the window buttons (AppKit's is 9 pt), after the zoom button and after
-    /// the Home button.
-    private static let titlebarSpacing: CGFloat = 12
+    // MARK: - Traffic Lights
 
     private weak var buttonWindow: NSWindow?
     private var observedButtons = Set<ObjectIdentifier>()
 
-    /// AppKit insets the close button 19 pt, puts the buttons back there
-    /// whenever it lays out the title bar, and may replace them when the
-    /// window is shown. They are placed again after each of those.
+    /// The traffic lights keep AppKit's horizontal place but are centered on
+    /// the content's title bar, which is taller than the system one. AppKit
+    /// puts them back whenever it lays out the title bar, and may replace
+    /// them when the window is shown, so they are placed again after each.
     private func pinWindowButtons(in window: NSWindow) {
         buttonWindow = window
         let names: [Notification.Name] = [
             NSWindow.didResizeNotification, NSWindow.didEndLiveResizeNotification,
-            NSWindow.didExitFullScreenNotification, NSWindow.didBecomeKeyNotification,
-            NSWindow.didResignKeyNotification, NSWindow.didBecomeMainNotification,
-            NSWindow.didChangeScreenNotification, NSWindow.didUpdateNotification,
+            NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification,
+            NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification,
+            NSWindow.didBecomeMainNotification, NSWindow.didChangeScreenNotification,
+            NSWindow.didUpdateNotification,
         ]
         for name in names {
             NotificationCenter.default.addObserver(
@@ -273,10 +342,17 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
     }
 
     private func placeWindowButtons() {
-        guard let window = buttonWindow else { return }
-        var x = Self.titlebarSpacing
+        guard let window = buttonWindow, let content else { return }
+        // In full screen the traffic lights show with the menu bar, not over
+        // the title bar, so it needs no room for them.
+        guard !window.styleMask.contains(.fullScreen) else {
+            setTrafficLightInset(0)
+            return
+        }
+        let center = content.convert(NSPoint(x: 0, y: content.bounds.maxY - content.titleBarHeight / 2), to: nil)
+        var trailingEdge: CGFloat = 0
         for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-            guard let button = window.standardWindowButton(kind) else { continue }
+            guard let button = window.standardWindowButton(kind), let superview = button.superview else { continue }
             if observedButtons.insert(ObjectIdentifier(button)).inserted {
                 button.postsFrameChangedNotifications = true
                 NotificationCenter.default.addObserver(
@@ -284,56 +360,43 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
                     object: button,
                 )
             }
-            if button.frame.minX != x {
-                button.setFrameOrigin(NSPoint(x: x, y: button.frame.minY))
+            let y = (superview.convert(center, from: nil).y - button.frame.height / 2).rounded()
+            if button.frame.minY != y {
+                button.setFrameOrigin(NSPoint(x: button.frame.minX, y: y))
             }
-            x = button.frame.maxX + Self.titlebarSpacing
+            trailingEdge = max(trailingEdge, button.convert(button.bounds, to: nil).maxX)
+        }
+        setTrafficLightInset(trailingEdge.rounded(.up))
+    }
+
+    private func setTrafficLightInset(_ inset: CGFloat) {
+        if chrome.trafficLightInset != inset {
+            chrome.trafficLightInset = inset
         }
     }
 
-    /// The window's own title would sit AppKit's wider gap after the buttons,
-    /// so the name and subtitle are drawn here. `window.title` and
-    /// `window.subtitle` are still set for the Window menu and accessibility.
-    private func installTitle(_ name: String, in window: NSWindow, trailingInset: CGFloat) {
-        guard let zoom = window.standardWindowButton(.zoomButton),
-              let titlebar = zoom.superview,
-              let frame = window.contentView?.superview
-        else { return }
-        window.titleVisibility = .hidden
+    // MARK: - Status
 
-        let title = NSTextField(labelWithString: name)
-        title.font = .systemFont(ofSize: NSFont.systemFontSize + 2, weight: .bold)
-        let subtitle = NSTextField(labelWithString: "")
-        subtitle.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        subtitle.textColor = .secondaryLabelColor
-        subtitle.isHidden = true
-        for label in [title, subtitle] {
-            label.lineBreakMode = .byTruncatingTail
-            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+    /// The title bar's status line from vphoned's health report, which picks
+    /// the IPv4 address first and falls back to IPv6. `window.subtitle` keeps
+    /// the old `iOS <version> - <address>` line for the Window menu and
+    /// accessibility.
+    private func updateStatus(control: VPhoneGuestControl) {
+        let connected = control.isConnected
+        if chrome.isAgentConnected != connected {
+            chrome.isAgentConnected = connected
         }
-        subtitleLabel = subtitle
+        if chrome.iosVersion != control.guestIOSVersion {
+            chrome.iosVersion = control.guestIOSVersion
+        }
+        if chrome.address != control.guestIPAddress {
+            chrome.address = control.guestIPAddress
+        }
+        updateButtons(connected: connected)
 
-        let stack = NSStackView(views: [title, subtitle])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 0
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        titlebar.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: zoom.trailingAnchor, constant: Self.titlebarSpacing),
-            stack.trailingAnchor.constraint(
-                lessThanOrEqualTo: frame.trailingAnchor, constant: -trailingInset - Self.titlebarSpacing,
-            ),
-            stack.centerYAnchor.constraint(equalTo: zoom.centerYAnchor),
-        ])
-    }
-
-    /// `iOS <version> - <address>` from vphoned's health report, which picks
-    /// the IPv4 address first and falls back to IPv6; hidden until it connects.
-    private func updateSubtitle(control: VPhoneGuestControl) {
         guard let window = windowController?.window else { return }
         var parts: [String] = []
-        if control.isConnected {
+        if connected {
             if let version = control.guestIOSVersion, !version.isEmpty {
                 parts.append("iOS \(version)")
             }
@@ -341,127 +404,93 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
                 parts.append(address)
             }
         }
-        if let frameRate {
+        if let frameRate = chrome.frameRate {
             parts.append(VPhoneLocalization.format("%ld fps", frameRate))
         }
         let subtitle = parts.joined(separator: " - ")
         if window.subtitle != subtitle {
             window.subtitle = subtitle
-            subtitleLabel?.stringValue = subtitle
-            subtitleLabel?.isHidden = subtitle.isEmpty
         }
+    }
+
+    /// Home presses through vphoned, so it waits for the connection, as does a
+    /// screenshot. The other buttons follow their menu items.
+    private func updateButtons(connected: Bool) {
+        let states: [(ReferenceWritableKeyPath<VPhoneDisplayChromeModel, Bool>, Bool)] = [
+            (\.canPressHome, connected),
+            (\.canOpenGuestTools, VPhoneMenuCommand.guestTools.isEnabled),
+            (\.canRotate, VPhoneMenuCommand.rotateLeft.isEnabled),
+            (\.canTakeScreenshot, connected && VPhoneMenuCommand.copyScreenshot.isEnabled),
+        ]
+        for (keyPath, enabled) in states where chrome[keyPath: keyPath] != enabled {
+            chrome[keyPath: keyPath] = enabled
+        }
+    }
+
+    // MARK: - Recording
+
+    /// The Capture menu says when a recording starts and stops; the control
+    /// bar shows its timer meanwhile.
+    private func observeRecording() {
+        keyStateObservers.append(NotificationCenter.default.addObserver(
+            forName: .vphoneScreenRecordingDidChange, object: nil, queue: .main,
+        ) { [weak self] notification in
+            let start = notification.userInfo?[VPhoneScreenRecordingStatus.startedAtKey] as? Date
+            MainActor.assumeIsolated { self?.chrome.recordingStartedAt = start }
+        })
     }
 
     // MARK: - Frame Rate
 
-    /// Shows the guest's frame rate in the subtitle, sampled once a second.
+    /// Shows the guest's frame rate on the title bar's status line, sampled once a second.
     func setFrameRateDisplay(_ enabled: Bool) {
         frameRateTimer?.invalidate()
         frameRateTimer = nil
-        frameRate = nil
+        chrome.frameRate = nil
         if enabled, VPhoneFrameRateMeter.isAvailable {
             _ = VPhoneFrameRateMeter.takeFrameCount()
             frameRateSampledAt = CACurrentMediaTime()
-            frameRate = 0
+            chrome.frameRate = 0
             frameRateTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
                 Task { @MainActor in self?.sampleFrameRate() }
             }
         }
         if let control {
-            updateSubtitle(control: control)
+            updateStatus(control: control)
         }
     }
 
     private func sampleFrameRate() {
-        guard frameRate != nil, let control else { return }
+        guard chrome.frameRate != nil, let control else { return }
         let now = CACurrentMediaTime()
         let elapsed = now - frameRateSampledAt
         guard elapsed > 0 else { return }
-        frameRate = Int((Double(VPhoneFrameRateMeter.takeFrameCount()) / elapsed).rounded())
+        chrome.frameRate = Int((Double(VPhoneFrameRateMeter.takeFrameCount()) / elapsed).rounded())
         frameRateSampledAt = now
-        updateSubtitle(control: control)
-    }
-
-    // MARK: - Home Button
-
-    private static let homeImage = NSImage(
-        systemSymbolName: "circle.circle",
-        accessibilityDescription: VPhoneLocalization.text("Home"),
-    ) ?? NSImage()
-
-    /// `circle.circle` with a slash drawn across it; SF Symbols has no
-    /// `circle.circle.slash`. The slash cuts a gap in the circles like the
-    /// system's own slashed symbols.
-    private static let homeSlashImage: NSImage = {
-        let base = homeImage
-        let image = NSImage(size: base.size, flipped: false) { rect in
-            base.draw(in: rect)
-            let slash = NSBezierPath()
-            slash.move(to: NSPoint(x: rect.minX + 1, y: rect.maxY - 1))
-            slash.line(to: NSPoint(x: rect.maxX - 1, y: rect.minY + 1))
-            slash.lineCapStyle = .round
-            NSGraphicsContext.current?.compositingOperation = .clear
-            slash.lineWidth = 4
-            slash.stroke()
-            NSGraphicsContext.current?.compositingOperation = .sourceOver
-            NSColor.black.setStroke()
-            slash.lineWidth = 1.5
-            slash.stroke()
-            return true
-        }
-        image.isTemplate = true
-        image.accessibilityDescription = base.accessibilityDescription
-        return image
-    }()
-
-    private func makeHomeAccessory() -> NSTitlebarAccessoryViewController {
-        let button = NSButton(image: Self.homeImage, target: self, action: #selector(homePressed))
-        if #available(macOS 26.0, *) {
-            button.bezelStyle = .glass
-            button.borderShape = .circle
-        } else {
-            button.bezelStyle = .toolbar
-        }
-        button.controlSize = .large
-        button.toolTip = VPhoneLocalization.text("Home Button")
-        button.translatesAutoresizingMaskIntoConstraints = false
-        homeButton = button
-
-        // A titlebar accessory takes its width from the view's frame, so the
-        // container is sized explicitly; otherwise the button collapses to 0.
-        // The accessory clips to that frame, and the glass bezel's shadow and
-        // press highlight reach past the button's frame, so the leading edge
-        // keeps room for them.
-        let leadingInset: CGFloat = 6
-        let trailingInset = Self.titlebarSpacing
-        let container = NSView()
-        container.addSubview(button)
-        NSLayoutConstraint.activate([
-            button.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: leadingInset),
-            button.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -trailingInset),
-            button.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            button.widthAnchor.constraint(equalTo: button.heightAnchor),
-        ])
-        let side = button.fittingSize.height
-        container.frame.size = NSSize(width: leadingInset + side + trailingInset, height: side)
-
-        let accessory = NSTitlebarAccessoryViewController()
-        accessory.view = container
-        accessory.layoutAttribute = .trailing
-        return accessory
-    }
-
-    /// The button presses Home through vphoned, so it is disabled and slashed
-    /// while vphoned is not connected.
-    private func updateHomeButton(connected: Bool) {
-        guard let homeButton else { return }
-        homeButton.isEnabled = connected
-        homeButton.image = connected ? Self.homeImage : Self.homeSlashImage
+        updateStatus(control: control)
     }
 
     // MARK: - Actions
 
-    @objc private func homePressed() {
+    private func homePressed() {
         control?.sendHIDPress(page: 0x0C, usage: 0x40)
+        returnKeyboardToGuest()
+    }
+
+    /// Presses a bar button's menu item, then gives the keyboard back to the
+    /// guest.
+    private func press(_ command: VPhoneMenuCommand) {
+        command.perform()
+        if let control {
+            updateButtons(connected: control.isConnected)
+        }
+        returnKeyboardToGuest()
+    }
+
+    private func returnKeyboardToGuest() {
+        guard let window = windowController?.window, let view = virtualMachineView,
+              window.firstResponder !== view
+        else { return }
+        window.makeFirstResponder(view)
     }
 }

@@ -49,18 +49,15 @@ private let locationReplayPoints: [VPhoneLocationProvider.ReplayPoint] = [
 // MARK: - Location Menu
 
 extension VPhoneMenuController {
-    func buildLocationSubmenu() -> NSMenuItem {
-        let item = NSMenuItem(title: "Location", action: nil, keyEquivalent: "")
-        item.image = menuSymbol("location")
-        let menu = NSMenu(title: "Location")
+    /// The Simulate menu's Location section.
+    func addLocationItems(to menu: NSMenu) {
+        menu.addItem(NSMenuItem.sectionHeader(title: "Location"))
 
         let toggle = makeItem("Sync Host Location", action: #selector(toggleLocationSync))
         toggle.state = .off
         toggle.isEnabled = false
         locationMenuItem = toggle
         menu.addItem(toggle)
-
-        menu.addItem(NSMenuItem.separator())
 
         let presets = NSMenuItem(title: "Preset Location", action: nil, keyEquivalent: "")
         presets.image = menuSymbol("mappin.and.ellipse")
@@ -75,8 +72,6 @@ extension VPhoneMenuController {
         locationPresetMenuItem = presets
         menu.addItem(presets)
 
-        menu.addItem(NSMenuItem.separator())
-
         let replayStart = makeItem("Start Route Replay", action: #selector(startLocationReplay(_:)), symbol: "play")
         replayStart.isEnabled = false
         locationReplayStartItem = replayStart
@@ -86,9 +81,6 @@ extension VPhoneMenuController {
         replayStop.isEnabled = false
         locationReplayStopItem = replayStop
         menu.addItem(replayStop)
-
-        item.submenu = menu
-        return item
     }
 
     /// Enable or disable the location toggle based on guest capability.

@@ -1,19 +1,17 @@
 import AppKit
-import LocalAuthentication
 import VPhoneCoreKit
 
 // MARK: - Device Menu
 
-/// The phone's buttons and input, the UDID it gives provisioning profile
-/// checks, and restarting it. Sensor overrides live
-/// in the Features menu.
+/// The phone's buttons, its orientation, restarting it, and setting it up:
+/// Setup Assistant, unlocking at startup, and the UDID it gives provisioning
+/// profile checks. How the Mac's keyboard and trackpad reach it is the Input
+/// menu; sensor overrides are the Simulate menu.
 extension VPhoneMenuController {
     func buildDeviceMenu() -> NSMenuItem {
         let item = NSMenuItem(title: "Device", action: nil, keyEquivalent: "")
         let menu = NSMenu(title: "Device")
         menu.autoenablesItems = false
-        menu.addItem(makePanelItem(.controls, "Controls", keyEquivalent: "k", symbol: "slider.horizontal.3"))
-        menu.addItem(NSMenuItem.separator())
         menu.addItem(makeItem(
             "Home Screen",
             action: #selector(sendHome),
@@ -42,6 +40,7 @@ extension VPhoneMenuController {
             keyEquivalent: String(UnicodeScalar(NSLeftArrowFunctionKey)!),
             symbol: "rotate.left",
         )
+        .command(.rotateLeft)
         let rotateRight = makeItem(
             "Rotate Right",
             action: #selector(rotateRight),
@@ -61,48 +60,16 @@ extension VPhoneMenuController {
             self?.updateOrientationChecks(orientation)
         }
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(makeItem("Open Guest Spotlight", action: #selector(sendSpotlight), symbol: "magnifyingglass"))
-        menu.addItem(makeItem("Switch Guest Input Source", action: #selector(sendGlobe), symbol: "globe"))
-        let keyboardItem = makeItem(
-            "Use Hardware Keyboard",
-            action: #selector(toggleHardwareKeyboard),
-            keyEquivalent: "k",
-            modifiers: [.command, .shift],
-            symbol: "keyboard",
-        )
-        keyboardItem.isEnabled = false
-        keyboardItem.toolTip = VPhoneLocalization.text("Changing the hardware keyboard requires restarting the virtual machine.")
-        hardwareKeyboardItem = keyboardItem
-        menu.addItem(keyboardItem)
-        // Trackpad scroll and pinch arrive as ordinary NSEvents; the view turns
-        // them into guest touches. Off hands both back to AppKit untouched.
-        let trackpadItem = makeItem(
-            "Trackpad Scroll & Pinch to Touch",
-            action: #selector(toggleTrackpadGestures),
-            symbol: "hand.draw",
-        )
-        trackpadItem.state = VPhoneTrackpadGestures.isEnabled ? .on : .off
-        trackpadGesturesItem = trackpadItem
-        menu.addItem(trackpadItem)
-        // Off unless asked for: the window subtitle then carries the frames the
-        // guest presented in the last second.
-        let frameRateItem = makeItem("Show Frame Rate", action: #selector(toggleFrameRateDisplay))
-        frameRateItem.state = VPhoneFrameRateDisplay.isEnabled ? .on : .off
-        frameRateItem.isEnabled = VPhoneFrameRateMeter.isSupported
-        menu.addItem(frameRateItem)
-        let tidItem = makeItem("Touch ID Home Forwarding", action: #selector(toggleTouchIDForwarding))
-        if hasTouchID {
-            let tidEnabled = !UserDefaults.standard.bool(forKey: "touchIDForwardingDisabled")
-            tidItem.state = tidEnabled ? .on : .off
-        } else {
-            tidItem.isEnabled = false
-            tidItem.state = .off
-        }
-        touchIDMenuItem = tidItem
-        menu.addItem(tidItem)
+        let restart = makeItem("Restart Guest…", action: #selector(restartGuest), symbol: "arrow.clockwise")
+        restart.isEnabled = false
+        restartGuestItem = restart
+        menu.addItem(restart)
+        let shutDown = makeItem("Shut Down Guest…", action: #selector(shutDownGuest), symbol: "power")
+        shutDown.isEnabled = false
+        shutDownGuestItem = shutDown
+        menu.addItem(shutDown)
         menu.addItem(NSMenuItem.separator())
-        addUDIDItems(to: menu)
-        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem.sectionHeader(title: "Setup"))
         addSetupAssistantItem(to: menu)
         // Saved to this machine and read when vphoned next starts in the guest.
         let unlockItem = makeItem("Unlock at Startup", action: #selector(toggleUnlockAtStartup), symbol: "lock.open")
@@ -112,14 +79,7 @@ extension VPhoneMenuController {
         )
         unlockAtStartupItem = unlockItem
         menu.addItem(unlockItem)
-        let restart = makeItem("Restart Guest…", action: #selector(restartGuest), symbol: "arrow.clockwise")
-        restart.isEnabled = false
-        restartGuestItem = restart
-        menu.addItem(restart)
-        let shutDown = makeItem("Shut Down Guest…", action: #selector(shutDownGuest), symbol: "power")
-        shutDown.isEnabled = false
-        shutDownGuestItem = shutDown
-        menu.addItem(shutDown)
+        addUDIDItems(to: menu)
         item.submenu = menu
         return item
     }
@@ -145,53 +105,6 @@ extension VPhoneMenuController {
 
     @objc func sendVolumeDown() {
         keySender.sendVolumeDown()
-    }
-
-    @objc func sendSpotlight() {
-        keySender.sendSpotlight()
-    }
-
-    @objc func sendGlobe() {
-        keySender.sendGlobe()
-    }
-
-    @objc func toggleHardwareKeyboard() {
-        guard let vm, let change = onHardwareKeyboardChange,
-              hardwareKeyboardItem?.isEnabled == true else { return }
-        guard screenRecorder?.isRecording != true else {
-            VPhoneAlert.present(
-                title: "Recording in Progress",
-                message: "Stop the screen recording before changing the hardware keyboard.",
-                style: .warning,
-            )
-            return
-        }
-        let enabled = !vm.usesHardwareKeyboard
-        hardwareKeyboardItem?.isEnabled = false
-        VPhoneAlert.present(
-            title: enabled ? "Enable Hardware Keyboard?" : "Disable Hardware Keyboard?",
-            message: "Changing the hardware keyboard requires restarting the virtual machine. Save your work in the guest first. The setting is saved for this machine. With the hardware keyboard disabled, tap a text field to use the guest's software keyboard.",
-            style: .warning,
-            buttons: ["Restart and Apply", "Cancel"],
-        ) { [weak self] response in
-            guard let self else { return }
-            guard response == .alertFirstButtonReturn else {
-                hardwareKeyboardItem?.isEnabled = true
-                return
-            }
-            Task { [weak self] in
-                do {
-                    try await change(enabled)
-                } catch {
-                    self?.hardwareKeyboardItem?.isEnabled = true
-                    VPhoneAlert.present(
-                        title: "Unable to Change Hardware Keyboard",
-                        message: error.localizedDescription,
-                        style: .warning,
-                    )
-                }
-            }
-        }
     }
 
     // MARK: - Rotate
@@ -265,15 +178,6 @@ extension VPhoneMenuController {
         }
     }
 
-    /// Replays trackpad scroll and pinch inside the guest instead of letting
-    /// AppKit scroll the window. Persisted, so the choice survives relaunches.
-    @objc func toggleTrackpadGestures() {
-        let enabled = !VPhoneTrackpadGestures.isEnabled
-        VPhoneTrackpadGestures.isEnabled = enabled
-        trackpadGesturesItem?.state = enabled ? .on : .off
-        captureView?.trackpadGesturesEnabled = enabled
-    }
-
     /// Saved to this machine's config.plist; it takes effect from the next
     /// guest start and does not unlock the guest now.
     @objc func toggleUnlockAtStartup() {
@@ -289,14 +193,6 @@ extension VPhoneMenuController {
                 style: .warning,
             )
         }
-    }
-
-    /// Shows the guest's frame rate in the window subtitle. Persisted.
-    @objc func toggleFrameRateDisplay(_ sender: NSMenuItem) {
-        let enabled = !VPhoneFrameRateDisplay.isEnabled
-        VPhoneFrameRateDisplay.isEnabled = enabled
-        sender.state = enabled ? .on : .off
-        onFrameRateDisplayChange?(enabled)
     }
 
     // MARK: - Restart
@@ -361,20 +257,5 @@ extension VPhoneMenuController {
                 }
             }
         }
-    }
-
-    @objc func toggleTouchIDForwarding() {
-        guard let monitor = touchIDMonitor, let item = touchIDMenuItem else { return }
-        monitor.isEnabled.toggle()
-        item.state = monitor.isEnabled ? .on : .off
-        UserDefaults.standard.set(!monitor.isEnabled, forKey: "touchIDForwardingDisabled")
-    }
-}
-
-private extension VPhoneMenuController {
-    var hasTouchID: Bool {
-        let ctx = LAContext()
-        ctx.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
-        return ctx.biometryType == .touchID
     }
 }

@@ -80,12 +80,18 @@ class VPhoneMenuController {
     var cameraStartStopItem: NSMenuItem?
     weak var captureView: VPhoneVirtualMachineView?
     var batterySyncEnabled = false
-    var batterySyncStatusItem: NSMenuItem?
+    var batteryHeaderItem: NSMenuItem?
+    var batteryLevelItem: NSMenuItem?
     var batteryLevelMenuItems: [NSMenuItem] = []
     var batteryConnectivityMenuItems: [NSMenuItem] = []
     var powerSourceRunLoopSource: CFRunLoopSource?
     var powerSourceRetainedPtr: UnsafeMutableRawPointer?
     var lowPowerObserver: (any NSObjectProtocol)?
+    /// Whether the agent serves the guest clipboard. The Edit menu enables its
+    /// items itself, so its Guest Clipboard items read this when validated.
+    var clipboardAvailable = false
+    /// Targets of the items in menus that enable their items themselves.
+    var menuItemValidators: [VPhoneMenuItemValidator] = []
 
     init(keySender: VPhoneVirtualMachineKeySender, control: VPhoneGuestControl) {
         self.keySender = keySender
@@ -97,10 +103,26 @@ class VPhoneMenuController {
 
     // MARK: - Menu Bar Setup
 
+    /// The menus, grouped by what their items act on: the phone, how the Mac
+    /// drives it, what the Mac simulates for it, its apps and data, then
+    /// inspection, capture and windows.
     private func setupMenuBar() {
         let mainMenu = NSMenu()
+        mainMenu.addItem(buildAppMenu())
+        mainMenu.addItem(buildEditMenu())
+        mainMenu.addItem(buildDeviceMenu())
+        mainMenu.addItem(buildInputMenu())
+        mainMenu.addItem(buildSimulateMenu())
+        mainMenu.addItem(buildAppsMenu())
+        mainMenu.addItem(buildDataMenu())
+        mainMenu.addItem(buildDiagnosticsMenu())
+        mainMenu.addItem(buildRecordMenu())
+        mainMenu.addItem(buildWindowMenu())
+        VPhoneLocalization.menu(mainMenu)
+        NSApp.mainMenu = mainMenu
+    }
 
-        // App menu
+    private func buildAppMenu() -> NSMenuItem {
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu(title: "VPhone")
         let buildItem = NSMenuItem(
@@ -117,14 +139,16 @@ class VPhoneMenuController {
             keyEquivalent: "q",
         )
         appMenuItem.submenu = appMenu
-        mainMenu.addItem(appMenuItem)
+        return appMenuItem
+    }
 
+    /// The Mac's own editing commands, then the guest's clipboard.
+    private func buildEditMenu() -> NSMenuItem {
         let editMenuItem = NSMenuItem()
         let editMenu = NSMenu(title: "Edit")
         editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(NSMenuItem.separator())
         editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editMenu.addItem(NSMenuItem.separator())
         let findItem = editMenu.addItem(
@@ -133,19 +157,14 @@ class VPhoneMenuController {
             keyEquivalent: "f",
         )
         findItem.target = self
+        editMenu.addItem(NSMenuItem.separator())
+        addGuestClipboardItems(to: editMenu)
         editMenuItem.submenu = editMenu
-        mainMenu.addItem(editMenuItem)
+        return editMenuItem
+    }
 
-        // The phone, its simulated sensors, the guest's data and apps, then
-        // inspection and capture.
-        mainMenu.addItem(buildDeviceMenu())
-        mainMenu.addItem(buildFeaturesMenu())
-        mainMenu.addItem(buildDataMenu())
-        mainMenu.addItem(buildAppsMenu())
-        mainMenu.addItem(buildDiagnosticsMenu())
-        mainMenu.addItem(buildRecordMenu())
-
-        // Window menu — provides Cmd+W (close) and Cmd+M (minimize) for any key window
+    /// Provides ⌘W and ⌘M for any key window, and opens Guest Tools.
+    private func buildWindowMenu() -> NSMenuItem {
         let windowMenuItem = NSMenuItem()
         let windowMenu = NSMenu(title: "Window")
         windowMenu.addItem(
@@ -158,6 +177,13 @@ class VPhoneMenuController {
             action: #selector(NSWindow.performMiniaturize(_:)),
             keyEquivalent: "m",
         )
+        windowMenu.addItem(
+            withTitle: "Zoom",
+            action: #selector(NSWindow.performZoom(_:)),
+            keyEquivalent: "",
+        )
+        windowMenu.addItem(NSMenuItem.separator())
+        windowMenu.addItem(makeGuestToolsItem())
         windowMenu.addItem(NSMenuItem.separator())
         windowMenu.addItem(
             withTitle: "Bring All to Front",
@@ -165,11 +191,8 @@ class VPhoneMenuController {
             keyEquivalent: "",
         )
         windowMenuItem.submenu = windowMenu
-        mainMenu.addItem(windowMenuItem)
         NSApp.windowsMenu = windowMenu
-
-        VPhoneLocalization.menu(mainMenu)
-        NSApp.mainMenu = mainMenu
+        return windowMenuItem
     }
 
     /// "2.3.2 (26, 735927f)": the bundle version, its build number and the
@@ -203,6 +226,30 @@ class VPhoneMenuController {
         return item
     }
 
+    /// An item for a menu that enables its items itself, such as Edit or
+    /// Window, whose responder-chain commands need it. AppKit asks the item's
+    /// target whether it is enabled; `isEnabled` answers.
+    func makeValidatedItem(
+        _ title: String,
+        keyEquivalent: String = "",
+        modifiers: NSEvent.ModifierFlags = .command,
+        symbol: String? = nil,
+        isEnabled: @escaping @MainActor () -> Bool,
+        action: @escaping @MainActor () -> Void,
+    ) -> NSMenuItem {
+        let validator = VPhoneMenuItemValidator(isEnabled: isEnabled, action: action)
+        menuItemValidators.append(validator)
+        let item = NSMenuItem(
+            title: title,
+            action: #selector(VPhoneMenuItemValidator.perform(_:)),
+            keyEquivalent: keyEquivalent,
+        )
+        item.keyEquivalentModifierMask = modifiers
+        item.target = validator
+        item.image = symbol.flatMap(menuSymbol)
+        return item
+    }
+
     /// An SF Symbol for a menu item. Checkable items, value lists and status
     /// rows have none, so the icons mark actions, windows and submenus.
     func menuSymbol(_ name: String) -> NSImage? {
@@ -211,5 +258,29 @@ class VPhoneMenuController {
 
     @objc private func findKeychain() {
         onFindPressed?()
+    }
+}
+
+// MARK: - Validated Items
+
+/// The target of an item in a menu that enables its items itself. It runs the
+/// controller's action and answers AppKit's validation for it. The menu item
+/// holds its target weakly, so the controller keeps these.
+@MainActor
+final class VPhoneMenuItemValidator: NSObject, NSMenuItemValidation {
+    private let isEnabled: @MainActor () -> Bool
+    private let action: @MainActor () -> Void
+
+    init(isEnabled: @escaping @MainActor () -> Bool, action: @escaping @MainActor () -> Void) {
+        self.isEnabled = isEnabled
+        self.action = action
+    }
+
+    @objc func perform(_: Any?) {
+        action()
+    }
+
+    func validateMenuItem(_: NSMenuItem) -> Bool {
+        isEnabled()
     }
 }
