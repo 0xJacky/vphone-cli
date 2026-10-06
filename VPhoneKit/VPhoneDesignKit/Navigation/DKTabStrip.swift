@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Tab strip
 
@@ -13,11 +14,18 @@ import SwiftUI
 /// a tab is removed, for cleanup such as ending its session. Hover is tracked
 /// once for the whole strip (see `DKRowTracker`) and holds still while the strip
 /// scrolls.
+///
+/// With `drag`, tabs can be dragged out of the strip and dropped on another
+/// tab (see `DKPaneGroupArea`, which uses it to move tabs between split
+/// panes). A strip that is not `isFocused` draws its selected tab without the
+/// accent bar, so that among several strips only the focused one has it.
 public struct DKTabStrip<ID: Hashable & Sendable>: View {
     @Binding var tabs: [DKTab<ID>]
     @Binding var selection: ID?
     let label: String
     let newTabLabel: String
+    let isFocused: Bool
+    let drag: DKTabStripDrag<ID>?
     let onNewTab: (() -> Void)?
     let onClose: ((ID) -> Void)?
 
@@ -27,6 +35,8 @@ public struct DKTabStrip<ID: Hashable & Sendable>: View {
     /// - Parameters:
     ///   - label: What VoiceOver calls the strip ("Terminal tabs").
     ///   - newTabLabel: The "+" button's tooltip and accessibility label.
+    ///   - isFocused: Whether the selected tab carries the accent bar.
+    ///   - drag: Makes the tabs draggable and drop targets for each other.
     ///   - onNewTab: Shows the "+" button and runs when it is clicked.
     ///   - onClose: Runs after the strip removes a closed tab.
     public init(
@@ -34,6 +44,8 @@ public struct DKTabStrip<ID: Hashable & Sendable>: View {
         selection: Binding<ID?>,
         label: String = "Tabs",
         newTabLabel: String = "New Tab",
+        isFocused: Bool = true,
+        drag: DKTabStripDrag<ID>? = nil,
         onNewTab: (() -> Void)? = nil,
         onClose: ((ID) -> Void)? = nil,
     ) {
@@ -41,6 +53,8 @@ public struct DKTabStrip<ID: Hashable & Sendable>: View {
         _selection = selection
         self.label = label
         self.newTabLabel = newTabLabel
+        self.isFocused = isFocused
+        self.drag = drag
         self.onNewTab = onNewTab
         self.onClose = onClose
     }
@@ -54,6 +68,8 @@ public struct DKTabStrip<ID: Hashable & Sendable>: View {
                             DKTabView(
                                 tab: tab,
                                 isSelected: tab.id == selection,
+                                isFocused: isFocused,
+                                drag: drag,
                                 tabTracker: tabTracker,
                                 closeTracker: closeTracker,
                                 select: { selection = tab.id },
@@ -113,6 +129,8 @@ public struct DKTabStrip<ID: Hashable & Sendable>: View {
 struct DKTabView<ID: Hashable & Sendable>: View {
     let tab: DKTab<ID>
     let isSelected: Bool
+    var isFocused = true
+    var drag: DKTabStripDrag<ID>?
     var tabTracker: DKRowTracker?
     var closeTracker: DKRowTracker?
     let select: () -> Void
@@ -130,7 +148,7 @@ struct DKTabView<ID: Hashable & Sendable>: View {
                     }
                     if let glyph = tab.glyph {
                         DKIcon(glyph, size: 13)
-                            .foregroundStyle(isSelected ? DK.Palette.accent : DK.Palette.muted)
+                            .foregroundStyle(isSelected && isFocused ? DK.Palette.accent : DK.Palette.muted)
                     }
                     Text(tab.title)
                         .font(.system(size: 12.5))
@@ -161,11 +179,11 @@ struct DKTabView<ID: Hashable & Sendable>: View {
                     .padding(.trailing, 7)
             }
         }
-        .foregroundStyle(isSelected ? DK.Palette.ink : DK.Palette.muted)
+        .foregroundStyle(isSelected ? (isFocused ? DK.Palette.ink : DK.Palette.inkSecondary) : DK.Palette.muted)
         .frame(maxHeight: .infinity)
         .background(background)
         .overlay(alignment: .top) {
-            if isSelected {
+            if isSelected, isFocused {
                 Rectangle().fill(DK.Palette.accent).frame(height: 2)
             }
         }
@@ -173,6 +191,7 @@ struct DKTabView<ID: Hashable & Sendable>: View {
             Rectangle().fill(DK.Palette.divider).frame(width: DK.Metric.hairline)
         }
         .dkTrackedRow(tabTracker, id: tab.id) { isHovered = $0 }
+        .modifier(DKTabDragModifier(id: tab.id, drag: drag))
         .help(tab.help ?? tab.title)
         .contextMenu {
             if tab.isTransient {
@@ -189,6 +208,67 @@ struct DKTabView<ID: Hashable & Sendable>: View {
             return DK.Palette.window
         }
         return isHovered ? DK.Palette.selectionNeutral : .clear
+    }
+}
+
+// MARK: - Dragging
+
+/// What dragging does on a `DKTabStrip`: `begin` makes the dragged tab's
+/// provider, and a drop on a tab of type `type` calls `dropOnTab` with that
+/// tab's id. `enterTab` runs while a drag is over a tab.
+public struct DKTabStripDrag<ID: Hashable & Sendable> {
+    public var type: UTType
+    public var begin: (ID) -> NSItemProvider
+    public var enterTab: (ID) -> Void
+    public var dropOnTab: (ID, DropInfo) -> Bool
+
+    public init(
+        type: UTType,
+        begin: @escaping (ID) -> NSItemProvider,
+        enterTab: @escaping (ID) -> Void = { _ in },
+        dropOnTab: @escaping (ID, DropInfo) -> Bool,
+    ) {
+        self.type = type
+        self.begin = begin
+        self.enterTab = enterTab
+        self.dropOnTab = dropOnTab
+    }
+}
+
+private struct DKTabDragModifier<ID: Hashable & Sendable>: ViewModifier {
+    let id: ID
+    let drag: DKTabStripDrag<ID>?
+
+    func body(content: Content) -> some View {
+        if let drag {
+            content
+                .onDrag { drag.begin(id) }
+                .onDrop(of: [drag.type], delegate: DKTabDropDelegate(id: id, drag: drag))
+        } else {
+            content
+        }
+    }
+}
+
+private struct DKTabDropDelegate<ID: Hashable & Sendable>: DropDelegate {
+    let id: ID
+    let drag: DKTabStripDrag<ID>
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [drag.type])
+    }
+
+    func dropEntered(info _: DropInfo) {
+        drag.enterTab(id)
+    }
+
+    func dropUpdated(info _: DropInfo) -> DropProposal? {
+        drag.enterTab(id)
+        return DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        drag.dropOnTab(id, info)
     }
 }
 
