@@ -10,6 +10,13 @@ import SwiftUI
 /// field. When the page is narrow the tools wrap under the title, and onto
 /// further lines among themselves.
 ///
+/// In a window that draws its own chrome, the header runs to the window's top
+/// edge and serves as its title bar: set `dkPageHeaderIsTitleBar` on the
+/// window's content. Dragging the header's background then moves the window,
+/// and the header keeps its subtitle line even while there is no subtitle,
+/// so the title stays in line with the window buttons and the header does not
+/// change height when the subtitle arrives.
+///
 /// ```swift
 /// DKPageHeader("Machines", subtitle: "4 machines · 1 running") {
 ///     DKButton("New Machine", glyph: .plus, variant: .primary) { create() }
@@ -25,6 +32,8 @@ public struct DKPageHeader<Tools: View>: View {
     let subtitle: String?
     let tools: Tools
 
+    @Environment(\.dkPageHeaderIsTitleBar) private var isTitleBar
+
     /// - Parameters:
     ///   - title: The page's name.
     ///   - subtitle: A muted summary line under the title: counts, the current state.
@@ -33,6 +42,19 @@ public struct DKPageHeader<Tools: View>: View {
         self.title = title
         self.subtitle = subtitle
         self.tools = tools()
+    }
+
+    /// The design's line heights (`.dk-header__title`, `.dk-header__subtitle`).
+    /// With the 12pt top padding they center the title 22pt below the
+    /// header's top edge, in line with the window buttons when the header
+    /// runs to the window's top.
+    static var titleLineHeight: CGFloat { 20 }
+    static var subtitleLineHeight: CGFloat { 16 }
+
+    /// Whether the header shows a line under its title: the subtitle, or,
+    /// in a title bar, the room for it.
+    static func showsSubtitleLine(_ subtitle: String?, isTitleBar: Bool) -> Bool {
+        isTitleBar || !(subtitle ?? "").isEmpty
     }
 
     public var body: some View {
@@ -48,6 +70,16 @@ public struct DKPageHeader<Tools: View>: View {
         .padding(.vertical, DK.Space.s3)
         .padding(.horizontal, DK.Space.s4)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            if isTitleBar {
+                // The header is the window's title bar, and drags the window
+                // even while it is behind others.
+                Color.clear
+                    .contentShape(Rectangle())
+                    .gesture(WindowDragGesture())
+                    .allowsWindowActivationEvents(true)
+            }
+        }
         .overlay(alignment: .bottom) {
             DKSectionsDivider(color: DK.Palette.divider)
         }
@@ -59,17 +91,28 @@ public struct DKPageHeader<Tools: View>: View {
                 .font(DK.Typeface.pageTitle)
                 .foregroundStyle(DK.Palette.ink)
                 .lineLimit(1)
+                .frame(minHeight: Self.titleLineHeight)
                 .accessibilityAddTraits(.isHeader)
-            if let subtitle, !subtitle.isEmpty {
-                Text(subtitle)
+            if Self.showsSubtitleLine(subtitle, isTitleBar: isTitleBar) {
+                Text(subtitle ?? "")
                     .font(DK.Typeface.caption)
                     .foregroundStyle(DK.Palette.muted)
                     .lineLimit(1)
+                    .frame(minHeight: Self.subtitleLineHeight)
+                    .accessibilityHidden((subtitle ?? "").isEmpty)
             }
         }
         .padding(.leading, DK.Space.s1)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
+}
+
+public extension EnvironmentValues {
+    /// Whether page headers are their window's title bar: the window draws
+    /// its own chrome and each page's header runs to its top edge, beside
+    /// the window buttons. Such a header drags the window and keeps its
+    /// title in line with the buttons. Guest Tools sets it.
+    @Entry var dkPageHeaderIsTitleBar = false
 }
 
 public extension DKPageHeader where Tools == EmptyView {
