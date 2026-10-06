@@ -8,7 +8,8 @@ import VPhoneDesignKit
 /// The display window's content view: the title bar, the guest display on
 /// the display ground with the design's padding around it, and the control
 /// bar. The window uses a full-size content view, so the title bar sits under
-/// the transparent system title bar and its traffic lights.
+/// the transparent system title bar, whose buttons are hidden; the title bar
+/// draws its own.
 ///
 /// The bars have fixed heights, measured once. Everything else goes to the
 /// display, which `VPhoneDisplayContainerView` fits at the panel's aspect
@@ -33,6 +34,10 @@ final class VPhoneDisplayWindowContentView: NSView {
         controlBarHeight = ceil(controlBar.fittingSize.height)
         titleBar.sizingOptions = []
         controlBar.sizingOptions = []
+        // The bars sit at the window's edges by design, so the title bar
+        // safe area must not push the title bar's content down.
+        titleBar.safeAreaRegions = []
+        controlBar.safeAreaRegions = []
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor

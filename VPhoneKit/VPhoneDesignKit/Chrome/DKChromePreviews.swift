@@ -48,7 +48,7 @@ private struct DKChromePreviewVMWindow: View {
                 os: "iOS 26.6.2",
                 address: "192.168.64.12",
                 actions: [DKButtonSpec("Guest Tools", glyph: .sidebar, variant: .ghost, size: .icon)],
-                drawsTrafficLights: true,
+                showsWindowControls: true,
             )
             ZStack {
                 DK.Palette.display
@@ -100,7 +100,7 @@ private struct DKChromePreviewTitleBars: View {
                         os: "iOS 26.6.2",
                         address: "192.168.64.12",
                         actions: [DKButtonSpec("Guest Tools", glyph: .sidebar, variant: .ghost, size: .icon)],
-                        drawsTrafficLights: true,
+                        showsWindowControls: true,
                     )
                 }
             }

@@ -4,9 +4,11 @@ import SwiftUI
 /// dot, the guest OS and its address), with the window's actions on the trailing
 /// side.
 ///
-/// The bar leaves room for the traffic lights on its leading side, because the
-/// real window draws them over it. Set `trafficLightInset` to the room the
-/// window needs, or to 0 for a bar without them. The display window uses the
+/// The bar draws the window buttons on its leading side (`DKWindowControls`):
+/// the window hides its system buttons, so they sit centered on this bar
+/// rather than on the shorter system title bar. Pass `showsWindowControls:
+/// false` in full screen, where the system shows its own with the menu bar.
+/// The display window uses the
 /// roomy bar; Workspace, Terminal and Files use `compact`, which centers the
 /// title and halves the padding. `init(machine:kind:…)` picks both for a
 /// `DKVMWindowKind`.
@@ -27,15 +29,9 @@ public struct DKTitleBar<Accessory: View>: View {
     public var actions: [DKButtonSpec]
     /// The centered, tighter variant for the Workspace, Terminal and Files windows.
     public var compact: Bool
-    /// Room left on the leading side, after the padding, for the traffic lights.
-    public var trafficLightInset: CGFloat
-    /// Draws the traffic lights itself, for previews and mockups. The real window
-    /// draws its own.
-    public var drawsTrafficLights: Bool
+    /// Draws close, minimize and zoom on the leading side.
+    public var showsWindowControls: Bool
     let accessory: Accessory
-
-    /// Room for the three traffic lights (52pt) and the gap after them.
-    public static var defaultTrafficLightInset: CGFloat { 68 }
 
     public init(
         _ title: String,
@@ -45,8 +41,7 @@ public struct DKTitleBar<Accessory: View>: View {
         address: String? = nil,
         actions: [DKButtonSpec] = [],
         compact: Bool = false,
-        trafficLightInset: CGFloat = DKTitleBar.defaultTrafficLightInset,
-        drawsTrafficLights: Bool = false,
+        showsWindowControls: Bool = true,
         @ViewBuilder accessory: () -> Accessory,
     ) {
         self.title = title
@@ -56,8 +51,7 @@ public struct DKTitleBar<Accessory: View>: View {
         self.address = address
         self.actions = actions
         self.compact = compact
-        self.trafficLightInset = trafficLightInset
-        self.drawsTrafficLights = drawsTrafficLights
+        self.showsWindowControls = showsWindowControls
         self.accessory = accessory()
     }
 
@@ -71,8 +65,7 @@ public struct DKTitleBar<Accessory: View>: View {
         os: String,
         address: String? = nil,
         actions: [DKButtonSpec] = [],
-        trafficLightInset: CGFloat = DKTitleBar.defaultTrafficLightInset,
-        drawsTrafficLights: Bool = false,
+        showsWindowControls: Bool = true,
         @ViewBuilder accessory: () -> Accessory,
     ) {
         self.init(
@@ -83,8 +76,7 @@ public struct DKTitleBar<Accessory: View>: View {
             address: address,
             actions: actions,
             compact: kind.usesCompactTitleBar,
-            trafficLightInset: trafficLightInset,
-            drawsTrafficLights: drawsTrafficLights,
+            showsWindowControls: showsWindowControls,
             accessory: accessory,
         )
     }
@@ -112,11 +104,8 @@ public struct DKTitleBar<Accessory: View>: View {
 
     @ViewBuilder
     private var leadingRoom: some View {
-        if drawsTrafficLights {
-            DKTitleBarTrafficLights()
-                .frame(width: max(trafficLightInset - DK.Space.s4, 0), alignment: .leading)
-        } else if trafficLightInset > DK.Space.s4 {
-            Color.clear.frame(width: trafficLightInset - DK.Space.s4, height: 1)
+        if showsWindowControls {
+            DKWindowControls()
         }
     }
 
@@ -170,8 +159,7 @@ public extension DKTitleBar where Accessory == EmptyView {
         address: String? = nil,
         actions: [DKButtonSpec] = [],
         compact: Bool = false,
-        trafficLightInset: CGFloat = DKTitleBar.defaultTrafficLightInset,
-        drawsTrafficLights: Bool = false,
+        showsWindowControls: Bool = true,
     ) {
         self.init(
             title,
@@ -181,8 +169,7 @@ public extension DKTitleBar where Accessory == EmptyView {
             address: address,
             actions: actions,
             compact: compact,
-            trafficLightInset: trafficLightInset,
-            drawsTrafficLights: drawsTrafficLights,
+            showsWindowControls: showsWindowControls,
             accessory: { EmptyView() },
         )
     }
@@ -195,8 +182,7 @@ public extension DKTitleBar where Accessory == EmptyView {
         os: String,
         address: String? = nil,
         actions: [DKButtonSpec] = [],
-        trafficLightInset: CGFloat = DKTitleBar.defaultTrafficLightInset,
-        drawsTrafficLights: Bool = false,
+        showsWindowControls: Bool = true,
     ) {
         self.init(
             machine: machine,
@@ -206,28 +192,8 @@ public extension DKTitleBar where Accessory == EmptyView {
             os: os,
             address: address,
             actions: actions,
-            trafficLightInset: trafficLightInset,
-            drawsTrafficLights: drawsTrafficLights,
+            showsWindowControls: showsWindowControls,
             accessory: { EmptyView() },
         )
     }
-}
-
-// MARK: - Traffic lights
-
-/// The three window buttons as the design draws them, for previews.
-private struct DKTitleBarTrafficLights: View {
-    var body: some View {
-        HStack(spacing: DK.Space.s2) {
-            Circle().fill(Self.close)
-            Circle().fill(Self.minimize)
-            Circle().fill(Self.zoom)
-        }
-        .frame(width: 52, height: 12)
-        .accessibilityHidden(true)
-    }
-
-    private static let close = Color(nsColor: NSColor(rgb: 0xFF5F57, alpha: 1))
-    private static let minimize = Color(nsColor: NSColor(rgb: 0xFEBC2E, alpha: 1))
-    private static let zoom = Color(nsColor: NSColor(rgb: 0x28C840, alpha: 1))
 }

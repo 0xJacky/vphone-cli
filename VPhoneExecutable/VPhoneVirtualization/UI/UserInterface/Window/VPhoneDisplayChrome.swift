@@ -19,8 +19,9 @@ final class VPhoneDisplayChromeModel {
     var frameRate: Int?
     /// When the screen recording started; nil while not recording.
     var recordingStartedAt: Date?
-    /// Room the title bar leaves for the window's own traffic lights.
-    var trafficLightInset = DKTitleBar<EmptyView>.defaultTrafficLightInset
+    /// Whether the title bar draws the window buttons; off in full screen,
+    /// where the system shows its own.
+    var showsWindowControls = true
 
     var canPressHome = false
     var canOpenGuestTools = false
@@ -68,9 +69,8 @@ enum VPhoneScreenRecordingStatus {
 // MARK: - Title Bar
 
 /// The machine's name over its status line (state dot, iOS version, address,
-/// and the frame rate when shown), with Guest Tools on the trailing side. The
-/// window's own traffic lights are drawn over the room it leaves on the
-/// leading side.
+/// and the frame rate when shown), with the window buttons on the leading
+/// side and Guest Tools on the trailing side.
 struct VPhoneDisplayTitleBar: View {
     let model: VPhoneDisplayChromeModel
 
@@ -91,8 +91,9 @@ struct VPhoneDisplayTitleBar: View {
                     action: { model.onGuestTools() },
                 ),
             ],
-            trafficLightInset: model.trafficLightInset,
+            showsWindowControls: model.showsWindowControls,
         )
+        .environment(\.dkLocalizationBundle, VPhoneLocalization.bundle)
     }
 
     /// Never empty, so the bar keeps the height it was measured at: without

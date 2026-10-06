@@ -75,20 +75,15 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         window.level = .normal
         VPhoneAlert.hostWindow = window
         window.title = name
-        // The title bar is the content's own; the system one keeps only the
-        // traffic lights. `window.title` and `window.subtitle` are still set
-        // for the Window menu and accessibility.
+        // The chrome is the content's own, window buttons included: the
+        // system title bar is transparent and its buttons hidden. `window.title`
+        // and `window.subtitle` are still set for the Window menu and
+        // accessibility.
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.titlebarSeparatorStyle = .none
-        // An empty unified toolbar gives the system title bar the height the
-        // traffic lights need to sit centered on the content's title bar.
-        let toolbar = NSToolbar(identifier: "vphone-toolbar")
-        toolbar.displayMode = .iconOnly
-        toolbar.allowsDisplayModeCustomization = false
-        window.toolbar = toolbar
-        window.toolbarStyle = .unified
         window.contentView = content
+        setSystemWindowButtonsHidden(true, in: window)
 
         // The scene belongs to the VM, not to the app: every VM directory keeps
         // its own window frame, and a newly created VM opens centered instead
@@ -105,7 +100,6 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         // had its bars, is reshaped: the guest boots in portrait, and the
         // orientation poll turns it again if not.
         applyOrientation(.portrait, to: window, force: true)
-        pinWindowButtons(in: window)
 
         let controller = NSWindowController(window: window)
         controller.showWindow(nil)
@@ -114,7 +108,6 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         keySender.window = window
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-        placeWindowButtons()
         window.makeFirstResponder(view)
 
         let monitor = VPhoneTouchIDMonitor()
@@ -311,67 +304,31 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         })
     }
 
-    // MARK: - Traffic Lights
+    // MARK: - Window Buttons
 
-    private weak var buttonWindow: NSWindow?
-    private var observedButtons = Set<ObjectIdentifier>()
-
-    /// The traffic lights keep AppKit's horizontal place but are centered on
-    /// the content's title bar, which is taller than the system one. AppKit
-    /// puts them back whenever it lays out the title bar, and may replace
-    /// them when the window is shown, so they are placed again after each.
-    private func pinWindowButtons(in window: NSWindow) {
-        buttonWindow = window
-        let names: [Notification.Name] = [
-            NSWindow.didResizeNotification, NSWindow.didEndLiveResizeNotification,
-            NSWindow.didEnterFullScreenNotification, NSWindow.didExitFullScreenNotification,
-            NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification,
-            NSWindow.didBecomeMainNotification, NSWindow.didChangeScreenNotification,
-            NSWindow.didUpdateNotification,
-        ]
-        for name in names {
-            NotificationCenter.default.addObserver(
-                self, selector: #selector(windowButtonMoved), name: name, object: window,
-            )
-        }
-        placeWindowButtons()
+    /// The title bar draws close, minimize and zoom itself. In full screen
+    /// the system's buttons come back, since they show with the menu bar
+    /// there and the title bar's would sit on the screen's edge.
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        chrome.showsWindowControls = false
+        setSystemWindowButtonsHidden(false, in: window)
     }
 
-    @objc private func windowButtonMoved() {
-        placeWindowButtons()
+    func windowDidExitFullScreen(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+        setSystemWindowButtonsHidden(true, in: window)
+        chrome.showsWindowControls = true
     }
 
-    private func placeWindowButtons() {
-        guard let window = buttonWindow, let content else { return }
-        // In full screen the traffic lights show with the menu bar, not over
-        // the title bar, so it needs no room for them.
-        guard !window.styleMask.contains(.fullScreen) else {
-            setTrafficLightInset(0)
-            return
-        }
-        let center = content.convert(NSPoint(x: 0, y: content.bounds.maxY - content.titleBarHeight / 2), to: nil)
-        var trailingEdge: CGFloat = 0
+    func windowDidFailToEnterFullScreen(_ window: NSWindow) {
+        setSystemWindowButtonsHidden(true, in: window)
+        chrome.showsWindowControls = true
+    }
+
+    private func setSystemWindowButtonsHidden(_ hidden: Bool, in window: NSWindow) {
         for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-            guard let button = window.standardWindowButton(kind), let superview = button.superview else { continue }
-            if observedButtons.insert(ObjectIdentifier(button)).inserted {
-                button.postsFrameChangedNotifications = true
-                NotificationCenter.default.addObserver(
-                    self, selector: #selector(windowButtonMoved), name: NSView.frameDidChangeNotification,
-                    object: button,
-                )
-            }
-            let y = (superview.convert(center, from: nil).y - button.frame.height / 2).rounded()
-            if button.frame.minY != y {
-                button.setFrameOrigin(NSPoint(x: button.frame.minX, y: y))
-            }
-            trailingEdge = max(trailingEdge, button.convert(button.bounds, to: nil).maxX)
-        }
-        setTrafficLightInset(trailingEdge.rounded(.up))
-    }
-
-    private func setTrafficLightInset(_ inset: CGFloat) {
-        if chrome.trafficLightInset != inset {
-            chrome.trafficLightInset = inset
+            window.standardWindowButton(kind)?.isHidden = hidden
         }
     }
 
