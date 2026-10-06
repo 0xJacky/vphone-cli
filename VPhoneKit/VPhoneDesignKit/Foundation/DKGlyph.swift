@@ -6,7 +6,7 @@ public enum DKGlyph: String, Sendable, CaseIterable, Hashable {
     case phone, ipad, machines, image, disk, drive, bundle, network, terminal, checklist
     case info, sliders, apps, cpu, gear, folder, folderPlus, pencil, key, list, clipboard
     case warning, check, play, stop, pause, restart, plus, minus, sun
-    case speakerPlus, speakerMinus, mute, search, refresh, trash, copy, download, upload
+    case speaker, speakerLoud, speakerPlus, speakerMinus, mute, search, refresh, trash, copy, download, upload
     case left, right, sidebar, home, camera, record, ellipsis, timer, bolt, xCircle
     case send, link, doc, globe, seal, lock, chevron, chevronDown, close, pending, spinner, minusCircle
 
@@ -43,6 +43,8 @@ public enum DKGlyph: String, Sendable, CaseIterable, Hashable {
         case .plus: "plus"
         case .minus: "minus"
         case .sun: "sun.max"
+        case .speaker: "speaker.wave.1"
+        case .speakerLoud: "speaker.wave.3"
         case .speakerPlus: "speaker.plus"
         case .speakerMinus: "speaker.minus"
         case .mute: "speaker.slash"

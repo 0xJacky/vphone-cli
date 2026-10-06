@@ -91,47 +91,84 @@ struct VPhoneControlsView: View {
     // MARK: - Audio
 
     private var audioSection: some View {
-        DKSection(String(localized: "Audio", bundle: VPhoneLocalization.bundle)) {
-            DKFormRow(String(localized: "Category", bundle: VPhoneLocalization.bundle)) {
-                DKSegmented(
-                    String(localized: "Category", bundle: VPhoneLocalization.bundle),
-                    selection: categoryBinding,
-                    options: VPhoneControlsVolumeCategory.allCases.map { DKSegmentOption($0.title, value: $0) },
-                )
-                .disabled(!model.canWrite)
-                .help(String(localized: "Choose which volume the slider below reads and sets", bundle: VPhoneLocalization.bundle))
-            }
-            DKFormRow(String(localized: "Volume", bundle: VPhoneLocalization.bundle)) {
-                Slider(value: $model.volume, in: 0 ... 1) { editing in
-                    if !editing {
-                        Task { await model.commitVolume() }
+        DKSection(String(localized: "Audio", bundle: VPhoneLocalization.bundle), card: false) {
+            DKCard(.padded) {
+                VStack(alignment: .leading, spacing: DK.Space.s3) {
+                    volumeReadout
+                    DKSlider(
+                        model.volumeCategory.volumeTitle,
+                        value: $model.volume,
+                        step: 0.05,
+                        minimumGlyph: .speaker,
+                        maximumGlyph: .speakerLoud,
+                        valueText: { VPhonePanelFormat.percent($0) },
+                    ) { editing in
+                        if !editing {
+                            Task { await model.commitVolume() }
+                        }
                     }
+                    .disabled(!model.canWrite || model.guestVolume == nil)
+                    activeSessionRow
                 }
-                .labelsHidden()
-                .tint(DK.Palette.accent)
-                .frame(width: 160)
-                .accessibilityLabel(String(localized: "Volume", bundle: VPhoneLocalization.bundle))
-                .disabled(!model.canWrite || model.guestVolume == nil)
-                Text(model.guestVolume == nil ? "—" : VPhonePanelFormat.percent(model.volume))
-                    .font(DK.Typeface.mono)
-                    .monospacedDigit()
-                    .foregroundStyle(DK.Palette.ink)
-                    .frame(width: 36, alignment: .trailing)
             }
-            DKFormRow(String(localized: "Active Session", bundle: VPhoneLocalization.bundle)) {
-                Text(activeSession)
-                    .font(DK.Typeface.body)
-                    .foregroundStyle(DK.Palette.muted)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .textSelection(.enabled)
-                    .help(activeSession)
-            }
+        } headAccessory: {
+            DKSegmented(
+                String(localized: "Category", bundle: VPhoneLocalization.bundle),
+                selection: categoryBinding,
+                options: VPhoneControlsVolumeCategory.allCases.map { DKSegmentOption($0.title, value: $0) },
+            )
+            .fixedSize()
+            .disabled(!model.canWrite)
+            .help(String(localized: "Choose which volume the slider below reads and sets", bundle: VPhoneLocalization.bundle))
         }
+    }
+
+    /// The category's name on the left and its level, large, on the right.
+    private var volumeReadout: some View {
+        HStack(alignment: .firstTextBaseline, spacing: DK.Space.s3) {
+            Text(model.volumeCategory.volumeTitle)
+                .font(DK.Typeface.caption)
+                .foregroundStyle(DK.Palette.muted)
+            Spacer(minLength: 0)
+            Text(model.guestVolume == nil ? "—" : VPhonePanelFormat.percent(model.volume))
+                .font(.system(size: 24, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(DK.Palette.ink)
+        }
+        .accessibilityHidden(true)
+    }
+
+    /// Which app holds the audio session, under a divider at the card's foot.
+    private var activeSessionRow: some View {
+        HStack(spacing: DK.Space.s2) {
+            DKStatusDot(activeSessionTone)
+            Text(activeSession)
+                .font(DK.Typeface.caption)
+                .foregroundStyle(DK.Palette.muted)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .textSelection(.enabled)
+                .help(activeSession)
+        }
+        .padding(.top, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) {
+            Rectangle().fill(DK.Palette.dividerSoft).frame(height: DK.Metric.hairline)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(String(localized: "Active Session", bundle: VPhoneLocalization.bundle))
+        .accessibilityValue(activeSession)
     }
 
     private var activeSession: String {
         model.activeSessionText
+    }
+
+    private var activeSessionTone: DKTone {
+        if model.audioStateError != nil {
+            return .warning
+        }
+        return model.hasActiveSession ? .success : .idle
     }
 
     // MARK: - Hardware Buttons

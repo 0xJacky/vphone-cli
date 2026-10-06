@@ -53,11 +53,11 @@ struct VPhoneControlsModelTests {
     }
 
     @Test
-    func `the active session names its category and level, or None`() {
+    func `the active session names its category and level, or that none plays`() {
         let model = model()
         #expect(model.activeSessionText == "—")
         model.apply(audioStateResult: ["active_category": "", "active_volume": 0.6, "active_muted": false])
-        #expect(model.activeSessionText == "None")
+        #expect(model.activeSessionText == "No app is playing audio")
         model.apply(audioStateResult: ["active_category": "Audio/Video"])
         #expect(model.activeSessionText == "Audio/Video")
         model.apply(audioStateResult: ["active_category": "Audio/Video", "active_volume": 0.6, "active_muted": false])
@@ -67,6 +67,22 @@ struct VPhoneControlsModelTests {
         model.apply(audioStateResult: ["active_category": "Ringtone", "active_volume": 0.4, "active_muted": true])
         #expect(model.activeSessionText.hasPrefix("Ringtone, "))
         #expect(model.activeSessionText.hasSuffix(", muted"))
+    }
+
+    @Test
+    func `a session is active only once a category is reported`() {
+        let model = model()
+        #expect(!model.hasActiveSession)
+        model.apply(audioStateResult: ["active_category": ""])
+        #expect(!model.hasActiveSession)
+        model.apply(audioStateResult: ["active_category": "Audio/Video", "active_volume": 0.6])
+        #expect(model.hasActiveSession)
+    }
+
+    @Test
+    func `each volume category names the slider it drives`() {
+        #expect(VPhoneControlsVolumeCategory.media.volumeTitle == "Media volume")
+        #expect(VPhoneControlsVolumeCategory.ringer.volumeTitle == "Ringer volume")
     }
 
     // MARK: - Sending

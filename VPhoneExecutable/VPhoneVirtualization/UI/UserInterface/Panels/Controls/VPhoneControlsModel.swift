@@ -211,21 +211,27 @@ final class VPhoneControlsModel {
     }
 
     /// The Active Session row: the session's category with its level, such
-    /// as "Audio/Video, 60%" or "Ringtone, 40%, muted"; "None" while no
-    /// session is active, whose level would describe nothing; "—" before the
-    /// first read; the read's error when it failed.
+    /// as "Audio/Video, 60%" or "Ringtone, 40%, muted"; "No app is playing
+    /// audio" while no session is active, whose level would describe nothing;
+    /// "—" before the first read; the read's error when it failed.
     var activeSessionText: String {
         if let audioStateError {
             return audioStateError
         }
         guard let category = activeAudioCategory else { return "—" }
-        guard !category.isEmpty else { return String(localized: "None", bundle: VPhoneLocalization.bundle) }
+        guard !category.isEmpty else { return String(localized: "No app is playing audio", bundle: VPhoneLocalization.bundle) }
         guard activeAudioVolume != nil || activeAudioMuted != nil else { return category }
         let level = VPhonePanelFormat.percent(activeAudioVolume)
         if activeAudioMuted == true {
             return String(localized: "\(category), \(level), muted", bundle: VPhoneLocalization.bundle)
         }
         return String(localized: "\(category), \(level)", bundle: VPhoneLocalization.bundle)
+    }
+
+    /// Whether an app holds an audio session: false before the first read,
+    /// while none is active, and when the read failed.
+    var hasActiveSession: Bool {
+        audioStateError == nil && activeAudioCategory?.isEmpty == false
     }
 
     /// `power.low_power_mode` → `{enabled, method}` (plus `changed` after a set).

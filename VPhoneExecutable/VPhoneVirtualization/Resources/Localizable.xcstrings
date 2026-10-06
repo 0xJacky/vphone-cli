@@ -15557,6 +15557,34 @@
         }
       }
     },
+    "Media volume" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "メディアの音量"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "미디어 음량"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Âm lượng phương tiện"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "媒体音量"
+          }
+        }
+      }
+    },
     "Memory" : {
       "localizations" : {
         "ja" : {
@@ -16979,6 +17007,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有打开的虚拟机窗口。请启动虚拟机后重试。"
+          }
+        }
+      }
+    },
+    "No app is playing audio" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "オーディオを再生中のアプリはありません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오디오를 재생 중인 앱이 없음"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không có ứng dụng nào đang phát âm thanh"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有 App 正在播放音频"
           }
         }
       }
@@ -23209,6 +23265,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "铃声"
+          }
+        }
+      }
+    },
+    "Ringer volume" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "着信音の音量"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "벨소리 음량"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Âm lượng chuông"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "铃声音量"
           }
         }
       }
