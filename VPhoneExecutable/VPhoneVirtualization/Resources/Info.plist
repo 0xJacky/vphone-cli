@@ -27,5 +27,9 @@
 			<string>com.vphone.terminal-tab</string>
 		</dict>
 	</array>
+	<!-- This fork's builds: a label beside the version, which stays the
+	     upstream number so Launchpad's series matching is untouched. -->
+	<key>VPhoneBuildVariant</key>
+	<string>ui</string>
 </dict>
 </plist>

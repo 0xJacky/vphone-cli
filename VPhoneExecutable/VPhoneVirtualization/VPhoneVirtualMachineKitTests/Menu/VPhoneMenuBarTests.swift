@@ -63,6 +63,17 @@ struct VPhoneMenuBarTests {
     }
 
     @Test
+    func `the build line names a fork's variant beside the version`() {
+        let upstream: [String: Any] = ["CFBundleShortVersionString": "2.6.1", "CFBundleVersion": "33", "VPhoneBuildHash": "a6c4ec8"]
+        #expect(VPhoneMenuController.buildDescription(info: upstream) == "2.6.1 (33, a6c4ec8)")
+        var fork = upstream
+        fork["VPhoneBuildVariant"] = "ui"
+        #expect(VPhoneMenuController.buildDescription(info: fork) == "2.6.1-ui (33, a6c4ec8)")
+        fork["VPhoneBuildVariant"] = ""
+        #expect(VPhoneMenuController.buildDescription(info: fork) == "2.6.1 (33, a6c4ec8)")
+    }
+
+    @Test
     func `every display window button finds its menu item`() {
         let bar = VPhoneMenuBarFixture()
         for command in VPhoneMenuCommand.allCases {

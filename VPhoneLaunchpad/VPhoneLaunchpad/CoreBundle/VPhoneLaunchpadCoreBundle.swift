@@ -11,6 +11,8 @@ final class VPhoneLaunchpadCoreBundle {
 
     struct Installed: Identifiable {
         let receipt: VPhoneLaunchpadBundleReceipt
+        /// The fork's build variant ("ui"), read once from its Info.plist.
+        var variant: String?
         var policy: VPhoneLaunchpadStatus = .pending
         var policyDetail = ""
         var preflight: VPhoneLaunchpadStatus = .pending
@@ -423,7 +425,7 @@ final class VPhoneLaunchpadCoreBundle {
             .sorted { $0.version.compare($1.version, options: .numeric) == .orderedDescending }
         installed = receipts.map { receipt in
             var item = installed.first { $0.version == receipt.version && $0.receipt == receipt }
-                ?? Installed(receipt: receipt)
+                ?? Installed(receipt: receipt, variant: VPhoneLaunchpadBuildVariant.ofBundle(version: receipt.version))
             if !VPhoneLaunchpadNames.isCompatibleBundleVersion(receipt.version) {
                 item.policy = .failed
                 item.preflight = .failed

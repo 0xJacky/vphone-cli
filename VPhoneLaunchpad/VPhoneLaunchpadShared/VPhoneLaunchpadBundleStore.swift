@@ -33,6 +33,34 @@ nonisolated enum VPhoneLaunchpadBundleStore {
     static let pinnedExecutables = ["vphone-cli", "vphone-vm"]
 }
 
+// MARK: - Build Variant
+
+/// The `VPhoneBuildVariant` a fork stamps into its Info.plist ("ui"),
+/// shown beside the version; nil for upstream's builds. The version itself
+/// stays the upstream number, so series matching never sees it.
+nonisolated enum VPhoneLaunchpadBuildVariant {
+    static let key = "VPhoneBuildVariant"
+
+    static func of(info: [String: Any]?) -> String? {
+        (info?[key] as? String).flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// What the About panel shows in parentheses after the version: the
+    /// build number, then the variant ("13, ui"). Nil without a variant, so
+    /// the panel shows its own.
+    static func aboutBuildLine(info: [String: Any]?) -> String? {
+        guard let variant = of(info: info) else { return nil }
+        let build = (info?["CFBundleVersion"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        return [build, variant].compactMap(\.self).joined(separator: ", ")
+    }
+
+    /// The variant of an installed bundle, from its Info.plist.
+    static func ofBundle(version: String) -> String? {
+        let plist = VPhoneLaunchpadBundleStore.bundle(version: version).appendingPathComponent("Contents/Info.plist")
+        return of(info: NSDictionary(contentsOf: plist) as? [String: Any])
+    }
+}
+
 // MARK: - Receipt
 
 /// Written by the helper next to each installed bundle.

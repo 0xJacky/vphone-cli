@@ -214,13 +214,18 @@ class VPhoneMenuController {
     /// "2.3.2 (26, 735927f)": the bundle version, its build number and the
     /// commit `StageBundle.sh` stamped into the Info.plist. vphone-vm runs from
     /// `VPhone.bundle/Contents/MacOS`, so `Bundle.main` is that bundle.
-    static func buildDescription() -> String {
+    /// A build of this fork's `VPhoneBuildVariant` adds it to the version:
+    /// "2.6.1-ui (33, a6c4ec8)".
+    static func buildDescription(info: [String: Any] = Bundle.main.infoDictionary ?? [:]) -> String {
         func value(_ key: String) -> String? {
-            (Bundle.main.object(forInfoDictionaryKey: key) as? String).flatMap { $0.isEmpty ? nil : $0 }
+            (info[key] as? String).flatMap { $0.isEmpty ? nil : $0 }
         }
         let details = [value("CFBundleVersion"), value("VPhoneBuildHash")].compactMap(\.self)
         let detail = details.isEmpty ? nil : details.joined(separator: ", ")
-        switch (value("CFBundleShortVersionString"), detail) {
+        let version = value("CFBundleShortVersionString").map { version in
+            value("VPhoneBuildVariant").map { "\(version)-\($0)" } ?? version
+        }
+        switch (version, detail) {
         case let (version?, detail?): return "\(version) (\(detail))"
         case let (version?, nil): return version
         case let (nil, detail?): return detail

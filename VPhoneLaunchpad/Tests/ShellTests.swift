@@ -21,6 +21,7 @@ struct ShellTests {
         routing()
         sidebar()
         windowSize()
+        buildVariant()
         hostSetup()
         bundles()
         settings()
@@ -59,6 +60,21 @@ struct ShellTests {
     }
 
     // MARK: - Sidebar
+
+    static func buildVariant() {
+        typealias Variant = VPhoneLaunchpadBuildVariant
+        // Upstream's builds carry none; the version alone names them.
+        expectEqual(Variant.of(info: ["CFBundleShortVersionString": "2.6.1"]), nil)
+        expectEqual(Variant.of(info: ["VPhoneBuildVariant": ""]), nil)
+        expectEqual(Variant.of(info: nil), nil)
+        expectEqual(Variant.of(info: ["VPhoneBuildVariant": "ui"]), "ui")
+        // About: the build number, then the variant.
+        expectEqual(Variant.aboutBuildLine(info: ["CFBundleVersion": "13", "VPhoneBuildVariant": "ui"]), "13, ui")
+        expectEqual(Variant.aboutBuildLine(info: ["VPhoneBuildVariant": "ui"]), "ui")
+        expectEqual(Variant.aboutBuildLine(info: ["CFBundleVersion": "13"]), nil)
+        // The variant never reaches the version, so series matching is unchanged.
+        expectEqual(VPhoneLaunchpadNames.isCompatibleBundleVersion("2.6.1-local.ab12cd34"), true)
+    }
 
     static func windowSize() {
         typealias Size = VPhoneLaunchpadWindowSize

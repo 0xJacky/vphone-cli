@@ -27,6 +27,13 @@ struct VPhoneLaunchpadCommands: Commands {
         CommandMenu("Machine") {
             DKMenuContent(VPhoneLaunchpadMachineActions(model: model).menuBarItems())
         }
+        // About shows this fork's build variant with the build number: "(13, ui)".
+        CommandGroup(replacing: .appInfo) {
+            Button(String(localized: "About VPhone Launchpad")) {
+                let build = VPhoneLaunchpadBuildVariant.aboutBuildLine(info: Bundle.main.infoDictionary)
+                NSApp.orderFrontStandardAboutPanel(options: build.map { [.version: $0] } ?? [:])
+            }
+        }
         // No Help menu: Launchpad has no help book, so the system one only
         // offered a search over the menus.
         CommandGroup(replacing: .help) {}

@@ -54,5 +54,9 @@
 		<key>com.vphone.launchpad.helper</key>
 		<string>anchor apple generic and identifier "com.vphone.launchpad.helper" and certificate leaf[subject.OU] = "$(VPHONE_LAUNCHPAD_TEAM)"</string>
 	</dict>
+	<!-- This fork's builds: a label beside the version, which stays the
+	     upstream number so Launchpad's series matching is untouched. -->
+	<key>VPhoneBuildVariant</key>
+	<string>ui</string>
 </dict>
 </plist>

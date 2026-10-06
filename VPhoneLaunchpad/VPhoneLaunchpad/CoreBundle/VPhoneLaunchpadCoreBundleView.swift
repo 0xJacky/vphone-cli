@@ -169,6 +169,9 @@ struct VPhoneLaunchpadCoreBundleView: View {
         if isDefault {
             badges.append(.init(String(localized: "Default"), tone: .accent))
         }
+        if let variant = bundle.variant {
+            badges.append(.init(variant, tone: .neutral))
+        }
         badges.append(VPhoneLaunchpadBundleText.checkBadge(
             version: bundle.version,
             status: status,
