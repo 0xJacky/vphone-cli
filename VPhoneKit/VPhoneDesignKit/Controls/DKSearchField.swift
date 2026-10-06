@@ -182,6 +182,11 @@ struct DKNativeSearchField: NSViewRepresentable {
 /// An `NSSearchField` that reports when it gains and loses the keyboard focus
 /// and takes the focus SwiftUI asks for once it is in a window.
 final class DKSearchFieldView: NSSearchField {
+    override class var cellClass: AnyClass? {
+        get { DKSearchFieldCell.self }
+        set {}
+    }
+
     var onFocusChange: ((Bool) -> Void)?
     /// What the SwiftUI side last asked for; applied after the update that
     /// changed it, or when the field reaches a window.
@@ -304,4 +309,21 @@ private struct DKSearchFieldPreview: View {
 
 #Preview("Search field, dark") {
     DKSearchFieldPreview().preferredColorScheme(.dark)
+}
+
+// MARK: - Cell
+
+/// The search field's cell. A borderless `NSSearchField` hands the field
+/// editor its whole bounds, so while focused the text and the placeholder
+/// start under the magnifying glass; this gives the editor the cell's own
+/// text rectangle, between the glass and the clear button, as a bezeled
+/// field does.
+final class DKSearchFieldCell: NSSearchFieldCell {
+    override func edit(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?, event: NSEvent?) {
+        super.edit(withFrame: searchTextRect(forBounds: rect), in: controlView, editor: textObj, delegate: delegate, event: event)
+    }
+
+    override func select(withFrame rect: NSRect, in controlView: NSView, editor textObj: NSText, delegate: Any?, start selStart: Int, length selLength: Int) {
+        super.select(withFrame: searchTextRect(forBounds: rect), in: controlView, editor: textObj, delegate: delegate, start: selStart, length: selLength)
+    }
 }

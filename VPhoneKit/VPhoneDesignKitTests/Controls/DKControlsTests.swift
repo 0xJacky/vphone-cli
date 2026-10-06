@@ -88,6 +88,20 @@ struct DKControlsTests {
         #expect(DKSearchField.showsClearButton(for: "r"))
     }
 
+    @Test
+    func `a focused search field edits beside the magnifying glass, not under it`() throws {
+        let field = DKSearchFieldView(frame: NSRect(x: 0, y: 0, width: 212, height: 16))
+        field.isBezeled = false
+        field.isBordered = false
+        let window = NSWindow(contentRect: field.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = field
+        window.makeFirstResponder(field)
+        let cell = try #require(field.cell as? DKSearchFieldCell)
+        let editor = try #require(window.fieldEditor(false, for: field))
+        #expect(editor.frame.minX == cell.searchTextRect(forBounds: field.bounds).minX)
+        #expect(editor.frame.minX >= cell.searchButtonRect(forBounds: field.bounds).maxX - 1)
+    }
+
     // MARK: - Progress
 
     @Test
