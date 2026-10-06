@@ -256,3 +256,128 @@ struct DKPaneGroupAreaTests {
     }
 
 }
+
+// MARK: - Drops
+
+/// A drag as AppKit hands it to a drop target: a location in the window and
+/// a pasteboard carrying the dragged tab's id. Fed to the hosting view's
+/// `NSDraggingDestination` methods, it runs SwiftUI's `onDrop` dispatch, the
+/// area's drop delegates, the zone classification and the model's move,
+/// everything a mouse drop runs after AppKit's drag loop.
+@MainActor
+final class DKFakeDraggingInfo: NSObject, @preconcurrency NSDraggingInfo {
+    let draggingDestinationWindow: NSWindow?
+    let draggingLocation: NSPoint
+    let draggingPasteboard: NSPasteboard
+    var draggingFormation: NSDraggingFormation = .default
+    var animatesToDestination = false
+    var numberOfValidItemsForDrop = 1
+    let springLoadingHighlight: NSSpringLoadingHighlight = .none
+    private let item: NSPasteboardItem
+
+    init(window: NSWindow, location: NSPoint, tabID: UUID, type: UTType) {
+        draggingDestinationWindow = window
+        draggingLocation = location
+        draggingPasteboard = NSPasteboard(name: NSPasteboard.Name("dk.pane.test.\(UUID().uuidString)"))
+        draggingPasteboard.clearContents()
+        item = NSPasteboardItem()
+        item.setData(Data(tabID.uuidString.utf8), forType: NSPasteboard.PasteboardType(type.identifier))
+        draggingPasteboard.writeObjects([item])
+    }
+
+    var draggingSourceOperationMask: NSDragOperation { .move }
+    var draggedImageLocation: NSPoint { draggingLocation }
+    var draggedImage: NSImage? { nil }
+    var draggingSource: Any? { nil }
+    var draggingSequenceNumber: Int { 1 }
+
+    func slideDraggedImage(to _: NSPoint) {}
+
+    func enumerateDraggingItems(
+        options _: NSDraggingItemEnumerationOptions = [],
+        for _: NSView?,
+        classes _: [AnyClass],
+        searchOptions _: [NSPasteboard.ReadingOptionKey: Any] = [:],
+        using block: (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void,
+    ) {
+        // SwiftUI builds the drop's item providers from these items.
+        var stop: ObjCBool = false
+        block(NSDraggingItem(pasteboardWriter: item), 0, &stop)
+    }
+
+    func resetSpringLoading() {}
+}
+
+@MainActor private var dropTrace = ""
+
+extension DKPaneGroupAreaTests {
+    /// Drops `tabID` at `point` (top-left origin, in the area) the way AppKit
+    /// would, and waits for the item provider the delegate falls back on
+    /// when no drag began in this process.
+    private func drop(_ tabID: UUID, at point: CGPoint, on host: NSView, in window: NSWindow) async {
+        let location = host.convert(NSPoint(x: point.x, y: host.isFlipped ? point.y : host.bounds.height - point.y), to: nil)
+        let info = DKFakeDraggingInfo(window: window, location: location, tabID: tabID, type: .plainText)
+        // AppKit sends a drag to the deepest view registered for its types.
+        func targets(_ view: NSView) -> [NSView] {
+            (view.registeredDraggedTypes.isEmpty ? [] : [view]) + view.subviews.flatMap(targets)
+        }
+        let all = targets(host)
+        let destination = all.last { view in
+            let local = view.convert(location, from: nil)
+            return view.bounds.contains(local)
+        } ?? host
+        let entered = destination.draggingEntered(info)
+        let updated = destination.draggingUpdated(info)
+        let prepared = destination.prepareForDragOperation(info)
+        let performed = destination.performDragOperation(info)
+        destination.concludeDragOperation(info)
+        // The delegate loads the tab id from the item provider and moves it on
+        // the main actor, which this test holds until it suspends.
+        try? await Task.sleep(for: .milliseconds(300))
+        settle(host, window)
+        dropTrace = "targets=\(all.map { String(describing: type(of: $0)) + "\($0.registeredDraggedTypes.map(\.rawValue))" }) dest=\(type(of: destination)) entered=\(entered.rawValue) updated=\(updated.rawValue) prepared=\(prepared) performed=\(performed)"
+    }
+
+    @Test
+    func `a drop on a pane's edge splits it, and on its center joins it`() async throws {
+        let model = DKPaneGroupsModel<String>()
+        let a = model.openTab { tab("a") }
+        let b = model.openTab { tab("b") }
+        let (window, host) = host(area(model).frame(width: 800, height: 600))
+        defer { window.contentView = nil }
+
+        // The right quarter of the only pane, below the strip: a split beside.
+        await drop(a, at: CGPoint(x: 780, y: 300), on: host, in: window)
+        #expect(model.groupCount == 2)
+        guard case let .split(split) = model.root else {
+            Issue.record("expected a split, got \(model.root); \(dropTrace)")
+            return
+        }
+        #expect(split.direction == .horizontal)
+        let right = try #require(model.locateTab(a)?.groupID)
+        #expect(split.second == .leaf(paneID: right))
+        #expect(model.locateTab(b)?.groupID != right)
+
+        // The center of the right pane takes b too; the left pane collapses.
+        await drop(b, at: CGPoint(x: 600, y: 330), on: host, in: window)
+        #expect(model.groupCount == 1)
+        #expect(model.groups[right]?.tabs.map(\.id) == [a, b])
+    }
+
+    @Test
+    func `a drop on a pane's bottom band stacks the panes`() async throws {
+        let model = DKPaneGroupsModel<String>()
+        let a = model.openTab { tab("a") }
+        model.openTab { tab("b") }
+        let (window, host) = host(area(model).frame(width: 800, height: 600))
+        defer { window.contentView = nil }
+        await drop(a, at: CGPoint(x: 400, y: 590), on: host, in: window)
+        guard case let .split(split) = model.root else {
+            Issue.record("expected a split, got \(model.root); \(dropTrace)")
+            return
+        }
+        #expect(split.direction == .vertical)
+        #expect(split.second == .leaf(paneID: try #require(model.locateTab(a)?.groupID)))
+    }
+}
+
