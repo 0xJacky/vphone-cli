@@ -20,6 +20,7 @@ struct ShellTests {
         destinations()
         routing()
         sidebar()
+        windowSize()
         hostSetup()
         bundles()
         settings()
@@ -59,6 +60,20 @@ struct ShellTests {
 
     // MARK: - Sidebar
 
+    static func windowSize() {
+        typealias Size = VPhoneLaunchpadWindowSize
+        // A 1512×982 MacBook Pro (visible 1512×949): most of the screen.
+        expectEqual(Size.ideal(forVisible: CGSize(width: 1512, height: 949)), CGSize(width: 1210, height: 807))
+        // A 5K display: capped, not a wall of empty columns.
+        expectEqual(Size.ideal(forVisible: CGSize(width: 2560, height: 1415)), CGSize(width: 1680, height: 1080))
+        // A small screen: the minimum, as long as it fits.
+        expectEqual(Size.ideal(forVisible: CGSize(width: 1280, height: 777)), CGSize(width: 1080, height: 680))
+        // A screen smaller than the minimum: the screen.
+        expectEqual(Size.ideal(forVisible: CGSize(width: 1024, height: 640)), CGSize(width: 1024, height: 640))
+        // No screen known: the minimum.
+        expectEqual(Size.ideal(forVisible: .zero), Size.minimum)
+    }
+
     static func sidebar() {
         typealias Meta = VPhoneLaunchpadSidebarMeta
         func row(
@@ -67,7 +82,6 @@ struct ShellTests {
             running: Int = 0,
             total: Int = 0,
             firmwares: Int? = nil,
-            bundle: String? = nil,
             hostWarning: Bool = false,
             bundleWarning: Bool = false,
         ) -> DKSidebarItem<DKLaunchpadDestination> {
@@ -76,14 +90,13 @@ struct ShellTests {
                 running: running,
                 total: total,
                 firmwareCount: firmwares,
-                bundleVersion: bundle,
                 hostWarning: hostWarning,
                 bundleWarning: bundleWarning,
             )
             return sections.allSidebarItems().first { $0.id == destination }!
         }
         // The kit's rows, sections and order.
-        let sections = Meta.sections(listed: true, running: 0, total: 0, firmwareCount: nil, bundleVersion: nil, hostWarning: false, bundleWarning: false)
+        let sections = Meta.sections(listed: true, running: 0, total: 0, firmwareCount: nil, hostWarning: false, bundleWarning: false)
         expectEqual(sections.map(\.title), ["Library", "System"])
         expectEqual(sections.allSidebarItems().map(\.id), DKLaunchpadDestination.allCases)
 
@@ -99,11 +112,8 @@ struct ShellTests {
         expectEqual(row(.firmwares, firmwares: 0).trailingText, nil)
         expectEqual(row(.firmwares, firmwares: 4).trailingText, "4")
 
-        // Bundles: the default version, in monospace.
-        expectEqual(row(.bundles, bundle: nil).trailingText, nil)
-        expectEqual(row(.bundles, bundle: "").trailingText, nil)
-        expectEqual(row(.bundles, bundle: "2.6.0").trailingText, "2.6.0")
-        expect(row(.bundles, bundle: "2.6.0").isMetaMonospaced, "bundle version monospaced")
+        // Bundles shows no version: a local build's name crowds out the label.
+        expectEqual(row(.bundles).trailingText, nil)
 
         // The warning glyphs, read out from the app's catalog.
         expect(!row(.bundles).isWarning && !row(.hostSetup).isWarning, "no warnings")

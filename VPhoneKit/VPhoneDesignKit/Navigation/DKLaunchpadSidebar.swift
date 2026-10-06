@@ -90,7 +90,6 @@ public struct DKLaunchpadSidebar: View {
     ///     shows "running/total" after a green dot (gray when none run).
     ///   - machineCount: Machines in the library. Alone, it shows as a count.
     ///   - firmwareCount: Firmwares in the library, shown as a count.
-    ///   - bundleVersion: The default bundle's version, in monospace.
     ///   - hostSetupNeedsAttention: Shows the warning glyph on Host Setup.
     ///   - bundlesNeedAttention: Shows the warning glyph on Bundles, as when the
     ///     guest environment and the host programs come from different bundles.
@@ -102,7 +101,6 @@ public struct DKLaunchpadSidebar: View {
         runningMachines: Int? = nil,
         machineCount: Int? = nil,
         firmwareCount: Int? = nil,
-        bundleVersion: String? = nil,
         hostSetupNeedsAttention: Bool = false,
         bundlesNeedAttention: Bool = false,
         helperStatus: String? = nil,
@@ -114,7 +112,6 @@ public struct DKLaunchpadSidebar: View {
             runningMachines: runningMachines,
             machineCount: machineCount,
             firmwareCount: firmwareCount,
-            bundleVersion: bundleVersion,
             hostSetupNeedsAttention: hostSetupNeedsAttention,
             bundlesNeedAttention: bundlesNeedAttention,
         )
@@ -140,7 +137,6 @@ public struct DKLaunchpadSidebar: View {
         runningMachines: Int? = nil,
         machineCount: Int? = nil,
         firmwareCount: Int? = nil,
-        bundleVersion: String? = nil,
         hostSetupNeedsAttention: Bool = false,
         bundlesNeedAttention: Bool = false,
     ) -> [DKSidebarSection<DKLaunchpadDestination>] {
@@ -158,8 +154,8 @@ public struct DKLaunchpadSidebar: View {
                 case .firmwares:
                     item.count = firmwareCount
                 case .bundles:
-                    item.meta = bundleVersion
-                    item.isMetaMonospaced = true
+                    // No version: a local build's name ("2.6.0-local.0d5e6f90")
+                    // crowds out the row's label, and the Bundles page names it.
                     item.isWarning = bundlesNeedAttention
                 case .hostSetup:
                     item.isWarning = hostSetupNeedsAttention
@@ -194,7 +190,6 @@ private struct DKLaunchpadSidebarPreview: View {
             runningMachines: 1,
             machineCount: 4,
             firmwareCount: 4,
-            bundleVersion: "2.6.0",
             hostSetupNeedsAttention: true,
             helperStatus: "Helper 2.6.0 ready",
             libraryPath: "~/VPhone",

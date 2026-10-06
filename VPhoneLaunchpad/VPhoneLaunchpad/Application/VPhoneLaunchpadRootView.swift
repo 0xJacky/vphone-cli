@@ -28,6 +28,7 @@ struct VPhoneLaunchpadRootView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .environment(\.dkPageHeaderWindowControls, !model.showsSidebar)
         }
+        .frame(minWidth: VPhoneLaunchpadWindowSize.minimum.width, minHeight: VPhoneLaunchpadWindowSize.minimum.height)
         // The content runs under the transparent title bar to the window's
         // top edge; the headers and the sidebar band take its place.
         .ignoresSafeArea(.container, edges: .top)

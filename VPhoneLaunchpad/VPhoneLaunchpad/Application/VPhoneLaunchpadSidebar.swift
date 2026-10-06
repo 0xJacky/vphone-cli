@@ -31,7 +31,6 @@ struct VPhoneLaunchpadSidebar: View {
             running: library.runningCount,
             total: library.machines.count,
             firmwareCount: model.firmwareCount,
-            bundleVersion: model.bundles.defaultVersion,
             hostWarning: model.hostNeedsAttention,
             bundleWarning: model.bundleNeedsAttention,
         )

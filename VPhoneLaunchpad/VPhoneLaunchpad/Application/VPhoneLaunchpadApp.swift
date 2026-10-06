@@ -27,6 +27,12 @@ struct VPhoneLaunchpadApp: App {
         // header, and the window moves by any part of it that is not a control.
         .windowStyle(.hiddenTitleBar)
         .windowBackgroundDragBehavior(.enabled)
+        // Sized from the screen it opens on; never smaller than the root
+        // view's minimum frame.
+        .defaultWindowPlacement { _, context in
+            WindowPlacement(size: VPhoneLaunchpadWindowSize.ideal(forVisible: context.defaultDisplay.visibleRect.size))
+        }
+        .windowResizability(.contentMinSize)
         // Nor is any saved: the window's frame is kept under its own name.
         .restorationBehavior(.disabled)
         .commands {

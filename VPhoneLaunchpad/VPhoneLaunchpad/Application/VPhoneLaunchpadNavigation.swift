@@ -11,6 +11,35 @@ extension DKLaunchpadDestination {
     }
 }
 
+// MARK: - Window Size
+
+/// The main window's size. The minimum keeps the sidebar, a page's table and
+/// the Machines inspector side by side; the first open takes most of the
+/// screen it lands on, as Finder and Xcode do, within a ceiling that keeps a
+/// large display from getting an unreadably wide window. After that the
+/// window keeps the frame the user gave it.
+nonisolated enum VPhoneLaunchpadWindowSize {
+    static let minimum = CGSize(width: 1080, height: 680)
+    static let maximumIdeal = CGSize(width: 1680, height: 1080)
+    /// The share of the screen's visible area the first open takes.
+    static let screenShare = CGSize(width: 0.8, height: 0.85)
+
+    /// The size for a first open on a screen whose visible area (menu bar
+    /// and Dock taken off) is `visible`: a share of it, at least the
+    /// minimum, at most the ceiling, and never larger than the screen.
+    static func ideal(forVisible visible: CGSize) -> CGSize {
+        func side(_ visible: CGFloat, share: CGFloat, minimum: CGFloat, maximum: CGFloat) -> CGFloat {
+            guard visible > 0 else { return minimum }
+            let wanted = min(max((visible * share).rounded(), minimum), maximum)
+            return min(wanted, visible)
+        }
+        return CGSize(
+            width: side(visible.width, share: screenShare.width, minimum: minimum.width, maximum: maximumIdeal.width),
+            height: side(visible.height, share: screenShare.height, minimum: minimum.height, maximum: maximumIdeal.height),
+        )
+    }
+}
+
 // MARK: - Panels
 
 /// What `VPhoneLaunchpadModel.present(_:)` asks for. Host Setup and Core
@@ -79,7 +108,6 @@ enum VPhoneLaunchpadSidebarMeta {
         running: Int,
         total: Int,
         firmwareCount: Int?,
-        bundleVersion: String?,
         hostWarning: Bool,
         bundleWarning: Bool,
     ) -> [DKSidebarSection<DKLaunchpadDestination>] {
@@ -88,7 +116,6 @@ enum VPhoneLaunchpadSidebarMeta {
             runningMachines: listed ? running : nil,
             machineCount: listed ? total : nil,
             firmwareCount: firmwareCount.flatMap { $0 > 0 ? $0 : nil },
-            bundleVersion: bundleVersion,
             hostSetupNeedsAttention: hostWarning,
             bundlesNeedAttention: bundleWarning,
         ).map { section in

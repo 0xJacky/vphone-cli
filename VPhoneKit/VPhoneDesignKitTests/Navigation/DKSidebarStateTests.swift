@@ -40,10 +40,10 @@ struct DKSidebarStateTests {
 
     @Test
     func `the launchpad sidebar can warn on Bundles`() throws {
-        let items = DKLaunchpadSidebar.sections(bundleVersion: "2.6.0", bundlesNeedAttention: true).allSidebarItems()
+        let items = DKLaunchpadSidebar.sections(bundlesNeedAttention: true).allSidebarItems()
         let bundles = try #require(items.first { $0.id == .bundles })
         #expect(bundles.isWarning)
-        #expect(bundles.trailingText == "2.6.0")
+        #expect(bundles.trailingText == nil)
         #expect(DKLaunchpadSidebar.sections().allSidebarItems().allSatisfy { !$0.isWarning })
     }
 

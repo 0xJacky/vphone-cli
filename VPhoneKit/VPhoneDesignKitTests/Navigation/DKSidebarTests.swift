@@ -20,12 +20,11 @@ struct DKSidebarTests {
     }
 
     @Test
-    func `the launchpad sidebar shows running machines, counts, the bundle version and the host setup warning`() throws {
+    func `the launchpad sidebar shows running machines, counts and the host setup warning, and no bundle version`() throws {
         let sections = DKLaunchpadSidebar.sections(
             runningMachines: 1,
             machineCount: 4,
             firmwareCount: 4,
-            bundleVersion: "2.6.0",
             hostSetupNeedsAttention: true,
         )
         #expect(sections.map(\.title) == ["Library", "System"])
@@ -41,8 +40,7 @@ struct DKSidebarTests {
         #expect(firmwares.metaTone == nil)
 
         let bundles = try #require(items.first { $0.id == .bundles })
-        #expect(bundles.trailingText == "2.6.0")
-        #expect(bundles.isMetaMonospaced)
+        #expect(bundles.trailingText == nil)
 
         let host = try #require(items.first { $0.id == .hostSetup })
         #expect(host.isWarning)
