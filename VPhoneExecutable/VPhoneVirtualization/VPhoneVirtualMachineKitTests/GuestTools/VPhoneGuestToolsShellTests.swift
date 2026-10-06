@@ -67,6 +67,45 @@ struct VPhoneGuestToolsShellTests {
         }
     }
 
+    // MARK: - Chrome
+
+    @Test
+    func `the window draws its own chrome, with no toolbar or system buttons`() throws {
+        let shell = VPhoneGuestToolsShell(control: VPhoneGuestControl(), machineName: "test")
+        defer { VPhoneGuestToolsShellWindow.close(shell) }
+        shell.show(.apps)
+        let window = try #require(VPhoneGuestToolsShellWindow.windows(shell).first)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+
+        #expect(window.toolbar == nil)
+        #expect(window.titleVisibility == .hidden)
+        #expect(window.titlebarAppearsTransparent)
+        #expect(window.titlebarSeparatorStyle == .none)
+        #expect(window.styleMask.contains(.fullSizeContentView))
+        // The sidebar's own buttons take over from the system ones.
+        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            #expect(window.standardWindowButton(kind)?.isHidden != false, "\(kind)")
+        }
+        // The title stays for the Window menu and accessibility.
+        #expect(window.title == String(localized: "Guest Tools", bundle: VPhoneLocalization.bundle))
+        #expect(window.subtitle == "test")
+    }
+
+    @Test
+    func `find focuses the search field in the page header`() throws {
+        let shell = VPhoneGuestToolsShell(control: VPhoneGuestControl(), machineName: "test")
+        defer { VPhoneGuestToolsShellWindow.close(shell) }
+        shell.show(.apps)
+        let window = try #require(VPhoneGuestToolsShellWindow.windows(shell).first)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+
+        let root = try #require(window.contentView)
+        let field = try #require(VPhoneGuestToolsShell.firstSearchField(in: root))
+        shell.focusSearchField()
+        let editor = window.firstResponder as? NSTextView
+        #expect(window.firstResponder === field || editor?.delegate === field)
+    }
+
     // MARK: - Last Tool
 
     @Test

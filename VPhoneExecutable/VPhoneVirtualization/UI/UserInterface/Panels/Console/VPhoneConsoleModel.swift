@@ -78,7 +78,7 @@ final class VPhoneConsoleModel {
         }
     }
 
-    /// Captures once. Toolbar Refresh uses this while the stream is paused.
+    /// Captures once. The header's Refresh uses this while the stream is paused.
     func captureOnce() async {
         guard !isCapturing, control.isConnected else { return }
         await capture(force: true)

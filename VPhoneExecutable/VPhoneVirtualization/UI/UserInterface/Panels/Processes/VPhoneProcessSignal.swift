@@ -11,7 +11,7 @@ enum VPhoneProcessSignal: String, CaseIterable, Identifiable {
     case usr1 = "USR1"
     case usr2 = "USR2"
 
-    /// The signals the toolbar Signal menu offers; Terminate has its own button.
+    /// The signals the header's Signal menu offers; Terminate has its own button.
     static let menuSignals: [VPhoneProcessSignal] = [.kill, .stop, .cont, .hup, .int, .usr1, .usr2]
 
     var id: Self {

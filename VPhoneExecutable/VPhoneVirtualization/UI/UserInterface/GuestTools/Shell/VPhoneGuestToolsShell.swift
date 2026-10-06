@@ -117,17 +117,15 @@ final class VPhoneGuestToolsShell: NSObject, NSWindowDelegate {
         window?.isKeyWindow == true && selection == tool
     }
 
-    /// Puts the keyboard focus in the first search field of the shown page.
+    /// Puts the keyboard focus in the search field in the shown page's header.
     func focusSearchField() {
-        guard let window, let root = window.contentView else { return }
-        if let field = Self.firstSearchField(in: root) ?? window.toolbar?.items
-            .compactMap({ ($0 as? NSSearchToolbarItem)?.searchField }).first
-        {
-            window.makeFirstResponder(field)
-        }
+        guard let window, let root = window.contentView,
+              let field = Self.firstSearchField(in: root)
+        else { return }
+        window.makeFirstResponder(field)
     }
 
-    private static func firstSearchField(in view: NSView) -> NSSearchField? {
+    static func firstSearchField(in view: NSView) -> NSSearchField? {
         if let field = view as? NSSearchField, !field.isHidden {
             return field
         }
@@ -185,9 +183,13 @@ final class VPhoneGuestToolsShell: NSObject, NSWindowDelegate {
 
     private func makeWindow() -> NSWindow {
         let hostingController = NSHostingController(rootView: VPhoneGuestToolsView(shell: self))
-        // Pages that still put their tools in a window toolbar keep them there.
-        hostingController.sceneBridgingOptions = [.toolbars]
+        // The window has no toolbar: every page keeps its tools and its
+        // search field in its own header.
+        hostingController.sceneBridgingOptions = []
         hostingController.sizingOptions = [.minSize]
+        // The sidebar and the page headers run to the window's top edge, so
+        // the title bar safe area must not push them down.
+        hostingController.safeAreaRegions = []
 
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: Self.defaultSize),
@@ -195,14 +197,16 @@ final class VPhoneGuestToolsShell: NSObject, NSWindowDelegate {
             backing: .buffered,
             defer: false,
         )
+        // The chrome is the content's own: the sidebar draws the window
+        // buttons, which hide the system ones, and each page header runs
+        // under the transparent title bar. The title and subtitle are still
+        // set for the Window menu and accessibility.
         window.title = String(localized: "Guest Tools", bundle: VPhoneLocalization.bundle)
         window.subtitle = machineName
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
+        DKWindowChromeStyle.apply(to: window)
         window.contentViewController = hostingController
         window.contentMinSize = Self.minimumSize
         window.setContentSize(Self.defaultSize)
-        window.toolbarStyle = .unified
         window.isReleasedWhenClosed = false
         window.level = .normal
         window.delegate = self

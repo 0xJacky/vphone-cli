@@ -5,6 +5,10 @@ import VPhoneDesignKit
 
 /// The Guest Tools window: the guest sidebar beside the selected tool's page.
 /// Each page draws its own header and status bar, so the panel gets neither.
+///
+/// The window has no system title bar, toolbar or buttons of its own: the
+/// sidebar draws close, minimize and zoom at its top, and each page header
+/// runs to the window's top edge, its title in line with the buttons.
 struct VPhoneGuestToolsView: View {
     @Bindable var shell: VPhoneGuestToolsShell
 
@@ -19,6 +23,8 @@ struct VPhoneGuestToolsView: View {
             page
                 .id(shell.selection)
         }
+        .environment(\.dkLocalizationBundle, VPhoneLocalization.bundle)
+        .environment(\.dkPageHeaderIsTitleBar, true)
     }
 
     @ViewBuilder
@@ -66,7 +72,7 @@ struct VPhoneGuestToolsSidebar: View {
 
     var body: some View {
         let control = shell.control
-        DKSidebar(sections: sections, selection: $shell.selection, header: {
+        DKSidebar(sections: sections, selection: $shell.selection, windowControls: true, header: {
             DKSidebarMachineHeader(
                 shell.machineName,
                 tone: DKConnectionState(isConnected: control.isConnected).tone,

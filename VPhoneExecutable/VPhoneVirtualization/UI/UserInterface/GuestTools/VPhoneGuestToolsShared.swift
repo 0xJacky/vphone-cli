@@ -3,7 +3,7 @@ import VPhoneDesignKit
 
 // MARK: - Mode
 
-/// The toolbar switch each guest tool window shows.
+/// The Read/Write switch in a guest tool page's header.
 enum VPhoneGuestToolMode: String, CaseIterable, Identifiable {
     case read
     case write
@@ -57,7 +57,7 @@ struct VPhoneGuestToolStatus {
 
 // MARK: - Shortcuts
 
-/// A keyboard shortcut for a toolbar action.
+/// A keyboard shortcut for a page header action.
 struct VPhoneGuestToolShortcut {
     let key: KeyEquivalent
     var modifiers: EventModifiers = .command
@@ -66,7 +66,7 @@ struct VPhoneGuestToolShortcut {
 }
 
 extension View {
-    /// Adds keyboard shortcuts for toolbar actions. The buttons are invisible
+    /// Adds keyboard shortcuts for page header actions. The buttons are invisible
     /// but stay in the hosting view, where AppKit routes key equivalents.
     func guestToolShortcuts(_ shortcuts: [VPhoneGuestToolShortcut]) -> some View {
         background {
