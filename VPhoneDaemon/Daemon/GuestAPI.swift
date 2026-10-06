@@ -101,6 +101,7 @@ enum GuestAPI {
                 "bootstrap_install",
                 "bootstrap_uninstall",
                 "port_forward",
+                "terminal",
                 "camera",
                 "screenshot",
                 "device_info",

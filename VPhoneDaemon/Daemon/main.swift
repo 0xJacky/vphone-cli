@@ -46,7 +46,8 @@ do {
                     // that carries Origin or a non-loopback Host. The refused
                     // request then reaches GuestHyperTextHandler, which replies 403.
                     let allowed = GuestHyperTextHandler.isLocalClient(request.headers) &&
-                        (request.uri == "/v1/events" || GuestPortForwardHandler.port(from: request.uri) != nil)
+                        (request.uri == "/v1/events" || GuestTerminalWire.isTerminal(request.uri) ||
+                            GuestPortForwardHandler.port(from: request.uri) != nil)
                     guard allowed else { return channel.eventLoop.makeSucceededFuture(nil) }
                     // A client that gave the host proxy its token as a WebSocket
                     // subprotocol expects the server to select that protocol.
@@ -74,6 +75,15 @@ do {
                                     maxAccumulatedFrameSize: 1 << 20,
                                 ),
                                 GuestPortForwardHandler(port: port),
+                            ])
+                        } else if GuestTerminalWire.isTerminal(request.uri) {
+                            try sync.addHandlers([
+                                NIOWebSocketFrameAggregator(
+                                    minNonFinalFragmentSize: 1,
+                                    maxAccumulatedFrameCount: 32,
+                                    maxAccumulatedFrameSize: 1 << 20,
+                                ),
+                                GuestTerminalHandler(uri: request.uri),
                             ])
                         } else {
                             try sync.addHandlers([

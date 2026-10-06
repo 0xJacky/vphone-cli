@@ -84,3 +84,23 @@ NSDictionary *vp_network_hostname_set(NSString *name, NSString **error);
 /// publishes what it derives from them.
 BOOL vp_preferences_apply(NSString **error);
 #endif
+
+/// One shell for a host terminal: what to run, as whom, and the starting size.
+typedef struct {
+    const char *path;
+    char *const *argv;
+    char *const *envp;
+    /// Tried first; the child falls back to "/" when it cannot enter it.
+    const char *cwd;
+    uint32_t uid;
+    uint32_t gid;
+    uint16_t columns;
+    uint16_t rows;
+} VPPtySpawnRequest;
+
+/// Start `request->path` on a new pseudo-terminal, as the session leader with
+/// the terminal as its controlling terminal, under `uid`/`gid`. On success
+/// returns 0 with the close-on-exec master in `*master` and the child in
+/// `*pid`; the caller owns both and must reap the child. Otherwise returns an
+/// errno value and leaves nothing open.
+int vp_pty_spawn(const VPPtySpawnRequest *request, int *master, int32_t *pid);

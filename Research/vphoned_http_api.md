@@ -209,6 +209,24 @@ WebSocket fragmentation is reassembled before forwarding. On disconnect, the
 guest tunnel and the host TCP-to-VSOCK proxy let their final queued write
 finish before closing the opposite socket, with a five-second drain limit.
 
+For a shell, upgrade `GET /v1/terminal?cols=<n>&rows=<n>[&name=<machine>]` to
+WebSocket (capability `terminal`; the VM's Window › Terminal uses it). Each
+connection is one shell on its own pseudo-terminal and lives exactly as long as
+the connection: closing it sends SIGHUP to the shell's process group, then
+SIGKILL after three seconds, and vphoned reaps the child. At most 16 run at
+once. Binary frames carry terminal bytes, keyboard input to the guest and shell
+output to the host. Text frames carry JSON control messages: the host sends
+`{"type":"resize","cols":n,"rows":n}` (TIOCSWINSZ, 1–1000 each); the guest
+sends `{"type":"started","pid":n,"shell":path,"layout":…,"user":"mobile"}`,
+then `{"type":"exit","status":n}` or `{"type":"exit","signal":n}` before a
+1000 close, or `{"type":"error","code":…,"message":…}` before a 1011 close.
+`no_shell` means no bootstrap shell exists yet. The shell is the first of bash,
+zsh and sh found in the detected bootstrap root, the RootHide root, `/var/jb`
+or `/`, started as a login shell for `mobile` (uid/gid 501) with
+`TERM=xterm-256color`, the bootstrap's bin directories on `PATH`, and `name`
+in the prompt unless the profile sets its own. See
+`VPhoneDaemon/Daemon/GuestTerminal.swift`.
+
 `apps.launch` returns a PID and `frontmost_verified`. IcliKit 0.6.8 checks
 RunningBoard's live focal assertion and accepts it only when one real app owns
 it. iOS 26.6.2 uses `SuspendableRole-UIFocal`; older systems may use
