@@ -48,6 +48,25 @@ public enum DKWindowButton: String, Sendable, CaseIterable, Hashable {
         case .zoom: styleMask.contains(.resizable)
         }
     }
+
+    /// The buttons `window` offers right now: those its style has, less any
+    /// whose system button AppKit has disabled, such as zoom on a window held
+    /// to one size.
+    @MainActor
+    static func offered(in window: NSWindow) -> Set<DKWindowButton> {
+        Set(allCases.filter { button in
+            isAvailable(button, styleMask: window.styleMask)
+                && window.standardWindowButton(button.systemType)?.isEnabled != false
+        })
+    }
+
+    var systemType: NSWindow.ButtonType {
+        switch self {
+        case .close: .closeButton
+        case .minimize: .miniaturizeButton
+        case .zoom: .zoomButton
+        }
+    }
 }
 
 // MARK: - Controls
@@ -116,17 +135,20 @@ public struct DKWindowControls: View {
     }
 
     private func light(_ button: DKWindowButton) -> some View {
-        let showsColor = appearsActive || isHovering
+        // A button the window does not offer, such as zoom on a window that
+        // cannot resize, stays gray and shows no symbol, as the system's does.
+        let isAvailable = reference.offered.contains(button)
+        let showsColor = (appearsActive || isHovering) && isAvailable
         let dark = colorScheme == .dark
         return ZStack {
             Circle()
                 .fill(showsColor ? DKWindowControlsPalette.fill(button) : DKWindowControlsPalette.inactive(dark: dark))
             Circle()
                 .strokeBorder(showsColor ? DKWindowControlsPalette.rim(button) : DKWindowControlsPalette.inactiveRim(dark: dark), lineWidth: 0.5)
-            if pressed == button {
+            if pressed == button, isAvailable {
                 Circle().fill(DKWindowControlsPalette.pressed)
             }
-            if isHovering {
+            if isHovering, isAvailable {
                 Image(systemName: DKWindowButton.symbolName(button, option: isOptionDown))
                     .font(.system(size: button == .zoom && !isOptionDown ? 6.5 : 8, weight: .bold))
                     .foregroundStyle(DKWindowControlsPalette.glyph(button))
@@ -154,7 +176,7 @@ public struct DKWindowControls: View {
     }
 
     private func perform(_ button: DKWindowButton) {
-        guard let window = reference.window, DKWindowButton.isAvailable(button, styleMask: window.styleMask) else {
+        guard let window = reference.window, DKWindowButton.offered(in: window).contains(button) else {
             NSSound.beep()
             return
         }
@@ -239,6 +261,8 @@ enum DKWindowControlsPalette {
 @Observable
 final class DKWindowReference {
     private(set) var isFullScreen = false
+    /// The buttons the window offers; until there is a window, all three.
+    private(set) var offered = Set(DKWindowButton.allCases)
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored weak var window: NSWindow? {
         didSet {
@@ -250,6 +274,7 @@ final class DKWindowReference {
 
     private func adopt(_ window: NSWindow?) {
         guard let window else { return }
+        updateOffered(window)
         let fullScreen = window.styleMask.contains(.fullScreen)
         if isFullScreen != fullScreen {
             isFullScreen = fullScreen
@@ -272,10 +297,9 @@ final class DKWindowReference {
         }
         let resync: (Notification) -> Void = { [weak self] note in
             MainActor.assumeIsolated {
-                guard let self, let window = note.object as? NSWindow, window === self.window,
-                      !window.styleMask.contains(.fullScreen), self.isFullScreen,
-                      !window.inLiveResize
-                else { return }
+                guard let self, let window = note.object as? NSWindow, window === self.window else { return }
+                self.updateOffered(window)
+                guard !window.styleMask.contains(.fullScreen), self.isFullScreen, !window.inLiveResize else { return }
                 leaving(note)
             }
         }
@@ -287,6 +311,13 @@ final class DKWindowReference {
             center.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main, using: resync),
             center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main, using: resync),
         ]
+    }
+
+    private func updateOffered(_ window: NSWindow) {
+        let buttons = DKWindowButton.offered(in: window)
+        if offered != buttons {
+            offered = buttons
+        }
     }
 
     private func release(_ window: NSWindow?) {
@@ -346,6 +377,75 @@ public extension View {
     /// or a sidebar's `windowControls`) where the buttons go.
     func dkWindowChrome() -> some View {
         background(DKWindowStyler().frame(width: 0, height: 0))
+    }
+
+    /// Lifts this view under the transparent title bar to the window's top
+    /// edge, for a window that takes its height from its content, such as a
+    /// settings window. SwiftUI sizes such a window to the content plus the
+    /// title bar; this gives the title bar's height back, so the window ends
+    /// where the content does. A window the user sizes uses
+    /// `ignoresSafeArea(.container, edges: .top)` instead.
+    func dkContentUnderTitleBar() -> some View {
+        modifier(DKContentUnderTitleBar())
+    }
+}
+
+private struct DKContentUnderTitleBar: ViewModifier {
+    @State private var inset: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.top, -inset)
+            .background(DKTitleBarInsetReader(inset: $inset).frame(width: 0, height: 0))
+    }
+}
+
+/// Reads the height of the window's title bar: the part of its content view
+/// above the content layout rect.
+private struct DKTitleBarInsetReader: NSViewRepresentable {
+    @Binding var inset: CGFloat
+
+    func makeNSView(context _: Context) -> DKTitleBarInsetView {
+        let view = DKTitleBarInsetView()
+        view.onChange = { inset = $0 }
+        return view
+    }
+
+    func updateNSView(_ view: DKTitleBarInsetView, context _: Context) {
+        view.onChange = { inset = $0 }
+        view.measure()
+    }
+}
+
+private final class DKTitleBarInsetView: NSView {
+    var onChange: ((CGFloat) -> Void)?
+    private var reported: CGFloat?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        measure()
+    }
+
+    override func layout() {
+        super.layout()
+        measure()
+    }
+
+    func measure() {
+        guard let window, let contentView = window.contentView else { return }
+        let inset = max(0, contentView.frame.maxY - window.contentLayoutRect.maxY)
+        guard inset != reported else { return }
+        reported = inset
+        // Not during SwiftUI's update of this view.
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                self?.onChange?(inset)
+            }
+        }
+    }
+
+    override func hitTest(_: NSPoint) -> NSView? {
+        nil
     }
 }
 

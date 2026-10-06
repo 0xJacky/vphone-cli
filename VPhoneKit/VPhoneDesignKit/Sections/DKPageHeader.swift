@@ -27,10 +27,15 @@ import SwiftUI
 ///     DKButtonSpec("Check Again", glyph: .refresh) { recheck() },
 /// ])
 /// ```
+///
+/// A header at the window's top edge with no sidebar beside it holds the window
+/// buttons: set `dkPageHeaderWindowControls` and they lead the title, in line
+/// with it, where a sidebar's window band would put them.
 public struct DKPageHeader<Tools: View>: View {
     let title: String
     let subtitle: String?
     let tools: Tools
+    @Environment(\.dkPageHeaderWindowControls) private var windowControls
 
     @Environment(\.dkPageHeaderIsTitleBar) private var isTitleBar
 
@@ -58,12 +63,18 @@ public struct DKPageHeader<Tools: View>: View {
     }
 
     public var body: some View {
-        DKSectionsFlexLayout(horizontalSpacing: DK.Space.s2, verticalSpacing: 10) {
-            titles
-                .dkSectionsFlex(grow: 1)
-            if Tools.self != EmptyView.self {
-                DKSectionsFlexLayout(horizontalSpacing: DK.Space.s2, verticalSpacing: DK.Space.s2) {
-                    tools
+        HStack(alignment: .top, spacing: DK.Space.s3) {
+            if windowControls {
+                DKWindowControls()
+                    .padding(.top, DKPageHeaderMetrics.windowControlsTop)
+            }
+            DKSectionsFlexLayout(horizontalSpacing: DK.Space.s2, verticalSpacing: 10) {
+                titles
+                    .dkSectionsFlex(grow: 1)
+                if Tools.self != EmptyView.self {
+                    DKSectionsFlexLayout(horizontalSpacing: DK.Space.s2, verticalSpacing: DK.Space.s2) {
+                        tools
+                    }
                 }
             }
         }
@@ -107,12 +118,17 @@ public struct DKPageHeader<Tools: View>: View {
     }
 }
 
+enum DKPageHeaderMetrics {
+    /// The window buttons' top inside the header's padding: their centers sit
+    /// 22pt below the window's top edge, as in `DKSidebar`'s window band.
+    static let windowControlsTop: CGFloat = 22 - 7 - DK.Space.s3
+}
+
 public extension EnvironmentValues {
-    /// Whether page headers are their window's title bar: the window draws
-    /// its own chrome and each page's header runs to its top edge, beside
-    /// the window buttons. Such a header drags the window and keeps its
-    /// title in line with the buttons. Guest Tools sets it.
-    @Entry var dkPageHeaderIsTitleBar = false
+    /// Puts the window buttons at the leading end of each `DKPageHeader` below,
+    /// for a page that reaches the window's top-left corner, such as one whose
+    /// sidebar is hidden.
+    @Entry var dkPageHeaderWindowControls = false
 }
 
 public extension DKPageHeader where Tools == EmptyView {
