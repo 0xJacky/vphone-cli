@@ -34,6 +34,7 @@ struct VPhoneMenuBarTests {
     func `items keep the design's shortcuts`() throws {
         let bar = VPhoneMenuBarFixture()
         let expected: [(String, String, DKShortcut)] = [
+            ("VPhone", "Machine Details…", DKShortcut("i", [.command])),
             ("Edit", "Find…", DKShortcut("f", [.command])),
             ("Edit", "Show Guest Clipboard", DKShortcut("c", [.shift, .command])),
             ("Device", "Home Screen", DKShortcut("h", [.shift, .command])),

@@ -71,9 +71,23 @@ extension VPhoneMenuController {
         return item
     }
 
-    /// Window > Guest Tools, which the display window's title bar button
-    /// presses. It opens Guest Tools on the tool it showed last, Device Info
-    /// the first time, and is available while the guest agent is connected.
+    /// The app menu's Machine Details… (⌘I): Guest Tools on Device Info, where
+    /// the machine's details are. The display window's title bar holds only
+    /// Home, so this is the way in from the window. Available while the guest
+    /// agent is connected, as Guest Tools is.
+    func makeMachineDetailsItem() -> NSMenuItem {
+        makeValidatedItem(
+            "Machine Details…",
+            keyEquivalent: "i",
+            symbol: "info.circle",
+            isEnabled: { [weak self] in self?.guestToolsAvailable == true },
+            action: { [weak self] in self?.guestPanelsWindowController.shell.show(.deviceInfo) },
+        )
+    }
+
+    /// Window > Guest Tools. It opens Guest Tools on the tool it showed last,
+    /// Device Info the first time, and is available while the guest agent is
+    /// connected.
     /// The Window menu enables its items itself, so this one validates.
     func makeGuestToolsItem() -> NSMenuItem {
         makeValidatedItem(

@@ -144,6 +144,8 @@ class VPhoneMenuController {
         buildItem.isEnabled = false
         appMenu.addItem(buildItem)
         appMenu.addItem(NSMenuItem.separator())
+        appMenu.addItem(makeMachineDetailsItem())
+        appMenu.addItem(NSMenuItem.separator())
         appMenu.addItem(
             withTitle: "Quit VPhone",
             action: #selector(NSApplication.terminate(_:)),
