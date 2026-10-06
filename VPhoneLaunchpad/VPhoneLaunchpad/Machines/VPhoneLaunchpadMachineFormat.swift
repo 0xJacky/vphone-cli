@@ -107,3 +107,21 @@ nonisolated enum VPhoneLaunchpadMachineFormat {
         states.firstIndex { $0 == .active || $0 == .failed }.map { $0 + 1 }
     }
 }
+
+// MARK: - Terminal
+
+/// Why the VM's Terminal window did not open, from the error vphone-vm
+/// answered on vphone.sock. Nil for an error with nothing to add, which is
+/// then shown as it came.
+nonisolated enum VPhoneLaunchpadTerminalFailure {
+    static func reason(forDetail detail: String?) -> String? {
+        guard let detail else { return nil }
+        if detail.hasPrefix("unknown command") {
+            return String(localized: "This machine runs a Core Bundle without the Terminal. Change it to a newer bundle, then start the machine again.")
+        }
+        if detail.contains("headless") {
+            return String(localized: "The machine was started without a window. Stop it and start it with its window to use the Terminal.")
+        }
+        return nil
+    }
+}

@@ -16,7 +16,21 @@ struct MachinesLogicTests {
         steps()
         fields()
         logs()
+        terminal()
         print("MachinesLogicTests passed")
+    }
+
+    // MARK: - Terminal
+
+    static func terminal() {
+        typealias Failure = VPhoneLaunchpadTerminalFailure
+        // A bundle from before the Terminal does not know the command.
+        expect(Failure.reason(forDetail: "unknown command: terminal")?.contains("Core Bundle") == true, "old bundle")
+        // A headless launch has no window to open it in.
+        expect(Failure.reason(forDetail: "terminal needs a VM window; this launch is headless")?.contains("without a window") == true, "headless")
+        // Anything else is shown as it came.
+        expect(Failure.reason(forDetail: "guest not connected") == nil, "other errors pass through")
+        expect(Failure.reason(forDetail: nil) == nil, "no detail")
     }
 
     // MARK: - Machine menu

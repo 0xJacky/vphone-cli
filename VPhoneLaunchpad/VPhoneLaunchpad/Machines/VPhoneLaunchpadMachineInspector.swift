@@ -189,7 +189,16 @@ struct VPhoneLaunchpadMachineInspector: View {
                 ) { actions.start([machine]) })
             }
             if !isCreating {
-                DKButton(DKButtonSpec(String(localized: "Open Console"), glyph: .terminal, size: .icon) {
+                DKButton(DKButtonSpec(
+                    String(localized: "Open Terminal"),
+                    glyph: .terminal,
+                    size: .icon,
+                    isEnabled: state == .running,
+                    help: state == .running
+                        ? String(localized: "Open a shell in the guest")
+                        : String(localized: "Start the machine to open a shell in the guest"),
+                ) { actions.openTerminal(machine) })
+                DKButton(DKButtonSpec(String(localized: "Open Console"), glyph: .log, size: .icon) {
                     openConsole(path)
                 })
             }

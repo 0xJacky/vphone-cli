@@ -620,6 +620,24 @@ final class VPhoneLaunchpadMachineLibrary {
         return false
     }
 
+    /// Opens the machine's Terminal window, the shells in its guest. The
+    /// window belongs to the machine's vphone-vm, which is asked over
+    /// vphone.sock; the caller hands it the activation first so the window
+    /// comes to the front (`VPhoneLaunchpadMachineActions.openTerminal`).
+    func openTerminal(_ machine: Path) async {
+        let socket = machine.url.appendingPathComponent("vphone.sock").path
+        let request: [String: Any] = ["t": "terminal", "do": "open", "screen": false, "delay": 0]
+        do {
+            _ = try await VPhoneLaunchpadGuestSocket.send(request, socketPath: socket, timeout: 10)
+        } catch {
+            let detail = (error as? VPhoneLaunchpadError)?.detail
+            actionError = VPhoneLaunchpadError(
+                String(localized: "Unable to Open the Terminal of \(machine.name)"),
+                detail: VPhoneLaunchpadTerminalFailure.reason(forDetail: detail) ?? VPhoneLaunchpadError.message(for: error),
+            )
+        }
+    }
+
     /// Whether the machine's virtual machine is still up: the process
     /// Launchpad started, or for one started elsewhere, whoever holds its disk.
     private func isRunning(_ machine: Path) async -> Bool {

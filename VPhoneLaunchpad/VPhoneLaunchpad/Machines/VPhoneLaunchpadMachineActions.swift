@@ -89,6 +89,15 @@ struct VPhoneLaunchpadMachineActions {
         }
     }
 
+    func openTerminal(_ machine: VPhoneLaunchpadMachine) {
+        let library = library
+        // macOS lets an app take the front only when the active one yields
+        // it. Every vphone-vm has this identifier; only the one asked opens
+        // a window.
+        NSApp.yieldActivation(toApplicationWithBundleIdentifier: "com.vphone.bundle")
+        Task { await library.openTerminal(machine.path) }
+    }
+
     // MARK: - Menus
 
     /// The menu for `machines`, as the right-click menu and the ⋯ button

@@ -3869,6 +3869,34 @@
         }
       }
     },
+    "This machine runs a Core Bundle without the Terminal. Change it to a newer bundle, then start the machine again." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このマシンのコア Bundle にはターミナルがありません。新しい Bundle に変更してから、マシンをもう一度起動してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 머신의 코어 Bundle에는 터미널이 없습니다. 더 새로운 Bundle로 변경한 다음 머신을 다시 시작하십시오."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Máy này dùng Core Bundle không có Terminal. Hãy đổi sang bundle mới hơn rồi khởi động lại máy."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台虚拟机使用的核心 Bundle 不含终端。请更改为更新的 Bundle，然后重新启动虚拟机。"
+          }
+        }
+      }
+    },
     "Copy Prompt" : {
       "localizations" : {
         "en" : {
@@ -12313,6 +12341,62 @@
         }
       }
     },
+    "Open Terminal" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナルを開く"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "터미널 열기"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mở Terminal"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开终端"
+          }
+        }
+      }
+    },
+    "Open a shell in the guest" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲストでシェルを開きます"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게스트에서 셸 열기"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mở shell trong máy khách"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在客户机中打开 shell"
+          }
+        }
+      }
+    },
     "Open the workflow run on GitHub" : {
       "localizations" : {
         "en" : {
@@ -15301,6 +15385,34 @@
         }
       }
     },
+    "Start the machine to open a shell in the guest" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲストでシェルを開くには、マシンを起動してください"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게스트에서 셸을 열려면 머신을 시작하십시오"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Khởi động máy để mở shell trong máy khách"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启动虚拟机后才能在客户机中打开 shell"
+          }
+        }
+      }
+    },
     "Start the selected machine" : {
       "localizations" : {
         "en" : {
@@ -16394,6 +16506,34 @@
         }
       }
     },
+    "The machine was started without a window. Stop it and start it with its window to use the Terminal." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "マシンはウインドウなしで起動されています。ターミナルを使うには、停止してからウインドウ付きで起動してください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "머신이 윈도우 없이 시작되었습니다. 터미널을 사용하려면 중지한 다음 윈도우와 함께 시작하십시오."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Máy đã được khởi động không có cửa sổ. Hãy dừng rồi khởi động lại có cửa sổ để dùng Terminal."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台虚拟机是以无窗口方式启动的。请停止后以带窗口的方式启动，才能使用终端。"
+          }
+        }
+      }
+    },
     "The machine's disk, firmware and settings are removed. This cannot be undone." : {
       "localizations" : {
         "en" : {
@@ -16832,6 +16972,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法安装 Helper"
+          }
+        }
+      }
+    },
+    "Unable to Open the Terminal of %@" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ のターミナルを開けません"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@의 터미널을 열 수 없음"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Không thể mở Terminal của %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法打开 %@ 的终端"
           }
         }
       }
