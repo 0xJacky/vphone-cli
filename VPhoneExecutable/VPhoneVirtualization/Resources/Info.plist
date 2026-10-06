@@ -8,11 +8,24 @@
 	<string>VPhone</string>
 	<key>CFBundlePackageType</key>
 	<string>BNDL</string>
-	<key>CFBundleVersion</key>
-	<string>34</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.7.0</string>
+	<string>2.6.0</string>
+	<key>CFBundleVersion</key>
+	<string>32</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Shares this Mac's microphone with the virtual iPhone so apps running inside it can record.</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>VPhone Terminal Tab</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.vphone.terminal-tab</string>
+		</dict>
+	</array>
 </dict>
 </plist>

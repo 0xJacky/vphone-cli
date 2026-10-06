@@ -87,61 +87,14 @@ enum VPhoneTerminalSessionState: Equatable {
     }
 }
 
-// MARK: - Tab List
+// MARK: - Tab Numbers
 
-/// The Terminal window's tabs: their order, their numbers and the selection.
-/// The first tab is named after the machine, later ones add their number
-/// ("research-26 (2)"); numbers go on from the highest open one and start
-/// over once every tab is closed.
-struct VPhoneTerminalTabList<ID: Hashable & Sendable> {
-    struct Entry: Equatable {
-        let id: ID
-        let number: Int
-    }
-
-    private(set) var entries: [Entry] = []
-    var selection: ID?
-
-    var isEmpty: Bool {
-        entries.isEmpty
-    }
-
-    var ids: [ID] {
-        entries.map(\.id)
-    }
-
-    /// Adds a tab after the others and selects it. Returns its number.
-    @discardableResult
-    mutating func add(_ id: ID) -> Int {
-        let number = (entries.map(\.number).max() ?? 0) + 1
-        entries.append(Entry(id: id, number: number))
-        selection = id
-        return number
-    }
-
-    /// Removes a tab. Closing the selected tab selects its right neighbour,
-    /// or its left one when it was last, as `DKTabStrip` does.
-    mutating func remove(_ id: ID) {
-        let tabs = entries.map { DKTab(id: $0.id, title: "") }
-        selection = tabs.selectionAfterClosingTab(id, selection: selection)
-        entries.removeAll { $0.id == id }
-    }
-
-    /// Keeps only the tabs in `ids`, in their order there; returns the ones
-    /// dropped. The tab strip edits its own copy of the list this way.
-    @discardableResult
-    mutating func keep(_ ids: [ID]) -> [ID] {
-        let dropped = entries.filter { !ids.contains($0.id) }.map(\.id)
-        for id in dropped {
-            remove(id)
-        }
-        let order = Dictionary(uniqueKeysWithValues: ids.enumerated().map { ($1, $0) })
-        entries.sort { (order[$0.id] ?? .max) < (order[$1.id] ?? .max) }
-        return dropped
-    }
-
-    func number(of id: ID) -> Int? {
-        entries.first { $0.id == id }?.number
+/// How the Terminal window's tabs are named: the first after the machine,
+/// later ones with their number ("research-26 (2)"). Numbers go on from the
+/// highest open tab, in any pane, and start over once every tab is closed.
+enum VPhoneTerminalTabNumbering {
+    static func next(after open: [Int]) -> Int {
+        (open.max() ?? 0) + 1
     }
 
     static func title(machine: String, number: Int) -> String {

@@ -130,63 +130,79 @@ struct VPhoneTerminalSessionStateTests {
 
 // MARK: - Tabs
 
-@Suite("Terminal tabs")
-struct VPhoneTerminalTabListTests {
+@Suite("Terminal tab numbers")
+struct VPhoneTerminalTabNumberingTests {
     @Test
     func `tabs are numbered after the machine and start over when all close`() {
-        var list = VPhoneTerminalTabList<Int>()
-        #expect(list.add(1) == 1)
-        #expect(list.add(2) == 2)
-        #expect(list.add(3) == 3)
-        #expect(VPhoneTerminalTabList<Int>.title(machine: "research-26", number: 1) == "research-26")
-        #expect(VPhoneTerminalTabList<Int>.title(machine: "research-26", number: 2) == "research-26 (2)")
+        #expect(VPhoneTerminalTabNumbering.next(after: []) == 1)
+        #expect(VPhoneTerminalTabNumbering.next(after: [1, 2, 3]) == 4)
+        // Numbers go on from the highest open tab, in any pane.
+        #expect(VPhoneTerminalTabNumbering.next(after: [1, 4]) == 5)
+        #expect(VPhoneTerminalTabNumbering.next(after: [1]) == 2)
+        #expect(VPhoneTerminalTabNumbering.title(machine: "research-26", number: 1) == "research-26")
+        #expect(VPhoneTerminalTabNumbering.title(machine: "research-26", number: 2) == "research-26 (2)")
+    }
+}
 
-        // Numbers go on from the highest open tab.
-        list.remove(2)
-        #expect(list.add(4) == 4)
-        list.remove(3)
-        list.remove(4)
-        #expect(list.add(5) == 2)
-
-        list.remove(1)
-        list.remove(5)
-        #expect(list.isEmpty)
-        #expect(list.add(6) == 1)
+/// The Terminal window's panes, without a guest: sessions never connect, so
+/// these exercise only the wiring between the pane model and the shells.
+@MainActor
+@Suite("Terminal panes", .serialized)
+struct VPhoneTerminalPaneTests {
+    private func makeController() -> VPhoneTerminalWindowController {
+        VPhoneTerminalWindowController(control: VPhoneGuestControl(), machineName: "research-26")
     }
 
     @Test
-    func `a new tab is selected and closing it selects a neighbour`() {
-        var list = VPhoneTerminalTabList<Int>()
-        list.add(1)
-        list.add(2)
-        list.add(3)
-        #expect(list.selection == 3)
-
-        list.selection = 2
-        list.remove(2)
-        #expect(list.selection == 3)
-        list.remove(3)
-        #expect(list.selection == 1)
-        // Closing a tab that is not selected keeps the selection.
-        list.add(4)
-        list.selection = 1
-        list.remove(4)
-        #expect(list.selection == 1)
-        list.remove(1)
-        #expect(list.selection == nil)
+    func `new tabs open in the active pane and number on`() throws {
+        let controller = makeController()
+        controller.newTab()
+        controller.newTab()
+        #expect(controller.sessions.map(\.number) == [1, 2])
+        let first = try #require(controller.panes.allTabs.first)
+        let pane = try #require(controller.panes.activeGroupID)
+        controller.panes.moveTab(first.id, toGroup: pane, zone: .trailing)
+        #expect(controller.panes.groupCount == 2)
+        controller.newTab()
+        let active = try #require(controller.panes.activeGroup)
+        #expect(active.tabs.map(\.payload.number) == [1, 3])
     }
 
     @Test
-    func `keeping the strip's tabs drops the closed ones and follows its order`() {
-        var list = VPhoneTerminalTabList<Int>()
-        list.add(1)
-        list.add(2)
-        list.add(3)
-        let dropped = list.keep([3, 1])
-        #expect(dropped == [2])
-        #expect(list.ids == [3, 1])
-        #expect(list.number(of: 3) == 3)
-        #expect(list.number(of: 2) == nil)
+    func `dropping the only tab on its own edge opens a second shell`() throws {
+        let controller = makeController()
+        controller.newTab()
+        let tab = try #require(controller.panes.allTabs.first)
+        let pane = try #require(controller.panes.activeGroupID)
+        controller.panes.moveTab(tab.id, toGroup: pane, zone: .bottom)
+        #expect(controller.panes.groupCount == 2)
+        #expect(controller.sessions.count == 2)
+        #expect(controller.sessions.map(\.number) == [1, 2])
+        #expect(VPhoneTerminalWindowController.describe(controller.panes.root, panes: controller.panes.groupIDs) == "V(0.50: 0 / 1)")
+    }
+
+    @Test
+    func `closing a pane's last tab ends its shell and collapses the split`() throws {
+        let controller = makeController()
+        controller.newTab()
+        controller.newTab()
+        let second = try #require(controller.panes.allTabs.last)
+        let pane = try #require(controller.panes.activeGroupID)
+        controller.panes.moveTab(second.id, toGroup: pane, zone: .leading)
+        #expect(controller.panes.groupCount == 2)
+        controller.closeTab(second.id)
+        #expect(controller.panes.groupCount == 1)
+        #expect(controller.sessions.map(\.number) == [1])
+        #expect(second.payload.state == .connecting)
+    }
+
+    @Test
+    func `the split layout reads as one line`() {
+        let a = UUID(), b = UUID(), c = UUID()
+        let layout = DKPaneLayout.leaf(paneID: a)
+            .splitting(paneID: a, direction: .horizontal, newPaneID: b, splitID: UUID())
+            .splitting(paneID: b, direction: .vertical, newPaneID: c, splitID: UUID(), fraction: 0.25)
+        #expect(VPhoneTerminalWindowController.describe(layout, panes: [a, b, c]) == "H(0.50: 0 | V(0.25: 1 / 2))")
     }
 }
 

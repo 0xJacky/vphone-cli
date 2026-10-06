@@ -2,6 +2,7 @@ import AppKit
 import GhosttyTerminal
 import Observation
 import SwiftUI
+import UniformTypeIdentifiers
 import VPhoneDesignKit
 
 // MARK: - Window Controller
@@ -10,16 +11,25 @@ import VPhoneDesignKit
 /// display window. Window › Terminal opens it, or brings it forward; opening it
 /// with no tab starts one. Closing a tab ends its shell, and closing the window
 /// ends them all, so a shell never outlives what shows it.
+///
+/// Tabs live in split panes (`DKPaneGroupsModel`), after uTerm: drag a tab onto
+/// a pane's edge to split it, onto its center to move the tab there, or drag a
+/// splitter to resize. A pane whose last tab closes collapses, and the window
+/// closes with its last tab. New tabs open in the active pane, and the keyboard
+/// follows it.
 @MainActor
 @Observable
 final class VPhoneTerminalWindowController: NSObject, NSWindowDelegate {
     static let defaultSize = NSSize(width: 860, height: 560)
     static let minimumSize = NSSize(width: 480, height: 300)
+    /// Dragged tabs carry this type, declared in the bundle's Info.plist.
+    static let tabDragType = UTType(exportedAs: "com.vphone.terminal-tab")
 
     let control: VPhoneGuestControl
     let machineName: String
-    private(set) var sessions: [VPhoneTerminalSession] = []
-    fileprivate var tabList = VPhoneTerminalTabList<UUID>()
+    let panes = DKPaneGroupsModel<VPhoneTerminalSession>(
+        policy: DKPaneGroupsPolicy(collapsesEmptyGroups: true, allowsLastGroupEmpty: false, keepAlive: .allTabs),
+    )
 
     @ObservationIgnored fileprivate var window: NSWindow?
 
@@ -27,6 +37,11 @@ final class VPhoneTerminalWindowController: NSObject, NSWindowDelegate {
         self.control = control
         self.machineName = machineName
         super.init()
+        panes.onTabRemoved = { removed, _ in removed.payload.close() }
+        panes.onAreaEmptied = { [weak self] in self?.closeWindowIfOpen() }
+        // The only tab of a pane dropped on that pane's own edge: a second
+        // shell beside it, as in uTerm.
+        panes.cloneTab = { [weak self] _ in self?.makeTab() }
     }
 
     // MARK: Showing
@@ -34,12 +49,12 @@ final class VPhoneTerminalWindowController: NSObject, NSWindowDelegate {
     /// Brings the window forward, creating it and a first tab when needed.
     func show() {
         let window = window ?? makeWindow()
-        if sessions.isEmpty {
+        if panes.isEmpty {
             newTab()
         }
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
-        focusSelection()
+        focusActivePane()
     }
 
     /// True while the Terminal window is the key window, for New Terminal Tab.
@@ -53,52 +68,21 @@ final class VPhoneTerminalWindowController: NSObject, NSWindowDelegate {
 
     // MARK: Tabs
 
-    var selection: UUID? {
-        get { tabList.selection }
-        set {
-            guard newValue != tabList.selection else { return }
-            tabList.selection = newValue
-            focusSelection()
-        }
+    var sessions: [VPhoneTerminalSession] {
+        panes.allTabs.map(\.payload)
     }
 
-    /// The strip's tabs; setting it keeps the tabs the strip kept, which is
-    /// how its close buttons close a tab.
-    var tabs: [DKTab<UUID>] {
-        get {
-            tabList.entries.compactMap { entry in
-                guard let session = session(entry.id) else { return nil }
-                return DKTab(
-                    id: entry.id,
-                    title: VPhoneTerminalTabList<UUID>.title(machine: machineName, number: entry.number),
-                    glyph: .terminal,
-                    statusTone: session.state.tone,
-                    help: help(for: session),
-                )
-            }
-        }
-        set {
-            for id in tabList.keep(newValue.map(\.id)) {
-                end(id)
-            }
-            closeWindowIfEmpty()
-        }
+    /// Opens a shell in the active pane, or in `groupID`.
+    func newTab(in groupID: UUID? = nil) {
+        let tab = makeTab()
+        panes.openTab({ tab }, in: groupID)
+        focusActivePane()
     }
 
-    func newTab() {
-        let session = VPhoneTerminalSession(control: control, machineName: machineName)
-        session.onStateChange = { [weak self] session in self?.stateChanged(session) }
-        sessions.append(session)
-        tabList.add(session.id)
-        focusSelection()
-    }
-
+    /// Asks a tab to close: its shell ends.
     func closeTab(_ id: UUID) {
-        guard tabList.ids.contains(id) else { return }
-        tabList.remove(id)
-        end(id)
-        closeWindowIfEmpty()
-        focusSelection()
+        panes.closeTab(id)
+        focusActivePane()
     }
 
     /// Closes the window, ending every shell: the title bar's Disconnect and Close.
@@ -106,13 +90,11 @@ final class VPhoneTerminalWindowController: NSObject, NSWindowDelegate {
         window?.performClose(nil)
     }
 
-    fileprivate func session(_ id: UUID) -> VPhoneTerminalSession? {
-        sessions.first { $0.id == id }
-    }
-
-    private func end(_ id: UUID) {
-        guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
-        sessions.remove(at: index).close()
+    private func makeTab() -> DKPaneTab<VPhoneTerminalSession> {
+        let number = VPhoneTerminalTabNumbering.next(after: sessions.map(\.number))
+        let session = VPhoneTerminalSession(control: control, machineName: machineName, number: number)
+        session.onStateChange = { [weak self] session in self?.stateChanged(session) }
+        return DKPaneTab(id: session.id, payload: session)
     }
 
     private func stateChanged(_ session: VPhoneTerminalSession) {
@@ -121,15 +103,27 @@ final class VPhoneTerminalWindowController: NSObject, NSWindowDelegate {
         }
     }
 
-    private func closeWindowIfEmpty() {
-        if tabList.isEmpty, window?.isVisible == true {
+    private func closeWindowIfOpen() {
+        if window?.isVisible == true {
             window?.close()
         }
     }
 
-    private func focusSelection() {
-        guard let id = tabList.selection, let session = session(id) else { return }
-        session.view.requestFocus()
+    /// Gives the keyboard to the active pane's terminal. Each pane also asks
+    /// for it when its `DKActivePaneGate` turns active.
+    func focusActivePane() {
+        panes.activeTab?.payload.view.requestFocus()
+    }
+
+    fileprivate func tabItem(_ tab: DKPaneTab<VPhoneTerminalSession>) -> DKTab<UUID> {
+        let session = tab.payload
+        return DKTab(
+            id: tab.id,
+            title: VPhoneTerminalTabNumbering.title(machine: machineName, number: session.number),
+            glyph: .terminal,
+            statusTone: session.state.tone,
+            help: help(for: session),
+        )
     }
 
     private func help(for session: VPhoneTerminalSession) -> String? {
@@ -174,17 +168,16 @@ final class VPhoneTerminalWindowController: NSObject, NSWindowDelegate {
         return window
     }
 
-
     nonisolated func windowDidBecomeKey(_: Notification) {
-        MainActor.assumeIsolated { focusSelection() }
+        MainActor.assumeIsolated { focusActivePane() }
     }
 
     nonisolated func windowWillClose(_: Notification) {
         MainActor.assumeIsolated {
-            for id in tabList.ids {
-                tabList.remove(id)
-                end(id)
-            }
+            // Every shell ends with the window; reset skips the removal hook.
+            let sessions = sessions
+            panes.reset()
+            sessions.forEach { $0.close() }
             window = nil
         }
     }
@@ -192,13 +185,12 @@ final class VPhoneTerminalWindowController: NSObject, NSWindowDelegate {
 
 // MARK: - Window Content
 
-/// The Terminal window: compact title bar, the shell tabs, the selected
-/// shell's terminal filling the window, and a compact status bar. Every tab's
-/// terminal stays in the view, hidden when not selected, so switching tabs
-/// keeps each one's screen and scrollback.
+/// The Terminal window: compact title bar, the panes of shell tabs filling the
+/// window, and a compact status bar. Every tab's terminal stays mounted,
+/// hidden when not in front, so switching, moving or splitting keeps each
+/// one's screen and scrollback.
 struct VPhoneTerminalWindowView: View {
-    @Bindable var model: VPhoneTerminalWindowController
-
+    let model: VPhoneTerminalWindowController
 
     var body: some View {
         let control = model.control
@@ -221,39 +213,28 @@ struct VPhoneTerminalWindowView: View {
                     ),
                 ],
             )
-            DKTabStrip(
-                tabs: $model.tabs,
-                selection: $model.selection,
+            DKPaneGroupArea(
+                model: model.panes,
+                dragType: VPhoneTerminalWindowController.tabDragType,
                 label: VPhoneLocalization.text("Terminal tabs"),
                 newTabLabel: VPhoneLocalization.text("New Terminal Tab"),
-                onNewTab: { model.newTab() },
+                tab: { model.tabItem($0) },
+                onNewTab: { model.newTab(in: $0) },
+                onRequestClose: { model.closeTab($0.id) },
+                content: { tab, _ in VPhoneTerminalPane(session: tab.payload) },
+                emptyGroup: { _ in DK.Palette.terminalBackground },
             )
-            terminals
             DK.Palette.divider.frame(height: DK.Metric.hairline)
             DKStatusBar(
                 isConnected: control.isConnected,
                 items: statusItems(control),
-                detail: VPhoneLocalization.format("%ld tabs", model.sessions.count),
+                detail: VPhoneLocalization.format("%ld tabs", model.panes.allTabs.count),
                 compact: true,
             )
         }
         .background(DK.Palette.window)
         .environment(\.dkLocalizationBundle, VPhoneLocalization.bundle)
         .frame(minWidth: VPhoneTerminalWindowController.minimumSize.width, minHeight: VPhoneTerminalWindowController.minimumSize.height)
-    }
-
-    private var terminals: some View {
-        ZStack {
-            DK.Palette.terminalBackground
-            ForEach(model.sessions) { session in
-                let isSelected = session.id == model.selection
-                TerminalSurfaceView(context: session.view)
-                    .opacity(isSelected ? 1 : 0)
-                    .allowsHitTesting(isSelected)
-                    .accessibilityHidden(!isSelected)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func osText(_ control: VPhoneGuestControl) -> String {
@@ -276,6 +257,23 @@ struct VPhoneTerminalWindowView: View {
     }
 }
 
+/// One shell's terminal in its pane. It takes the keyboard when its pane
+/// becomes the active one, and only then: every pane stays mounted.
+private struct VPhoneTerminalPane: View {
+    let session: VPhoneTerminalSession
+    @Environment(\.dkActivePaneGate) private var gate
+
+    var body: some View {
+        TerminalSurfaceView(context: session.view)
+            .background(DK.Palette.terminalBackground)
+            .onChange(of: gate?.isActive ?? false, initial: true) { _, isActive in
+                if isActive {
+                    session.view.requestFocus()
+                }
+            }
+    }
+}
+
 // MARK: - Automation
 
 extension VPhoneTerminalWindowController {
@@ -287,7 +285,7 @@ extension VPhoneTerminalWindowController {
         var description: String {
             switch self {
             case let .unknownAction(action):
-                "unknown terminal action \(action); use open, new_tab, select, close_tab, input, resize, close or state"
+                "unknown terminal action \(action); use open, new_tab, select, focus_pane, move, close_tab, input, resize, close or state"
             case .noTab: "the Terminal window has no tab"
             case let .badArgument(text): text
             }
@@ -295,7 +293,8 @@ extension VPhoneTerminalWindowController {
     }
 
     /// One `{"t":"terminal","do":…}` request from the VM's control socket,
-    /// as the window's own controls would do it.
+    /// as the window's own controls would do it. `index` counts tabs across
+    /// every pane in order, `pane` counts panes.
     func perform(automation request: [String: Any]) throws {
         let action = request["do"] as? String ?? "state"
         switch action {
@@ -307,26 +306,43 @@ extension VPhoneTerminalWindowController {
             show()
             newTab()
         case "select":
-            guard let index = request["index"] as? Int, tabList.ids.indices.contains(index) else {
-                throw AutomationError.badArgument("select needs the index of an open tab")
+            let tab = try tab(at: request["index"])
+            if let at = panes.locateTab(tab.id) {
+                panes.activateTab(groupID: at.groupID, index: at.index)
             }
-            selection = tabList.ids[index]
+            focusActivePane()
+        case "focus_pane":
+            panes.focusGroup(try pane(at: request["pane"]))
+            focusActivePane()
+        case "move":
+            // What a drop does: the tab onto a pane's center or edge.
+            let tab = try tab(at: request["index"])
+            let pane = try pane(at: request["pane"])
+            guard let zone = (request["zone"] as? String).flatMap(DKPaneDropZone.init(rawValue:)) else {
+                throw AutomationError.badArgument("move needs a zone: center, top, bottom, leading or trailing")
+            }
+            panes.moveTab(tab.id, toGroup: pane, zone: zone)
+            focusActivePane()
         case "close_tab":
-            guard let id = tabList.selection else { throw AutomationError.noTab }
-            closeTab(id)
+            guard let tab = panes.activeTab else { throw AutomationError.noTab }
+            closeTab(tab.id)
         case "input":
             guard let text = request["text"] as? String else {
                 throw AutomationError.badArgument("input needs text")
             }
-            guard let session = selectedSession else { throw AutomationError.noTab }
-            session.type(text)
+            guard let tab = panes.activeTab else { throw AutomationError.noTab }
+            tab.payload.type(text)
         case "resize":
-            guard let width = request["width"] as? Double, let height = request["height"] as? Double,
-                  let window
-            else {
+            guard let width = request["width"] as? Double, let height = request["height"] as? Double, let window else {
                 throw AutomationError.badArgument("resize needs width and height, and an open window")
             }
             window.setContentSize(NSSize(width: width, height: height))
+            if let x = request["x"] as? Double, let y = request["y"] as? Double,
+               let screen = window.screen ?? NSScreen.main
+            {
+                // Top-left in screen points, as CGWindowList reports it.
+                window.setFrameTopLeftPoint(NSPoint(x: x, y: screen.frame.maxY - y))
+            }
         case "close":
             closeWindow()
         default:
@@ -334,8 +350,9 @@ extension VPhoneTerminalWindowController {
         }
     }
 
-    /// What the window shows: its id for `screencapture -l`, its size, the
-    /// tabs with their state, and the selected terminal's visible text.
+    /// What the window shows: its id for `screencapture -l` and frame, the
+    /// panes and their tabs with their state, and the active terminal's
+    /// visible text.
     var automationState: [String: Any] {
         var state: [String: Any] = ["visible": isVisible, "key": isKey]
         if let window, window.isVisible {
@@ -343,22 +360,59 @@ extension VPhoneTerminalWindowController {
             state["width"] = window.contentLayoutRect.width
             state["height"] = window.contentLayoutRect.height
         }
+        let tabs = panes.allTabs
+        let activeTab = panes.activeTab?.id
         state["tabs"] = tabs.enumerated().map { index, tab in
-            let session = session(tab.id)
-            return [
+            [
                 "index": index,
-                "title": tab.title,
-                "selected": tab.id == selection,
-                "state": session.map { String(describing: $0.state) } ?? "closed",
+                "title": VPhoneTerminalTabNumbering.title(machine: machineName, number: tab.payload.number),
+                "pane": panes.locateTab(tab.id).flatMap { panes.groupIDs.firstIndex(of: $0.groupID) } ?? -1,
+                "selected": tab.id == activeTab,
+                "state": String(describing: tab.payload.state),
             ] as [String: Any]
         }
-        if let text = selectedSession?.visibleText {
+        state["panes"] = panes.groupIDs.enumerated().map { index, id in
+            [
+                "index": index,
+                "active": id == panes.activeGroupID,
+                "tabs": (panes.groups[id]?.tabs ?? []).compactMap { tab in tabs.firstIndex { $0.id == tab.id } },
+            ] as [String: Any]
+        }
+        state["layout"] = Self.describe(panes.root, panes: panes.groupIDs)
+        if let text = panes.activeTab?.payload.visibleText {
             state["text"] = text
         }
         return state
     }
 
-    private var selectedSession: VPhoneTerminalSession? {
-        tabList.selection.flatMap { session($0) }
+    /// The split tree in one line: `H(0.50: 0 | V(0.50: 1 / 2))`.
+    static func describe(_ layout: DKPaneLayout, panes: [UUID]) -> String {
+        switch layout {
+        case let .leaf(id):
+            return panes.firstIndex(of: id).map(String.init) ?? "?"
+        case let .split(split):
+            let fraction = String(format: "%.2f", split.fraction)
+            let first = describe(split.first, panes: panes)
+            let second = describe(split.second, panes: panes)
+            return split.direction == .horizontal
+                ? "H(\(fraction): \(first) | \(second))"
+                : "V(\(fraction): \(first) / \(second))"
+        }
+    }
+
+    private func tab(at value: Any?) throws -> DKPaneTab<VPhoneTerminalSession> {
+        let tabs = panes.allTabs
+        guard let index = value as? Int, tabs.indices.contains(index) else {
+            throw AutomationError.badArgument("index must name an open tab")
+        }
+        return tabs[index]
+    }
+
+    private func pane(at value: Any?) throws -> UUID {
+        let ids = panes.groupIDs
+        guard let index = value as? Int, ids.indices.contains(index) else {
+            throw AutomationError.badArgument("pane must name an open pane")
+        }
+        return ids[index]
     }
 }

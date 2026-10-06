@@ -72,6 +72,9 @@ enum VPhoneTerminalTheme {
 @Observable
 final class VPhoneTerminalSession: Identifiable {
     let id = UUID()
+    /// The tab's number in its window: 1 is named after the machine, later
+    /// ones add theirs.
+    let number: Int
     private(set) var state: VPhoneTerminalSessionState = .connecting
 
     @ObservationIgnored let view: TerminalViewState
@@ -88,8 +91,9 @@ final class VPhoneTerminalSession: Identifiable {
     /// How long to wait for Ghostty's first size before opening at 80×24.
     static let sizeWait: Duration = .milliseconds(600)
 
-    init(control: VPhoneGuestControl, machineName: String) {
+    init(control: VPhoneGuestControl, machineName: String, number: Int) {
         self.control = control
+        self.number = number
         self.machineName = machineName
         let connection = VPhoneTerminalConnection()
         let relay = VPhoneTerminalRelay()
