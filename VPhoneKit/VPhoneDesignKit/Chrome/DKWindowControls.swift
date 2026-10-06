@@ -99,6 +99,9 @@ public struct DKWindowControls: View {
         }
         .frame(width: Self.width, height: DKWindowControlsMetrics.diameter)
         .contentShape(Rectangle())
+        // Like the system buttons, these work in a window behind others: the
+        // click that brings the window forward also closes or minimizes it.
+        .allowsWindowActivationEvents(true)
         .onContinuousHover { phase in
             switch phase {
             case .active:

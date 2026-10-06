@@ -205,6 +205,7 @@ struct DKSidebarWindowBand: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .gesture(WindowDragGesture())
+                    .allowsWindowActivationEvents(true)
             }
     }
 }

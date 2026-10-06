@@ -94,6 +94,7 @@ public struct DKTitleBar<Accessory: View>: View {
             DK.Palette.window
                 .contentShape(Rectangle())
                 .gesture(WindowDragGesture())
+                .allowsWindowActivationEvents(true)
         }
         .overlay(alignment: .bottom) {
             DK.Palette.divider.frame(height: DK.Metric.hairline)
