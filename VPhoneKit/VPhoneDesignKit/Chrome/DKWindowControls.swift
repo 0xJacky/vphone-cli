@@ -52,8 +52,13 @@ public enum DKWindowButton: String, Sendable, CaseIterable, Hashable {
 
 // MARK: - Controls
 
-/// Close, minimize and zoom, drawn and handled by the content: a window that
-/// draws its own title bar hides the system buttons and puts these on it.
+/// Close, minimize and zoom, drawn and handled by the content, for a window
+/// that draws its own chrome.
+///
+/// Placing them in a window takes the buttons over: the window's system
+/// buttons are hidden while these are in it. In full screen the system
+/// buttons come back, since they show with the menu bar there, and these
+/// take no room; they return when the window leaves full screen.
 ///
 /// They follow the system buttons of macOS 26 and later: 14pt circles 9pt
 /// apart, colored while the window is active and gray behind it, with their
@@ -64,7 +69,7 @@ public struct DKWindowControls: View {
     @Environment(\.appearsActive) private var appearsActive
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dkLocalizationBundle) private var bundle
-    @State private var window = DKWindowReference()
+    @State private var reference = DKWindowReference()
     @State private var isHovering = false
     @State private var isOptionDown = false
     @State private var pressed: DKWindowButton?
@@ -77,6 +82,16 @@ public struct DKWindowControls: View {
     }
 
     public var body: some View {
+        ZStack(alignment: .leading) {
+            DKWindowReader(reference: reference)
+                .frame(width: 0, height: 0)
+            if !reference.isFullScreen {
+                lights
+            }
+        }
+    }
+
+    private var lights: some View {
         HStack(spacing: DKWindowControlsMetrics.gap) {
             ForEach(DKWindowButton.allCases, id: \.self) { button in
                 light(button)
@@ -94,7 +109,6 @@ public struct DKWindowControls: View {
                 isOptionDown = false
             }
         }
-        .background(DKWindowReader(reference: window))
         .accessibilityElement(children: .contain)
     }
 
@@ -137,7 +151,7 @@ public struct DKWindowControls: View {
     }
 
     private func perform(_ button: DKWindowButton) {
-        guard let window = window.window, DKWindowButton.isAvailable(button, styleMask: window.styleMask) else {
+        guard let window = reference.window, DKWindowButton.isAvailable(button, styleMask: window.styleMask) else {
             NSSound.beep()
             return
         }
@@ -215,10 +229,78 @@ enum DKWindowControlsPalette {
 
 // MARK: - Window Reference
 
-/// The window a SwiftUI view is in, read from an AppKit view placed behind it.
+/// The window the controls are in. Setting it hides that window's system
+/// buttons, and follows the window in and out of full screen; letting go of
+/// it shows them again.
 @MainActor
+@Observable
 final class DKWindowReference {
-    weak var window: NSWindow?
+    private(set) var isFullScreen = false
+    @ObservationIgnored private var observers: [NSObjectProtocol] = []
+    @ObservationIgnored weak var window: NSWindow? {
+        didSet {
+            guard window !== oldValue else { return }
+            release(oldValue)
+            adopt(window)
+        }
+    }
+
+    private func adopt(_ window: NSWindow?) {
+        guard let window else { return }
+        let fullScreen = window.styleMask.contains(.fullScreen)
+        if isFullScreen != fullScreen {
+            isFullScreen = fullScreen
+        }
+        Self.setSystemButtons(hidden: !isFullScreen, in: window)
+        let center = NotificationCenter.default
+        let entering: (Notification) -> Void = { [weak self] note in
+            MainActor.assumeIsolated {
+                guard let self, let window = note.object as? NSWindow, window === self.window else { return }
+                self.isFullScreen = true
+                Self.setSystemButtons(hidden: false, in: window)
+            }
+        }
+        let leaving: (Notification) -> Void = { [weak self] note in
+            MainActor.assumeIsolated {
+                guard let self, let window = note.object as? NSWindow, window === self.window else { return }
+                self.isFullScreen = false
+                Self.setSystemButtons(hidden: true, in: window)
+            }
+        }
+        let resync: (Notification) -> Void = { [weak self] note in
+            MainActor.assumeIsolated {
+                guard let self, let window = note.object as? NSWindow, window === self.window,
+                      !window.styleMask.contains(.fullScreen), self.isFullScreen,
+                      !window.inLiveResize
+                else { return }
+                leaving(note)
+            }
+        }
+        observers = [
+            center.addObserver(forName: NSWindow.willEnterFullScreenNotification, object: window, queue: .main, using: entering),
+            center.addObserver(forName: NSWindow.didExitFullScreenNotification, object: window, queue: .main, using: leaving),
+            // A failed entry posts no notification of its own; the next resize
+            // or key change puts the state back from the style mask.
+            center.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main, using: resync),
+            center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main, using: resync),
+        ]
+    }
+
+    private func release(_ window: NSWindow?) {
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        observers = []
+        if let window {
+            Self.setSystemButtons(hidden: false, in: window)
+        }
+    }
+
+    static func setSystemButtons(hidden: Bool, in window: NSWindow) {
+        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            window.standardWindowButton(kind)?.isHidden = hidden
+        }
+    }
 }
 
 private struct DKWindowReader: NSViewRepresentable {
@@ -232,7 +314,10 @@ private struct DKWindowReader: NSViewRepresentable {
 
     func updateNSView(_ view: DKWindowReaderView, context _: Context) {
         view.reference = reference
-        reference.window = view.window
+    }
+
+    static func dismantleNSView(_ view: DKWindowReaderView, coordinator _: ()) {
+        view.reference?.window = nil
     }
 }
 
@@ -246,6 +331,58 @@ private final class DKWindowReaderView: NSView {
 
     override func hitTest(_: NSPoint) -> NSView? {
         nil
+    }
+}
+
+// MARK: - Window Style
+
+public extension View {
+    /// Gives the window this view is in a content-drawn title bar: the title
+    /// hidden, the system title bar transparent with no separator, and the
+    /// content running under it. Put `DKWindowControls` (through `DKTitleBar`
+    /// or a sidebar's `windowControls`) where the buttons go.
+    func dkWindowChrome() -> some View {
+        background(DKWindowStyler().frame(width: 0, height: 0))
+    }
+}
+
+private struct DKWindowStyler: NSViewRepresentable {
+    func makeNSView(context _: Context) -> DKWindowStylerView {
+        DKWindowStylerView()
+    }
+
+    func updateNSView(_ view: DKWindowStylerView, context _: Context) {
+        view.applyStyle()
+    }
+}
+
+private final class DKWindowStylerView: NSView {
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        applyStyle()
+    }
+
+    func applyStyle() {
+        guard let window else { return }
+        DKWindowChromeStyle.apply(to: window)
+    }
+
+    override func hitTest(_: NSPoint) -> NSView? {
+        nil
+    }
+}
+
+/// The window settings a content-drawn title bar needs. AppKit windows made
+/// in code call `apply(to:)` directly; SwiftUI scenes use `dkWindowChrome()`.
+@MainActor
+public enum DKWindowChromeStyle {
+    public static func apply(to window: NSWindow) {
+        if !window.styleMask.contains(.fullSizeContentView) {
+            window.styleMask.insert(.fullSizeContentView)
+        }
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
     }
 }
 

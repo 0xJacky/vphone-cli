@@ -75,15 +75,12 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         window.level = .normal
         VPhoneAlert.hostWindow = window
         window.title = name
-        // The chrome is the content's own, window buttons included: the
-        // system title bar is transparent and its buttons hidden. `window.title`
-        // and `window.subtitle` are still set for the Window menu and
+        // The chrome is the content's own: the title bar draws the window
+        // buttons, which hide the system ones. `window.title` and
+        // `window.subtitle` are still set for the Window menu and
         // accessibility.
-        window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
-        window.titlebarSeparatorStyle = .none
+        DKWindowChromeStyle.apply(to: window)
         window.contentView = content
-        setSystemWindowButtonsHidden(true, in: window)
 
         // The scene belongs to the VM, not to the app: every VM directory keeps
         // its own window frame, and a newly created VM opens centered instead
@@ -302,34 +299,6 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         keyStateObservers.append(center.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.captureView?.clipboardSync?.bringGuestCopyToMac() }
         })
-    }
-
-    // MARK: - Window Buttons
-
-    /// The title bar draws close, minimize and zoom itself. In full screen
-    /// the system's buttons come back, since they show with the menu bar
-    /// there and the title bar's would sit on the screen's edge.
-    func windowWillEnterFullScreen(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow else { return }
-        chrome.showsWindowControls = false
-        setSystemWindowButtonsHidden(false, in: window)
-    }
-
-    func windowDidExitFullScreen(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow else { return }
-        setSystemWindowButtonsHidden(true, in: window)
-        chrome.showsWindowControls = true
-    }
-
-    func windowDidFailToEnterFullScreen(_ window: NSWindow) {
-        setSystemWindowButtonsHidden(true, in: window)
-        chrome.showsWindowControls = true
-    }
-
-    private func setSystemWindowButtonsHidden(_ hidden: Bool, in window: NSWindow) {
-        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-            window.standardWindowButton(kind)?.isHidden = hidden
-        }
     }
 
     // MARK: - Status

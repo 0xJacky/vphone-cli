@@ -28,17 +28,22 @@ public struct DKSidebar<ID: Hashable & Sendable, Header: View, Footer: View>: Vi
     @Binding var selection: ID?
     let header: Header
     let footer: Footer
+    /// Draws the window buttons in a band at the top, for a window whose
+    /// sidebar runs to its top edge.
+    let windowControls: Bool
 
     @State private var tracker = DKRowTracker()
 
     public init(
         sections: [DKSidebarSection<ID>],
         selection: Binding<ID?>,
+        windowControls: Bool = false,
         @ViewBuilder header: () -> Header,
         @ViewBuilder footer: () -> Footer,
     ) {
         self.sections = sections
         _selection = selection
+        self.windowControls = windowControls
         self.header = header()
         self.footer = footer()
     }
@@ -47,14 +52,18 @@ public struct DKSidebar<ID: Hashable & Sendable, Header: View, Footer: View>: Vi
     public init(
         sections: [DKSidebarSection<ID>],
         selection: Binding<ID>,
+        windowControls: Bool = false,
         @ViewBuilder header: () -> Header,
         @ViewBuilder footer: () -> Footer,
     ) {
-        self.init(sections: sections, selection: Binding(selection), header: header, footer: footer)
+        self.init(sections: sections, selection: Binding(selection), windowControls: windowControls, header: header, footer: footer)
     }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if windowControls {
+                DKSidebarWindowBand()
+            }
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: DK.Space.s4) {
                     if Header.self != EmptyView.self {
@@ -129,17 +138,19 @@ public extension DKSidebar where Header == EmptyView {
     init(
         sections: [DKSidebarSection<ID>],
         selection: Binding<ID?>,
+        windowControls: Bool = false,
         @ViewBuilder footer: () -> Footer,
     ) {
-        self.init(sections: sections, selection: selection, header: { EmptyView() }, footer: footer)
+        self.init(sections: sections, selection: selection, windowControls: windowControls, header: { EmptyView() }, footer: footer)
     }
 
     init(
         sections: [DKSidebarSection<ID>],
         selection: Binding<ID>,
+        windowControls: Bool = false,
         @ViewBuilder footer: () -> Footer,
     ) {
-        self.init(sections: sections, selection: selection, header: { EmptyView() }, footer: footer)
+        self.init(sections: sections, selection: selection, windowControls: windowControls, header: { EmptyView() }, footer: footer)
     }
 }
 
@@ -147,31 +158,52 @@ public extension DKSidebar where Footer == EmptyView {
     init(
         sections: [DKSidebarSection<ID>],
         selection: Binding<ID?>,
+        windowControls: Bool = false,
         @ViewBuilder header: () -> Header,
     ) {
-        self.init(sections: sections, selection: selection, header: header, footer: { EmptyView() })
+        self.init(sections: sections, selection: selection, windowControls: windowControls, header: header, footer: { EmptyView() })
     }
 
     init(
         sections: [DKSidebarSection<ID>],
         selection: Binding<ID>,
+        windowControls: Bool = false,
         @ViewBuilder header: () -> Header,
     ) {
-        self.init(sections: sections, selection: selection, header: header, footer: { EmptyView() })
+        self.init(sections: sections, selection: selection, windowControls: windowControls, header: header, footer: { EmptyView() })
     }
 }
 
 public extension DKSidebar where Header == EmptyView, Footer == EmptyView {
-    init(sections: [DKSidebarSection<ID>], selection: Binding<ID?>) {
-        self.init(sections: sections, selection: selection, header: { EmptyView() }, footer: { EmptyView() })
+    init(sections: [DKSidebarSection<ID>], selection: Binding<ID?>, windowControls: Bool = false) {
+        self.init(sections: sections, selection: selection, windowControls: windowControls, header: { EmptyView() }, footer: { EmptyView() })
     }
 
-    init(sections: [DKSidebarSection<ID>], selection: Binding<ID>) {
-        self.init(sections: sections, selection: selection, header: { EmptyView() }, footer: { EmptyView() })
+    init(sections: [DKSidebarSection<ID>], selection: Binding<ID>, windowControls: Bool = false) {
+        self.init(sections: sections, selection: selection, windowControls: windowControls, header: { EmptyView() }, footer: { EmptyView() })
     }
 }
 
 // MARK: - Section and row
+
+/// The band at the top of a sidebar that holds the window buttons, where the
+/// system title bar would put them: 16pt in, centered 22pt from the top, in
+/// line with the page header's title. Dragging it moves the window.
+struct DKSidebarWindowBand: View {
+    static let height: CGFloat = 36
+
+    var body: some View {
+        DKWindowControls()
+            .padding(.leading, DK.Space.s4)
+            .padding(.top, 22 - 7)
+            .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height, alignment: .topLeading)
+            .background {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .gesture(WindowDragGesture())
+            }
+    }
+}
 
 struct DKSidebarSectionView<ID: Hashable & Sendable>: View {
     let section: DKSidebarSection<ID>

@@ -19,9 +19,6 @@ final class VPhoneDisplayChromeModel {
     var frameRate: Int?
     /// When the screen recording started; nil while not recording.
     var recordingStartedAt: Date?
-    /// Whether the title bar draws the window buttons; off in full screen,
-    /// where the system shows its own.
-    var showsWindowControls = true
 
     var canPressHome = false
     var canOpenGuestTools = false
@@ -91,7 +88,6 @@ struct VPhoneDisplayTitleBar: View {
                     action: { model.onGuestTools() },
                 ),
             ],
-            showsWindowControls: model.showsWindowControls,
         )
         .environment(\.dkLocalizationBundle, VPhoneLocalization.bundle)
     }
