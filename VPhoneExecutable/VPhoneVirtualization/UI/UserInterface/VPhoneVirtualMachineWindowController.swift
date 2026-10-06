@@ -46,7 +46,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         displayContainer = container
 
         // The guest display opens at one Mac point per panel point; the
-        // window adds the bars and the padding around it.
+        // window adds the bars above and below it.
         let scale = CGFloat(screenScale)
         panelSize = NSSize(
             width: CGFloat(screenWidth) / scale,
@@ -194,7 +194,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
 
     /// Turns the VM view and gives the guest display the turned panel's
     /// aspect ratio, in one animation. A windowed VM reshapes around the
-    /// display's center while the bars and padding keep their size; a
+    /// display's center while the bars keep their size; a
     /// full-screen one keeps the screen and letterboxes the turned panel.
     private func applyOrientation(_ orientation: VPhoneDisplayOrientation, to window: NSWindow, force: Bool = false) {
         guard let container = displayContainer, let content,
@@ -224,7 +224,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
     private static let minimumDisplaySide: CGFloat = 260
 
     /// Keeps the guest display at the panel's aspect ratio while the bars
-    /// and padding keep their size; `contentAspectRatio` would hold the
+    /// keep their size; `contentAspectRatio` would hold the
     /// whole content, bars included, to the ratio. The side the drag changes
     /// more leads.
     func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {

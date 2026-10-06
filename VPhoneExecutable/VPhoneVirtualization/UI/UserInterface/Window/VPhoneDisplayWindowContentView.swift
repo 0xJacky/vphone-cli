@@ -5,9 +5,9 @@ import VPhoneDesignKit
 
 // MARK: - Display Window Content
 
-/// The display window's content view: the title bar, the guest display on
-/// the display ground with the design's padding around it, and the control
-/// bar. The window uses a full-size content view, so the title bar sits under
+/// The display window's content view: the title bar, the guest display
+/// edge to edge between the bars, and the control bar. A margin of display
+/// ground around the guest would read as a black frame round the screen. The window uses a full-size content view, so the title bar sits under
 /// the transparent system title bar, whose buttons are hidden; the title bar
 /// draws its own.
 ///
@@ -20,9 +20,6 @@ final class VPhoneDisplayWindowContentView: NSView {
     private let controlBar: NSView
     let titleBarHeight: CGFloat
     let controlBarHeight: CGFloat
-
-    /// The design's padding between the display ground's edges and the guest display.
-    static let displayPadding = DK.Space.s4
 
     init(display: VPhoneDisplayContainerView, chrome: VPhoneDisplayChromeModel) {
         self.display = display
@@ -52,10 +49,9 @@ final class VPhoneDisplayWindowContentView: NSView {
         fatalError("init(coder:) is not supported")
     }
 
-    /// The room around the guest display: the bars and the padding.
+    /// The room around the guest display: the bars above and below it.
     var chromeInsets: NSEdgeInsets {
-        let pad = Self.displayPadding
-        return NSEdgeInsets(top: titleBarHeight + pad, left: pad, bottom: controlBarHeight + pad, right: pad)
+        NSEdgeInsets(top: titleBarHeight, left: 0, bottom: controlBarHeight, right: 0)
     }
 
     override func layout() {
