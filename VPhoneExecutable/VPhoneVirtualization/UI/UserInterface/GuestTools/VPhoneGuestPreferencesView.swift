@@ -218,9 +218,7 @@ struct VPhoneGuestPreferencesView: View {
                     .help(entry.summary)
             }
         }
-        .tableStyle(.inset(alternatesRowBackgrounds: false))
-        .scrollContentBackground(.hidden)
-        .background(DK.Palette.window)
+        .systemPageTable()
         .contextMenu(forSelectionType: VPhoneGuestPreferenceEntry.ID.self) { ids in
             if let id = ids.first, let entry = entry(for: id) {
                 Button("Edit Value…") { model.edit(entry, switchToWrite: true) }

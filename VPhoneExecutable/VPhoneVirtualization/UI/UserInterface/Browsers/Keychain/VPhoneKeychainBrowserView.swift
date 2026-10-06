@@ -179,9 +179,7 @@ struct VPhoneKeychainBrowserView: View {
                 TableRow(item)
             }
         }
-        .tableStyle(.inset(alternatesRowBackgrounds: false))
-        .scrollContentBackground(.hidden)
-        .background(DK.Palette.window)
+        .systemPageTable()
         .contextMenu(forSelectionType: VPhoneKeychainItem.ID.self) { ids in
             contextMenu(for: ids)
         }

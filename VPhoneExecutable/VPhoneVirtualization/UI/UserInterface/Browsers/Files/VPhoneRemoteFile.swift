@@ -53,19 +53,33 @@ struct VPhoneRemoteFile: Identifiable, Hashable {
         VPhoneLocalization.text(kind.typeDescription)
     }
 
-    /// `ls -l` style mode, "drwxr-xr-x", from the octal permissions vphoned reports.
-    var symbolicPermissions: String {
+    /// The permission bits as `ls -l` writes them, "rwxr-xr-x", from the
+    /// octal permissions vphoned reports. Set-user-ID, set-group-ID and
+    /// sticky show as s, s and t over the execute bit (S, S and T without
+    /// it). Text that is not octal comes back as is.
+    var permissionString: String {
         guard let mode = Int(permissions, radix: 8) else { return permissions }
+        let letters = Array("rwxrwxrwx")
+        var bits = (0 ..< 9).map { index in
+            mode & (1 << (8 - index)) != 0 ? letters[index] : "-"
+        }
+        for (flag, index, letter) in [(0o4000, 2, "s"), (0o2000, 5, "s"), (0o1000, 8, "t")] as [(Int, Int, Character)]
+            where mode & flag != 0
+        {
+            bits[index] = bits[index] == "-" ? Character(letter.uppercased()) : letter
+        }
+        return String(bits)
+    }
+
+    /// `ls -l` style mode with the file type first, "drwxr-xr-x".
+    var symbolicPermissions: String {
+        guard Int(permissions, radix: 8) != nil else { return permissions }
         let typeLetter = switch type {
         case .directory: "d"
         case .symbolicLink: "l"
         case .file: "-"
         }
-        let letters = Array("rwxrwxrwx")
-        let bits = (0 ..< 9).map { index in
-            mode & (1 << (8 - index)) != 0 ? String(letters[index]) : "-"
-        }
-        return typeLetter + bits.joined()
+        return typeLetter + permissionString
     }
 
     enum FileType: String, Hashable {

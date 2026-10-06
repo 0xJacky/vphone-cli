@@ -91,11 +91,17 @@ extension View {
     /// The table stays transparent until its first rows are styled: SwiftUI
     /// draws them with separators first, and they would show for a moment.
     func systemPageTable() -> some View {
-        modifier(VPhoneSystemPageTable())
+        modifier(VPhoneSystemPageTable(update: UUID()))
     }
 }
 
 private struct VPhoneSystemPageTable: ViewModifier {
+    /// New on every update of the page that applies the modifier, so the
+    /// modifier's body, and with it the chrome view's `updateNSView`, runs
+    /// whenever the page does: that is how the chrome learns the rows
+    /// changed. Without it SwiftUI would skip the body of an unchanged
+    /// modifier, and rows added later would keep their separators.
+    let update: UUID
     @State private var isStyled = false
 
     func body(content: Content) -> some View {

@@ -66,6 +66,24 @@ struct VPhoneRemoteFileTests {
         #expect(odd?.symbolicPermissions == "rw?")
     }
 
+    @Test
+    func `the permissions column writes the nine mode letters without the type`() {
+        #expect(file("Library").permissionString == "rwxr-xr-x")
+        #expect(file("data.bin").permissionString == "rw-------")
+        let mode = { (perm: String) in
+            VPhoneRemoteFile(dir: "/", entry: ["name": "x", "type": "file", "perm": perm])?.permissionString
+        }
+        #expect(mode("777") == "rwxrwxrwx")
+        #expect(mode("000") == "---------")
+        // Set-user-ID, set-group-ID and sticky take the execute slot.
+        #expect(mode("4755") == "rwsr-xr-x")
+        #expect(mode("2750") == "rwxr-s---")
+        #expect(mode("1777") == "rwxrwxrwt")
+        #expect(mode("1666") == "rw-rw-rwT")
+        #expect(mode("4644") == "rwSr--r--")
+        #expect(mode("rw?") == "rw?")
+    }
+
     // MARK: - Kind
 
     @Test

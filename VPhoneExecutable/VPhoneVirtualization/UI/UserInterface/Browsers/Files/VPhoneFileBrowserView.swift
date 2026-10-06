@@ -212,10 +212,10 @@ struct VPhoneFileBrowserView: View {
             .width(min: 160, ideal: 260, max: .infinity)
 
             TableColumn("Permissions", value: \.permissions) { file in
-                DKTableCellView(.badge(.neutral, file.permissions))
-                    .help(file.symbolicPermissions)
+                DKTableCellView(.mono(file.permissionString))
+                    .help(file.permissions)
             }
-            .width(min: 70, ideal: 90, max: 110)
+            .width(min: 84, ideal: 96, max: 120)
 
             TableColumn("Modified", value: \.modified) { file in
                 DKTableCellView(.muted(file.displayDate))
@@ -237,9 +237,7 @@ struct VPhoneFileBrowserView: View {
                 }
             }
         }
-        .tableStyle(.inset(alternatesRowBackgrounds: false))
-        .scrollContentBackground(.hidden)
-        .background(DK.Palette.window)
+        .systemPageTable()
         .contextMenu(forSelectionType: VPhoneRemoteFile.ID.self) { ids in
             contextMenu(for: ids)
         } primaryAction: { ids in
