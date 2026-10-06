@@ -144,9 +144,16 @@ private struct DKSegmentButton<Value: Hashable>: View {
                     DKIcon(glyph, size: 13)
                 }
                 if !option.isIconOnly {
-                    Text(option.label)
-                        .fontWeight(isSelected ? .semibold : .regular)
-                        .lineLimit(1)
+                    // The label always takes its semibold width, so selecting
+                    // a segment does not resize it or move its neighbors.
+                    ZStack {
+                        Text(option.label)
+                            .fontWeight(.semibold)
+                            .hidden()
+                        Text(option.label)
+                            .fontWeight(isSelected ? .semibold : .regular)
+                    }
+                    .lineLimit(1)
                     if let count = option.count {
                         Text(count, format: .number)
                             .foregroundStyle(DK.Palette.muted)
