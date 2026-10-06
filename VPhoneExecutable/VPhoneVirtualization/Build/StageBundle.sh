@@ -61,6 +61,10 @@ fi
 /bin/rm -rf "$frameworks/VPhonePatchKit.framework"
 /bin/cp -R "$command_products/VPhonePatchKit.framework" "$frameworks/VPhonePatchKit.framework"
 /bin/cp "$TARGET_BUILD_DIR/vphone-vm" "$macos/vphone-vm"
+# The Terminal window's Ghostty finds its resources (terminfo, shell
+# integration) through SwiftPM's Bundle.module, which looks in the main
+# bundle's Resources: vphone-vm's main bundle is this one.
+/bin/cp -R "$TARGET_BUILD_DIR/GhosttyKit_GhosttyTerminal.bundle" "$resources/GhosttyKit_GhosttyTerminal.bundle"
 /bin/cp "$command_products/vphone-cli" "$macos/vphone-cli"
 /bin/cp "$amfi_products/vphone-escalator" "$macos/vphone-escalator"
 /bin/cp "$daemon_products/vphoned" "$guest/vphoned"

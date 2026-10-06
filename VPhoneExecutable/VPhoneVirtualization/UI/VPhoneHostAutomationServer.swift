@@ -36,6 +36,12 @@ import ImageIO
 ///                                               → any vphoned method; its result is in `"result"`
 ///   {"t":"network"}                             → the NIC's state, in `"result"`
 ///   {"t":"network","link":"down"}               → unplug (`up` replugs); not saved
+///   {"t":"terminal","do":"open"}                → the Terminal window (windowed launches only); `do`
+///                                                 is also new_tab, select (`index`), close_tab,
+///                                                 input (`text`, typed into the selected shell),
+///                                                 resize (`width`, `height`), close or state. The
+///                                                 result has the window id, the tabs and the
+///                                                 selected terminal's visible text
 ///
 /// All commands except "screenshot" and "rpc" wait briefly then capture a
 /// compact screen image returned as `"image":"<base64>"` in the response.
@@ -68,6 +74,8 @@ class VPhoneHostAutomationServer {
     private weak var control: VPhoneGuestControl?
     /// For the `network` command; nil until the VM exists.
     weak var virtualMachine: VPhoneVirtualMachine?
+    /// For the `terminal` command; nil for a headless launch.
+    weak var terminalWindowController: VPhoneTerminalWindowController?
 
     /// Matches vphoned's JSON body limit, so an `rpc` line is never refused
     /// here that the guest would accept.
@@ -257,6 +265,15 @@ class VPhoneHostAutomationServer {
                     try virtualMachine.setNetworkLink(up: link == "up")
                 }
                 return Self.reply(ok: true, result: virtualMachine.networkStatus)
+
+            case "terminal":
+                guard let terminal = terminalWindowController else {
+                    return Self.reply(ok: false, error: "terminal needs a VM window; this launch is headless")
+                }
+                try terminal.perform(automation: json)
+                // Let the guest answer and Ghostty draw before reading the screen back.
+                try await Task.sleep(for: .milliseconds(json["delay"] as? Int ?? 300))
+                return Self.reply(ok: true, result: terminal.automationState)
 
             default:
                 return Self.reply(ok: false, error: "unknown command: \(type)")

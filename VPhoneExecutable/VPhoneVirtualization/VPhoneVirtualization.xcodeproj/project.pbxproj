@@ -18,6 +18,12 @@
 		DD0000000000000000000109 /* Dynamic in Frameworks */ = {isa = PBXBuildFile; productRef = DD0000000000000000000202 /* Dynamic */; };
 		DD000000000000000000010A /* NIOCore in Frameworks */ = {isa = PBXBuildFile; productRef = DD0000000000000000000203 /* NIOCore */; };
 		DD000000000000000000010B /* NIOPosix in Frameworks */ = {isa = PBXBuildFile; productRef = DD0000000000000000000204 /* NIOPosix */; };
+		DD000000000000000000010C /* GhosttyTerminal in Frameworks */ = {isa = PBXBuildFile; productRef = DD0000000000000000000205 /* GhosttyTerminal */; };
+		DD000000000000000000010D /* NIOHTTP1 in Frameworks */ = {isa = PBXBuildFile; productRef = DD0000000000000000000206 /* NIOHTTP1 */; };
+		DD000000000000000000010E /* NIOWebSocket in Frameworks */ = {isa = PBXBuildFile; productRef = DD0000000000000000000207 /* NIOWebSocket */; };
+		DD000000000000000000010F /* GhosttyTerminal in Frameworks */ = {isa = PBXBuildFile; productRef = DD0000000000000000000205 /* GhosttyTerminal */; };
+		DD0000000000000000000110 /* NIOHTTP1 in Frameworks */ = {isa = PBXBuildFile; productRef = DD0000000000000000000206 /* NIOHTTP1 */; };
+		DD0000000000000000000111 /* NIOWebSocket in Frameworks */ = {isa = PBXBuildFile; productRef = DD0000000000000000000207 /* NIOWebSocket */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -86,6 +92,9 @@
 				DD0000000000000000000102 /* Dynamic in Frameworks */,
 				DD0000000000000000000103 /* NIOCore in Frameworks */,
 				DD0000000000000000000104 /* NIOPosix in Frameworks */,
+				DD000000000000000000010C /* GhosttyTerminal in Frameworks */,
+				DD000000000000000000010D /* NIOHTTP1 in Frameworks */,
+				DD000000000000000000010E /* NIOWebSocket in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -98,6 +107,9 @@
 				DD0000000000000000000109 /* Dynamic in Frameworks */,
 				DD000000000000000000010A /* NIOCore in Frameworks */,
 				DD000000000000000000010B /* NIOPosix in Frameworks */,
+				DD000000000000000000010F /* GhosttyTerminal in Frameworks */,
+				DD0000000000000000000110 /* NIOHTTP1 in Frameworks */,
+				DD0000000000000000000111 /* NIOWebSocket in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -172,6 +184,9 @@
 				DD0000000000000000000202 /* Dynamic */,
 				DD0000000000000000000203 /* NIOCore */,
 				DD0000000000000000000204 /* NIOPosix */,
+				DD0000000000000000000205 /* GhosttyTerminal */,
+				DD0000000000000000000206 /* NIOHTTP1 */,
+				DD0000000000000000000207 /* NIOWebSocket */,
 			);
 			productName = VPhoneVirtualMachineKit;
 			productReference = DD0000000000000000000032 /* libVPhoneVirtualMachineKit.a */;
@@ -241,6 +256,9 @@
 				DD0000000000000000000202 /* Dynamic */,
 				DD0000000000000000000203 /* NIOCore */,
 				DD0000000000000000000204 /* NIOPosix */,
+				DD0000000000000000000205 /* GhosttyTerminal */,
+				DD0000000000000000000206 /* NIOHTTP1 */,
+				DD0000000000000000000207 /* NIOWebSocket */,
 			);
 			productName = VPhoneVirtualMachineKitTests;
 			productReference = DD0000000000000000000035 /* VPhoneVirtualMachineKitTests.xctest */;
@@ -267,6 +285,7 @@
 				DD0000000000000000000171 /* XCRemoteSwiftPackageReference "swift-argument-parser" */,
 				DD0000000000000000000172 /* XCRemoteSwiftPackageReference "Dynamic" */,
 				DD0000000000000000000173 /* XCRemoteSwiftPackageReference "swift-nio" */,
+				DD0000000000000000000174 /* XCRemoteSwiftPackageReference "libghostty-spm" */,
 			);
 			projectDirPath = "";
 			projectRoot = "";
@@ -677,6 +696,14 @@
 				version = 2.83.0;
 			};
 		};
+		DD0000000000000000000174 /* XCRemoteSwiftPackageReference "libghostty-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Lakr233/libghostty-spm.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.6.20260928;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -699,6 +726,21 @@
 			isa = XCSwiftPackageProductDependency;
 			package = DD0000000000000000000173 /* XCRemoteSwiftPackageReference "swift-nio" */;
 			productName = NIOPosix;
+		};
+		DD0000000000000000000205 /* GhosttyTerminal */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DD0000000000000000000174 /* XCRemoteSwiftPackageReference "libghostty-spm" */;
+			productName = GhosttyTerminal;
+		};
+		DD0000000000000000000206 /* NIOHTTP1 */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DD0000000000000000000173 /* XCRemoteSwiftPackageReference "swift-nio" */;
+			productName = NIOHTTP1;
+		};
+		DD0000000000000000000207 /* NIOWebSocket */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DD0000000000000000000173 /* XCRemoteSwiftPackageReference "swift-nio" */;
+			productName = NIOWebSocket;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

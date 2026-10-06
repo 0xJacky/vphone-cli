@@ -235,7 +235,7 @@ final class VPhoneGuestToolsShell: NSObject, NSWindowDelegate {
 
     /// The VM's name: the folder holding the `--config` manifest this process
     /// was started with.
-    private static func currentMachineName() -> String {
+    static func currentMachineName() -> String {
         let arguments = CommandLine.arguments
         var path: String?
         for (index, argument) in arguments.enumerated() {

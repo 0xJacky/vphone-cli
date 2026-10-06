@@ -32,6 +32,7 @@ not there yet.
 | `{"t":"key","name":"home"}` | `home`, `power`, `volup`, `voldown` are hardware HID keys. Any other name (`return`, `cmd+v`) goes to vphoned `input.key` |
 | `{"t":"type","text":"Hello"}` | Sets the **guest clipboard**; it does not type |
 | `{"t":"rpc","method":"<vphoned method>","params":{…}}` | Calls any vphoned method; see [rpc-methods](rpc-methods.md) |
+| `{"t":"terminal","do":"open"}` | Drives the VM's Terminal window (windowed launches): `do` is `open`, `new_tab`, `select` (`index`), `close_tab`, `input` (`text` typed into the selected shell; `\r` is Return), `resize` (`width`, `height`), `close` or `state`. `result` holds `window_id` (for `screencapture -l`), the tabs with their state, and the selected terminal's visible `text` |
 
 Unknown `t`, or missing fields, give `{"ok":false,"error":"…"}`.
 

@@ -10,6 +10,7 @@ class VPhoneMenuController {
     let control: VPhoneGuestControl
     let guestToolsWindowController: VPhoneGuestToolsWindowController
     let guestPanelsWindowController: VPhoneGuestPanelsWindowController
+    let terminalWindowController: VPhoneTerminalWindowController
     weak var vm: VPhoneVirtualMachine? {
         didSet {
             hardwareKeyboardItem?.state = vm?.usesHardwareKeyboard == true ? .on : .off
@@ -93,6 +94,9 @@ class VPhoneMenuController {
     /// Whether a guest agent is connected, for Window > Guest Tools, which
     /// validates itself.
     var guestToolsAvailable = false
+    /// Whether Window › Terminal can open a shell; see `VPhoneMenuTerminal`.
+    var terminalAvailability = VPhoneTerminalAvailability.notConnected
+    var terminalItem: NSMenuItem?
     /// Targets of the items in menus that enable their items themselves.
     var menuItemValidators: [VPhoneMenuItemValidator] = []
 
@@ -101,6 +105,10 @@ class VPhoneMenuController {
         self.control = control
         guestToolsWindowController = VPhoneGuestToolsWindowController(control: control)
         guestPanelsWindowController = VPhoneGuestPanelsWindowController(control: control)
+        terminalWindowController = VPhoneTerminalWindowController(
+            control: control,
+            machineName: VPhoneGuestToolsShell.currentMachineName(),
+        )
         setupMenuBar()
     }
 
@@ -187,6 +195,9 @@ class VPhoneMenuController {
         )
         windowMenu.addItem(NSMenuItem.separator())
         windowMenu.addItem(makeGuestToolsItem())
+        for item in makeTerminalItems() {
+            windowMenu.addItem(item)
+        }
         windowMenu.addItem(NSMenuItem.separator())
         windowMenu.addItem(
             withTitle: "Bring All to Front",

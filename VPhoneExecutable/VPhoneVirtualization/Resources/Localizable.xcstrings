@@ -9515,6 +9515,35 @@
         }
       }
     },
+    "Disconnect and Close" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切断して閉じる"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "연결 해제 후 닫기"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ngắt kết nối và đóng"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "断开连接并关闭"
+          }
+        }
+      }
+    },
     "Disconnected" : {
       "localizations" : {
         "en" : {
@@ -12095,6 +12124,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "客户机未连接"
+          }
+        }
+      }
+    },
+    "Guest OS" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲスト OS"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게스트 OS"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hệ điều hành máy khách"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "客户机系统"
           }
         }
       }
@@ -16483,6 +16541,35 @@
         }
       }
     },
+    "New Terminal Tab" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新規ターミナルタブ"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 터미널 탭"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Thẻ Terminal mới"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新建终端标签页"
+          }
+        }
+      }
+    },
     "New Value" : {
       "localizations" : {
         "ja" : {
@@ -20538,6 +20625,35 @@
         }
       }
     },
+    "The guest refused the terminal (HTTP %ld)." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲストがターミナルを拒否しました（HTTP %ld）。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게스트가 터미널을 거부했습니다(HTTP %ld)."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Máy khách đã từ chối terminal (HTTP %ld)."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "客户机拒绝了终端（HTTP %ld）。"
+          }
+        }
+      }
+    },
     "The guest removes them from its keychain. This cannot be undone." : {
       "localizations" : {
         "en" : {
@@ -20835,6 +20951,35 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%ld fps"
+          }
+        }
+      }
+    },
+    "%ld tabs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%ld 個のタブ"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "탭 %ld개"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%ld thẻ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%ld 个标签页"
           }
         }
       }
@@ -27037,6 +27182,35 @@
         }
       }
     },
+    "Starting a shell in the guest…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲストでシェルを起動しています…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게스트에서 셸을 시작하는 중…"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Đang khởi động shell trong máy khách…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在客户机中启动 shell…"
+          }
+        }
+      }
+    },
     "State" : {
       "localizations" : {
         "ja" : {
@@ -28032,6 +28206,64 @@
         }
       }
     },
+    "Terminal" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナル"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "터미널"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terminal"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "终端"
+          }
+        }
+      }
+    },
+    "Terminal tabs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ターミナルタブ"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "터미널 탭"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Các thẻ Terminal"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "终端标签页"
+          }
+        }
+      }
+    },
     "Terminate" : {
       "localizations" : {
         "ja" : {
@@ -28681,6 +28913,64 @@
         }
       }
     },
+    "The guest agent does not report the “terminal” capability. Update vphoned in the guest to open a terminal." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲストエージェントは「terminal」機能を報告していません。ターミナルを開くには、ゲストの vphoned をアップデートしてください。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게스트 에이전트가 “terminal” 기능을 보고하지 않습니다. 터미널을 열려면 게스트의 vphoned를 업데이트하십시오."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tác tử máy khách không báo cáo khả năng “terminal”. Hãy cập nhật vphoned trong máy khách để mở terminal."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "客户机代理未报告“terminal”功能。请更新客户机中的 vphoned 以打开终端。"
+          }
+        }
+      }
+    },
+    "The guest agent is not connected." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲストエージェントが接続されていません。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게스트 에이전트가 연결되어 있지 않습니다."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tác tử máy khách chưa kết nối."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "客户机代理未连接。"
+          }
+        }
+      }
+    },
     "The guest agent is not connected. Wait for it to connect, then try again." : {
       "localizations" : {
         "en" : {
@@ -28774,6 +29064,64 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "客户机剪贴板中没有文本或图像。请在客户机中拷贝内容，然后刷新。"
+          }
+        }
+      }
+    },
+    "The guest closed the connection." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ゲストが接続を閉じました。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "게스트가 연결을 닫았습니다."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Máy khách đã đóng kết nối."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "客户机关闭了连接。"
+          }
+        }
+      }
+    },
+    "The guest closed the terminal before a shell started." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "シェルが起動する前にゲストがターミナルを閉じました。"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "셸이 시작되기 전에 게스트가 터미널을 닫았습니다."
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Máy khách đã đóng terminal trước khi shell khởi động."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "客户机在 shell 启动前关闭了终端。"
           }
         }
       }
@@ -35849,6 +36197,93 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "[%@ 二进制数据]"
+          }
+        }
+      }
+    },
+    "[Connection to the guest closed]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[ゲストとの接続が閉じられました]"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[게스트와의 연결이 닫힘]"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[Kết nối tới máy khách đã đóng]"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[与客户机的连接已关闭]"
+          }
+        }
+      }
+    },
+    "[Process exited with status %ld]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[プロセスはステータス %ld で終了しました]"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[프로세스가 상태 %ld(으)로 종료됨]"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[Tiến trình đã thoát với trạng thái %ld]"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[进程已退出，状态 %ld]"
+          }
+        }
+      }
+    },
+    "[Process terminated by signal %ld]" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[プロセスはシグナル %ld で終了しました]"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[프로세스가 시그널 %ld(으)로 종료됨]"
+          }
+        },
+        "vi" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[Tiến trình bị kết thúc bởi tín hiệu %ld]"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[进程被信号 %ld 终止]"
           }
         }
       }

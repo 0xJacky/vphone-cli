@@ -334,6 +334,7 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
             screenHeight: options.screenHeight,
         )
         server.virtualMachine = vm
+        server.terminalWindowController = windowController == nil ? nil : menuController?.terminalWindowController
         hostAutomationServer = server
     }
 

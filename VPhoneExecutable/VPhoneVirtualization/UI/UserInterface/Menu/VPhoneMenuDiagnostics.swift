@@ -90,6 +90,7 @@ extension VPhoneMenuController {
     /// them all.
     func updatePanelAvailability(capabilities: [String]) {
         guestToolsAvailable = !capabilities.isEmpty
+        updateTerminalAvailability(capabilities: capabilities)
         for (panel, item) in panelMenuItems {
             item.isEnabled = capabilities.contains(panel.capability)
         }

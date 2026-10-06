@@ -51,6 +51,8 @@ struct VPhoneMenuBarTests {
             ("Capture", "Start Recording", DKShortcut("r", [.shift, .command])),
             ("Capture", "Copy Screenshot", DKShortcut("c", [.control, .command])),
             ("Capture", "Save Screenshot", DKShortcut("s", [.shift, .command])),
+            ("Window", "Terminal", DKShortcut("3", [.option, .command])),
+            ("Window", "New Terminal Tab", DKShortcut("t", [.command])),
         ]
         for (menu, title, shortcut) in expected {
             let item = try #require(bar.item(menu, title), "\(menu) › \(title)")
@@ -207,6 +209,38 @@ struct VPhoneMenuBarTests {
         #expect(VPhoneMenuCommand.guestTools.perform())
         #expect(shell.selection == .services)
         #expect(VPhoneGuestToolsShellWindow.isVisible(shell))
+    }
+
+    // MARK: - Terminal
+
+    @Test
+    func `Terminal follows the terminal capability and says why it is off`() throws {
+        let bar = VPhoneMenuBarFixture()
+        let window = try #require(bar.menu("Window"))
+        let terminal = try #require(bar.item("Window", "Terminal"))
+        let newTab = try #require(bar.item("Window", "New Terminal Tab"))
+
+        window.update()
+        #expect(!terminal.isEnabled)
+        #expect(!newTab.isEnabled)
+        #expect(terminal.toolTip == VPhoneTerminalAvailability.notConnected.reason)
+
+        // An agent from before the terminal: still off, with the reason.
+        bar.controller.updatePanelAvailability(capabilities: ["apps", "device_info"])
+        window.update()
+        #expect(!terminal.isEnabled)
+        #expect(terminal.toolTip == VPhoneTerminalAvailability.unsupported.reason)
+
+        bar.controller.updatePanelAvailability(capabilities: ["apps", "terminal"])
+        window.update()
+        #expect(terminal.isEnabled)
+        #expect(terminal.toolTip == nil)
+        // ⌘T belongs to the guest until the Terminal window is key.
+        #expect(!newTab.isEnabled)
+
+        bar.controller.updatePanelAvailability(capabilities: [])
+        window.update()
+        #expect(!terminal.isEnabled)
     }
 
     // MARK: - Helpers

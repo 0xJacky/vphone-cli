@@ -689,6 +689,17 @@ final class VPhoneGuestControl {
         return .guestError(error?["message"] as? String ?? "HTTP \(response.status)")
     }
 
+    /// A new connection to vphoned's API port, for a client that speaks its own
+    /// protocol over it, such as a terminal's WebSocket. The caller closes it.
+    func openSocket() async throws -> VZVirtioSocketConnection {
+        guard let device else { throw ControlError.notConnected }
+        let socket = await withCheckedContinuation {
+            (continuation: CheckedContinuation<VPhoneSocketResult, Never>) in
+            device.connect(toPort: 1339) { continuation.resume(returning: VPhoneSocketResult($0)) }
+        }
+        return try socket.result.get()
+    }
+
     private func http(
         method: String,
         path: String,
@@ -696,12 +707,7 @@ final class VPhoneGuestControl {
         contentType: String = "application/json",
         limits: VPhoneHTTPLimits = .rpc,
     ) async throws -> VPhoneHTTPResponse {
-        guard let device else { throw ControlError.notConnected }
-        let socket = await withCheckedContinuation {
-            (continuation: CheckedContinuation<VPhoneSocketResult, Never>) in
-            device.connect(toPort: 1339) { continuation.resume(returning: VPhoneSocketResult($0)) }
-        }
-        let connection = try socket.result.get()
+        let connection = try await openSocket()
         let transaction = VPhoneHTTPTransaction(
             connection: connection,
             method: method,

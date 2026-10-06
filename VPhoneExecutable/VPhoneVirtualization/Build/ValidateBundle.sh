@@ -86,6 +86,12 @@ done
 for preset in "$resources/patches_presets/"*.plist; do
     /usr/bin/plutil -lint -s "$preset" || { print -u2 "Malformed patch preset: ${preset:t}"; exit 1; }
 done
+# vphone-vm stops with a fatal error when the Terminal window opens without
+# Ghostty's resource bundle.
+[[ -d "$resources/GhosttyKit_GhosttyTerminal.bundle/Contents/Resources/terminfo" ]] || {
+    print -u2 "Missing Ghostty resources: Contents/Resources/GhosttyKit_GhosttyTerminal.bundle"
+    exit 1
+}
 
 for name in vphoned launchdhook-vphone.dylib SystemHook-vphone.dylib libcamfix.dylib \
     libvcamcaptured.dylib libmisfix.dylib libhapticsfix.dylib libbatteryhealthfix.dylib libdevicehubfix.dylib libdevicename.dylib \
