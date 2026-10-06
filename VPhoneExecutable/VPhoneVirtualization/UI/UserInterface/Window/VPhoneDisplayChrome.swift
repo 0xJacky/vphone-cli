@@ -5,8 +5,8 @@ import VPhoneDesignKit
 
 // MARK: - Model
 
-/// What the display window's title bar and control bar show, and what their
-/// buttons do. The window controller fills it from vphoned's status and the
+/// What the display window's title bar shows, and what its Home button
+/// does. The window controller fills it from vphoned's status and the
 /// menu bar; the bars redraw when it changes.
 @MainActor
 @Observable
@@ -17,19 +17,13 @@ final class VPhoneDisplayChromeModel {
     var address: String?
     /// Frames the guest presented in the last second; nil while Show Frame Rate is off.
     var frameRate: Int?
-    /// When the screen recording started; nil while not recording.
+    /// When the screen recording started; nil while not recording. The
+    /// status line shows its timer.
     var recordingStartedAt: Date?
 
     var canPressHome = false
-    var canOpenGuestTools = false
-    var canRotate = false
-    var canTakeScreenshot = false
 
     @ObservationIgnored var onHome: @MainActor () -> Void = {}
-    @ObservationIgnored var onGuestTools: @MainActor () -> Void = {}
-    @ObservationIgnored var onRotateLeft: @MainActor () -> Void = {}
-    @ObservationIgnored var onCopyScreenshot: @MainActor () -> Void = {}
-    @ObservationIgnored var onToggleRecording: @MainActor () -> Void = {}
 }
 
 // MARK: - Recording
@@ -66,26 +60,39 @@ enum VPhoneScreenRecordingStatus {
 // MARK: - Title Bar
 
 /// The machine's name over its status line (state dot, iOS version, address,
-/// and the frame rate when shown), with the window buttons on the leading
-/// side and Guest Tools on the trailing side.
+/// the frame rate when shown, and the recording's time while recording),
+/// with the window buttons on the leading side and Home, the window's one
+/// button, on the trailing side, as in 2.6.0. Rotate, screenshots,
+/// recording and Guest Tools are in the menu bar.
 struct VPhoneDisplayTitleBar: View {
     let model: VPhoneDisplayChromeModel
 
     var body: some View {
+        if let start = model.recordingStartedAt {
+            TimelineView(.periodic(from: start, by: 1)) { context in
+                bar(recording: VPhoneScreenRecordingStatus.elapsedText(from: start, to: context.date))
+            }
+        } else {
+            bar(recording: nil)
+        }
+    }
+
+    private func bar(recording: String?) -> some View {
         DKTitleBar(
             model.machineName,
             tone: model.isAgentConnected ? .success : .warning,
             status: model.isAgentConnected ? VPhoneLocalization.text("Running") : nil,
-            os: statusText,
+            os: statusText(recording: recording),
             address: model.isAgentConnected ? model.address : nil,
             actions: [
                 DKButtonSpec(
-                    VPhoneLocalization.text("Guest Tools"),
-                    glyph: .sidebar,
+                    VPhoneLocalization.text("Home"),
+                    glyph: .home,
                     size: .icon,
-                    isEnabled: model.canOpenGuestTools,
-                    id: "guest-tools",
-                    action: { model.onGuestTools() },
+                    isEnabled: model.canPressHome,
+                    help: VPhoneLocalization.text("Home Button"),
+                    id: "home",
+                    action: { model.onHome() },
                 ),
             ],
         )
@@ -94,7 +101,7 @@ struct VPhoneDisplayTitleBar: View {
 
     /// Never empty, so the bar keeps the height it was measured at: without
     /// a version the line says whether the agent is there.
-    private var statusText: String {
+    private func statusText(recording: String?) -> String {
         var text = if model.isAgentConnected, let version = model.iosVersion, !version.isEmpty {
             "iOS \(version)"
         } else {
@@ -103,94 +110,9 @@ struct VPhoneDisplayTitleBar: View {
         if let frameRate = model.frameRate {
             text += " · " + VPhoneLocalization.format("%ld fps", frameRate)
         }
+        if let recording {
+            text += " · " + VPhoneLocalization.format("Recording %@", recording)
+        }
         return text
-    }
-}
-
-// MARK: - Control Bar
-
-/// The bar under the guest display: rotate and screenshot on the leading
-/// side, Home in the center, and recording on the trailing side, where the
-/// running timer replaces the record button.
-struct VPhoneDisplayControlBar: View {
-    let model: VPhoneDisplayChromeModel
-
-    var body: some View {
-        if let start = model.recordingStartedAt {
-            TimelineView(.periodic(from: start, by: 1)) { context in
-                bar(recordingText: VPhoneScreenRecordingStatus.elapsedText(from: start, to: context.date))
-            }
-        } else {
-            bar(recordingText: nil)
-        }
-    }
-
-    private func bar(recordingText: String?) -> some View {
-        DKControlBar(
-            leading: [
-                DKButtonSpec(
-                    VPhoneLocalization.text("Rotate Left"),
-                    glyph: .restart,
-                    size: .icon,
-                    isEnabled: model.canRotate,
-                    id: "rotate-left",
-                    action: { model.onRotateLeft() },
-                ),
-                DKButtonSpec(
-                    VPhoneLocalization.text("Copy Screenshot"),
-                    glyph: .camera,
-                    size: .icon,
-                    isEnabled: model.canTakeScreenshot,
-                    id: "copy-screenshot",
-                    action: { model.onCopyScreenshot() },
-                ),
-            ],
-            center: [
-                DKButtonSpec(
-                    VPhoneLocalization.text("Home"),
-                    glyph: .home,
-                    size: .largeIcon,
-                    isEnabled: model.canPressHome,
-                    help: VPhoneLocalization.text("Home Button"),
-                    id: "home",
-                    action: { model.onHome() },
-                ),
-            ],
-        ) {
-            recording(recordingText)
-        }
-    }
-
-    /// The record button, or while recording the timer, which stops it. A
-    /// narrow window drops the word "Recording" before it truncates the time.
-    @ViewBuilder
-    private func recording(_ elapsed: String?) -> some View {
-        if let elapsed {
-            let title = VPhoneLocalization.format("Recording %@", elapsed)
-            ViewThatFits(in: .horizontal) {
-                DKButton(timerSpec(label: title))
-                DKButton(timerSpec(label: elapsed))
-                    .accessibilityLabel(title)
-            }
-        } else {
-            DKButton(DKButtonSpec(
-                VPhoneLocalization.text("Start Recording"),
-                glyph: .record,
-                size: .icon,
-                id: "recording",
-                action: { model.onToggleRecording() },
-            ))
-        }
-    }
-
-    private func timerSpec(label: String) -> DKButtonSpec {
-        DKButtonSpec(
-            label,
-            glyph: .record,
-            variant: .recording,
-            help: VPhoneLocalization.text("Stop Recording"),
-            id: "recording",
-            action: { model.onToggleRecording() },
-        )
     }
 }

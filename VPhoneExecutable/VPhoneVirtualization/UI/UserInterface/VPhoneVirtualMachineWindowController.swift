@@ -56,10 +56,6 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
 
         chrome.machineName = name
         chrome.onHome = { [weak self] in self?.homePressed() }
-        chrome.onGuestTools = { [weak self] in self?.press(.guestTools) }
-        chrome.onRotateLeft = { [weak self] in self?.press(.rotateLeft) }
-        chrome.onCopyScreenshot = { [weak self] in self?.press(.copyScreenshot) }
-        chrome.onToggleRecording = { [weak self] in self?.press(.toggleRecording) }
         let content = VPhoneDisplayWindowContentView(display: container, chrome: chrome)
         self.content = content
 
@@ -339,24 +335,17 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         }
     }
 
-    /// Home presses through vphoned, so it waits for the connection, as does a
-    /// screenshot. The other buttons follow their menu items.
+    /// Home presses through vphoned, so it waits for the connection.
     private func updateButtons(connected: Bool) {
-        let states: [(ReferenceWritableKeyPath<VPhoneDisplayChromeModel, Bool>, Bool)] = [
-            (\.canPressHome, connected),
-            (\.canOpenGuestTools, VPhoneMenuCommand.guestTools.isEnabled),
-            (\.canRotate, VPhoneMenuCommand.rotateLeft.isEnabled),
-            (\.canTakeScreenshot, connected && VPhoneMenuCommand.copyScreenshot.isEnabled),
-        ]
-        for (keyPath, enabled) in states where chrome[keyPath: keyPath] != enabled {
-            chrome[keyPath: keyPath] = enabled
+        if chrome.canPressHome != connected {
+            chrome.canPressHome = connected
         }
     }
 
     // MARK: - Recording
 
-    /// The Capture menu says when a recording starts and stops; the control
-    /// bar shows its timer meanwhile.
+    /// The Capture menu says when a recording starts and stops; the title
+    /// bar's status line shows its timer meanwhile.
     private func observeRecording() {
         keyStateObservers.append(NotificationCenter.default.addObserver(
             forName: .vphoneScreenRecordingDidChange, object: nil, queue: .main,
@@ -400,16 +389,6 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
 
     private func homePressed() {
         control?.sendHIDPress(page: 0x0C, usage: 0x40)
-        returnKeyboardToGuest()
-    }
-
-    /// Presses a bar button's menu item, then gives the keyboard back to the
-    /// guest.
-    private func press(_ command: VPhoneMenuCommand) {
-        command.perform()
-        if let control {
-            updateButtons(connected: control.isConnected)
-        }
         returnKeyboardToGuest()
     }
 

@@ -5,40 +5,33 @@ import VPhoneDesignKit
 
 // MARK: - Display Window Content
 
-/// The display window's content view: the title bar, the guest display
-/// edge to edge between the bars, and the control bar. A margin of display
-/// ground around the guest would read as a black frame round the screen. The window uses a full-size content view, so the title bar sits under
-/// the transparent system title bar, whose buttons are hidden; the title bar
-/// draws its own.
+/// The display window's content view: the title bar over the guest display,
+/// which runs edge to edge below it. A margin of display ground around the
+/// guest would read as a black frame round the screen. The window uses a
+/// full-size content view, so the title bar sits under the transparent
+/// system title bar, whose buttons are hidden; the title bar draws its own.
 ///
-/// The bars have fixed heights, measured once. Everything else goes to the
-/// display, which `VPhoneDisplayContainerView` fits at the panel's aspect
+/// The title bar has a fixed height, measured once. Everything else goes to
+/// the display, which `VPhoneDisplayContainerView` fits at the panel's aspect
 /// ratio; the window controller sizes the window so that it fits exactly.
 final class VPhoneDisplayWindowContentView: NSView {
     let display: VPhoneDisplayContainerView
     private let titleBar: NSView
-    private let controlBar: NSView
     let titleBarHeight: CGFloat
-    let controlBarHeight: CGFloat
 
     init(display: VPhoneDisplayContainerView, chrome: VPhoneDisplayChromeModel) {
         self.display = display
         let titleBar = VPhoneChromeHostingView(rootView: VPhoneDisplayTitleBar(model: chrome))
-        let controlBar = VPhoneChromeHostingView(rootView: VPhoneDisplayControlBar(model: chrome))
         self.titleBar = titleBar
-        self.controlBar = controlBar
         titleBarHeight = ceil(titleBar.fittingSize.height)
-        controlBarHeight = ceil(controlBar.fittingSize.height)
         titleBar.sizingOptions = []
-        controlBar.sizingOptions = []
-        // The bars sit at the window's edges by design, so the title bar
-        // safe area must not push the title bar's content down.
+        // The title bar sits at the window's top edge by design, so the
+        // system title bar's safe area must not push its content down.
         titleBar.safeAreaRegions = []
-        controlBar.safeAreaRegions = []
         super.init(frame: .zero)
         wantsLayer = true
         layer?.backgroundColor = NSColor.black.cgColor
-        for view in [display, titleBar, controlBar] as [NSView] {
+        for view in [display, titleBar] as [NSView] {
             view.autoresizingMask = []
             addSubview(view)
         }
@@ -49,16 +42,15 @@ final class VPhoneDisplayWindowContentView: NSView {
         fatalError("init(coder:) is not supported")
     }
 
-    /// The room around the guest display: the bars above and below it.
+    /// The room around the guest display: the title bar above it.
     var chromeInsets: NSEdgeInsets {
-        NSEdgeInsets(top: titleBarHeight, left: 0, bottom: controlBarHeight, right: 0)
+        NSEdgeInsets(top: titleBarHeight, left: 0, bottom: 0, right: 0)
     }
 
     override func layout() {
         super.layout()
         let insets = chromeInsets
         titleBar.frame = NSRect(x: 0, y: bounds.maxY - titleBarHeight, width: bounds.width, height: titleBarHeight)
-        controlBar.frame = NSRect(x: 0, y: 0, width: bounds.width, height: controlBarHeight)
         display.frame = NSRect(
             x: insets.left,
             y: insets.bottom,
