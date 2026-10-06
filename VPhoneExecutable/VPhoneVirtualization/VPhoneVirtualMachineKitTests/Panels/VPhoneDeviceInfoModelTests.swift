@@ -50,6 +50,7 @@ struct VPhoneDeviceInfoModelTests {
         let model = model()
         #expect(model.sections(in: .leading).map(\.kind) == [.device, .power, .security, .agent])
         #expect(model.sections(in: .trailing).map(\.kind) == [.hardware, .display])
+        #expect(model.interleavedSections.map(\.kind) == [.device, .hardware, .power, .display, .security, .agent])
         #expect(model.sections(in: .leading).first?.rows.map(\.label) == [
             "Model", "iOS Version", "Kernel", "Host Name", "Boot Time", "Uptime", "Boot Session UUID",
         ])

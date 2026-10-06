@@ -143,6 +143,25 @@ final class VPhoneDeviceInfoModel {
         sections.filter { $0.kind.column == column }
     }
 
+    /// The sections in the order the page's masonry places them: the leading
+    /// and trailing sections taken in turn (Device, Hardware, Power,
+    /// Display…), so each lands near where the two-column page had it and
+    /// the shortest-column placement can even the columns out.
+    var interleavedSections: [VPhoneDeviceInfoSection] {
+        let leading = sections(in: .leading)
+        let trailing = sections(in: .trailing)
+        var result: [VPhoneDeviceInfoSection] = []
+        for index in 0 ..< max(leading.count, trailing.count) {
+            if index < leading.count {
+                result.append(leading[index])
+            }
+            if index < trailing.count {
+                result.append(trailing[index])
+            }
+        }
+        return result
+    }
+
     private func deviceSection(_ info: [String: Any]) -> VPhoneDeviceInfoSection {
         let kernel = [info.string("sysname"), info.string("kernel")].compactMap(\.self).joined(separator: " ")
         return VPhoneDeviceInfoSection(kind: .device, title: Self.text("Device"), rows: [

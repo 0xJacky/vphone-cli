@@ -103,23 +103,22 @@ struct VPhoneDeviceInfoView: View {
     }
 
     private var readout: some View {
+        // Masonry, not two fixed columns: every card keeps its own height and
+        // goes under the shortest column, so a short card is never stretched
+        // into an empty one beside the long Network table, and a wide window
+        // gets a third column.
         VPhoneGuestToolContent {
-            VPhoneGuestToolColumns {
-                let leading = model.sections(in: .leading)
-                ForEach(leading) { section in
-                    sectionView(section, grows: section.id == leading.last?.id)
-                }
-            } trailing: {
-                ForEach(model.sections(in: .trailing)) { section in
-                    sectionView(section, grows: false)
+            DKMasonry {
+                ForEach(model.interleavedSections) { section in
+                    sectionView(section)
                 }
                 networkSection
             }
         }
     }
 
-    private func sectionView(_ section: VPhoneDeviceInfoSection, grows: Bool) -> some View {
-        DKSection(section.title, grow: grows) {
+    private func sectionView(_ section: VPhoneDeviceInfoSection) -> some View {
+        DKSection(section.title) {
             ForEach(section.rows) { row in
                 VPhoneDeviceInfoRowView(row: row) { model.copyValue(row.value) }
             }
@@ -129,7 +128,7 @@ struct VPhoneDeviceInfoView: View {
     // MARK: - Network
 
     private var networkSection: some View {
-        DKSection(String(localized: "Network", bundle: VPhoneLocalization.bundle), grow: true) {
+        DKSection(String(localized: "Network", bundle: VPhoneLocalization.bundle)) {
             let rows = model.sortedAddresses
             if rows.isEmpty {
                 Text("The guest reported no IPv4 or IPv6 addresses.", bundle: VPhoneLocalization.bundle)
