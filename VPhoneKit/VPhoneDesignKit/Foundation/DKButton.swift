@@ -210,10 +210,24 @@ public struct DKButtonStyle: ButtonStyle {
         }
     }
 
+    /// A disabled button drops its variant's look: bordered and filled
+    /// variants become a flat gray well with no border, so a disabled Remove
+    /// shows no red and a disabled primary no accent; borderless ones only
+    /// gray their text. Every variant then reads as unavailable the same way.
+    nonisolated static func disabledShowsWell(_ variant: DKButtonVariant) -> Bool {
+        switch variant {
+        case .secondary, .primary, .danger, .pressed, .recording: true
+        case .ghost, .ghostOn, .plain: false
+        }
+    }
+
     private func background(pressed: Bool) -> Color {
+        guard isEnabled else {
+            return Self.disabledShowsWell(variant) ? DK.Palette.surfaceSunken : .clear
+        }
         switch variant {
         case .primary:
-            return isEnabled ? (pressed ? DK.Palette.accentPressed : DK.Palette.accent) : DK.Palette.surfaceSunken
+            return pressed ? DK.Palette.accentPressed : DK.Palette.accent
         case .recording:
             return DK.Palette.dangerSurface
         case .ghost:
@@ -230,7 +244,8 @@ public struct DKButtonStyle: ButtonStyle {
     }
 
     private var border: Color {
-        switch variant {
+        guard isEnabled else { return .clear }
+        return switch variant {
         case .primary, .ghost, .ghostOn, .plain: .clear
         case .danger, .recording: DK.Palette.dangerLine
         case .secondary, .pressed: DK.Palette.lineStrong
