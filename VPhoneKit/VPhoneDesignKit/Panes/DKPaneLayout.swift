@@ -177,6 +177,15 @@ public struct DKPaneFrame: Equatable, Sendable {
 /// One splitter's rectangle, with its split's fraction and the length along
 /// the split, which turns a drag distance into a fraction.
 public struct DKSplitterFrame: Equatable, Sendable {
+    /// Where the splitter takes drags: its line widened to
+    /// `DKPaneLayout.splitterThickness` across the line, over both panes.
+    public var hitRect: CGRect {
+        let grow = (DKPaneLayout.splitterThickness - (direction == .horizontal ? rect.width : rect.height)) / 2
+        return direction == .horizontal
+            ? rect.insetBy(dx: -max(grow, 0), dy: 0)
+            : rect.insetBy(dx: 0, dy: -max(grow, 0))
+    }
+
     public let splitID: UUID
     public let direction: DKSplitDirection
     public let rect: CGRect
@@ -204,7 +213,12 @@ public struct DKPaneLayoutFrames: Equatable, Sendable {
 }
 
 public extension DKPaneLayout {
-    /// The splitter's thickness, which is also its hit area.
+    /// The room between two panes: the splitter's one-point line, so the
+    /// panes meet at a hairline with no gap.
+    static let dividerThickness: CGFloat = DK.Metric.hairline
+
+    /// The splitter's drag area, centered on its line and reaching over
+    /// the panes on both sides.
     static let splitterThickness: CGFloat = 6
 
     /// One rectangle per pane and per splitter.
@@ -224,7 +238,7 @@ public extension DKPaneLayout {
         case let .leaf(paneID):
             frames.panes.append(DKPaneFrame(paneID: paneID, rect: rect))
         case let .split(split):
-            let thickness = DKPaneLayout.splitterThickness
+            let thickness = DKPaneLayout.dividerThickness
             let total = split.direction == .horizontal ? rect.width : rect.height
             let firstLength = max(0, total * split.fraction)
             let secondLength = max(0, total - firstLength - thickness)

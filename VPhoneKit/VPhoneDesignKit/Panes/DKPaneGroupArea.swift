@@ -122,8 +122,8 @@ public struct DKPaneGroupArea<Payload, Content: View, EmptyGroup: View>: View {
                         ),
                         totalLength: splitter.totalLength,
                     )
-                    .frame(width: splitter.rect.width, height: splitter.rect.height)
-                    .offset(x: splitter.rect.minX, y: splitter.rect.minY)
+                    .frame(width: splitter.hitRect.width, height: splitter.hitRect.height)
+                    .offset(x: splitter.hitRect.minX, y: splitter.hitRect.minY)
                     .zIndex(3)
                 }
             }

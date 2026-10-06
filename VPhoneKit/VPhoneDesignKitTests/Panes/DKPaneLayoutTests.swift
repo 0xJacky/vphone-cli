@@ -93,9 +93,10 @@ struct DKPaneLayoutFramesTests {
     }
 
     @Test
-    func `a split leaves room for its splitter`() {
+    func `a split leaves a hairline between its panes`() {
         let a = UUID(), b = UUID(), split = UUID()
-        let thickness = DKPaneLayout.splitterThickness
+        let thickness = DKPaneLayout.dividerThickness
+        #expect(thickness == 1)
         let frames = DKPaneLayout.leaf(paneID: a)
             .splitting(paneID: a, direction: .horizontal, newPaneID: b, splitID: split)
             .frames(in: CGRect(x: 0, y: 0, width: 800, height: 600))
@@ -106,6 +107,19 @@ struct DKPaneLayoutFramesTests {
         #expect(frames.splitters[0].splitID == split)
         #expect(frames.splitters[0].totalLength == 800)
         #expect(frames.splitters[0].rect == CGRect(x: 400, y: 0, width: thickness, height: 600))
+        // The drag area reaches over both panes, centered on the line.
+        #expect(frames.splitters[0].hitRect == CGRect(x: 397.5, y: 0, width: DKPaneLayout.splitterThickness, height: 600))
+    }
+
+    @Test
+    func `a stacked split's drag area widens vertically`() {
+        let a = UUID(), b = UUID()
+        let frames = DKPaneLayout.leaf(paneID: a)
+            .splitting(paneID: a, direction: .vertical, newPaneID: b, splitID: UUID())
+            .frames(in: CGRect(x: 0, y: 0, width: 800, height: 600))
+        #expect(frames.splitters[0].rect == CGRect(x: 0, y: 300, width: 800, height: 1))
+        #expect(frames.splitters[0].hitRect == CGRect(x: 0, y: 297.5, width: 800, height: 6))
+        #expect(frames.panes[1].rect.minY == 301)
     }
 
     @Test
