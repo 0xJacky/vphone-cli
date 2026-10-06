@@ -12,6 +12,8 @@ trap '/bin/rm -rf "$temporary"' EXIT
     "$machines/VPhoneLaunchpadMachineFormat.swift" \
     "$machines/VPhoneLaunchpadPatchCatalog.swift" \
     "$launchpad/VPhoneLaunchpad/Application/VPhoneLaunchpadLogTranslator.swift" \
+    "$launchpad/VPhoneLaunchpad/Application/VPhoneLaunchpadLogWriter.swift" \
+    "$launchpad/VPhoneLaunchpadShared/VPhoneLaunchpadLineReader.swift" \
     "$launchpad/Tests/MachinesLogicTests.swift" \
     -o "$temporary/machines-logic-tests"
 "$temporary/machines-logic-tests" "$@"

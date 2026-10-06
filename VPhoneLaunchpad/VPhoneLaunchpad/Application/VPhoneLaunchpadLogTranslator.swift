@@ -54,6 +54,9 @@ nonisolated enum VPhoneLaunchpadLogStyle: Hashable, Sendable {
 /// "down one row" without returning to the first column; each one gains a
 /// carriage return. A creation log is also coloured line by line, so it
 /// holds back a partial line until its end arrives.
+///
+/// A console can print thousands of lines a second, so both styles copy the
+/// runs between line feeds whole and make one pass over each chunk.
 nonisolated struct VPhoneLaunchpadLogTranslator {
     let style: VPhoneLaunchpadLogStyle
     private var previous: UInt8 = 0
@@ -68,35 +71,75 @@ nonisolated struct VPhoneLaunchpadLogTranslator {
         case .plain:
             return returnLines(data)
         case .creation:
-            pending.append(data)
-            var output = Data()
-            while let end = pending.firstIndex(of: 0x0A) {
-                var line = pending[pending.startIndex ..< end]
-                if line.last == 0x0D {
-                    line = line.dropLast()
-                }
-                let text = String(decoding: line, as: UTF8.self)
-                if let tone = VPhoneLaunchpadLogStyle.creationTone(of: text) {
-                    output.append(Data((VPhoneLaunchpadLogStyle.escape(tone) + text + VPhoneLaunchpadLogStyle.reset).utf8))
-                } else {
-                    output.append(line)
-                }
-                output.append(contentsOf: [0x0D, 0x0A])
-                pending = Data(pending[pending.index(after: end)...])
-            }
-            return output
+            return colourLines(data)
         }
     }
 
     private mutating func returnLines(_ data: Data) -> Data {
+        guard let last = data.last else {
+            return Data()
+        }
         var output = Data(capacity: data.count + data.count / 32)
-        for byte in data {
-            if byte == 0x0A, previous != 0x0D {
-                output.append(0x0D)
+        let previous = previous
+        data.withUnsafeBytes { bytes in
+            var start = 0
+            while let end = Self.lineFeed(in: bytes, from: start) {
+                let before = end > 0 ? bytes[end - 1] : previous
+                output.append(contentsOf: UnsafeRawBufferPointer(rebasing: bytes[start ..< end]))
+                if before != 0x0D {
+                    output.append(0x0D)
+                }
+                output.append(0x0A)
+                start = end + 1
             }
-            output.append(byte)
-            previous = byte
+            output.append(contentsOf: UnsafeRawBufferPointer(rebasing: bytes[start...]))
+        }
+        self.previous = last
+        return output
+    }
+
+    private mutating func colourLines(_ data: Data) -> Data {
+        pending.append(data)
+        var output = Data()
+        let consumed = pending.withUnsafeBytes { bytes -> Int in
+            var start = 0
+            while let end = Self.lineFeed(in: bytes, from: start) {
+                var line = UnsafeRawBufferPointer(rebasing: bytes[start ..< end])
+                if line.last == 0x0D {
+                    line = UnsafeRawBufferPointer(rebasing: line.dropLast())
+                }
+                // Each tone's mark starts with `$`, `w` or the lead byte of
+                // `✕` and `●`; other lines are copied without decoding.
+                if let first = line.first, first == 0x24 || first == 0x77 || first == 0xE2 {
+                    let text = String(decoding: line, as: UTF8.self)
+                    if let tone = VPhoneLaunchpadLogStyle.creationTone(of: text) {
+                        output.append(contentsOf: (VPhoneLaunchpadLogStyle.escape(tone) + text + VPhoneLaunchpadLogStyle.reset).utf8)
+                    } else {
+                        output.append(contentsOf: line)
+                    }
+                } else {
+                    output.append(contentsOf: line)
+                }
+                output.append(contentsOf: [0x0D, 0x0A])
+                start = end + 1
+            }
+            return start
+        }
+        if consumed == pending.count {
+            pending.removeAll(keepingCapacity: true)
+        } else if consumed > 0 {
+            pending = Data(pending.dropFirst(consumed))
         }
         return output
+    }
+
+    /// The offset of the next line feed at or after `start`.
+    private static func lineFeed(in bytes: UnsafeRawBufferPointer, from start: Int) -> Int? {
+        guard start < bytes.count, let base = bytes.baseAddress,
+              let found = memchr(base + start, 0x0A, bytes.count - start)
+        else {
+            return nil
+        }
+        return base.distance(to: UnsafeRawPointer(found))
     }
 }

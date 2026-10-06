@@ -322,5 +322,233 @@ struct MachinesLogicTests {
         expect(creation.translate(Data("$ vphone-cli re".utf8)).isEmpty, "partial line")
         let out = String(decoding: creation.translate(Data("store\r\nplain\n".utf8)), as: UTF8.self)
         expect(out == "\u{1B}[34m$ vphone-cli restore\u{1B}[0m\r\nplain\r\n", out.debugDescription)
+
+        translatorChunks()
+        splitter()
+        panicLines()
+        writer()
+    }
+
+    // MARK: - Console throughput
+
+    /// A console log as a guest prints it: plain lines, coloured lines,
+    /// bare and doubled line ends, progress redraws, blank lines, a creation
+    /// log's marks and a little invalid UTF-8.
+    static func consoleSample(lines: Int, seed: UInt64) -> Data {
+        var random = SplitMix(seed: seed)
+        let pieces: [String] = [
+            "set_dir_stats:3204: disk1s7 setting dir-stats for ino 1234 parent 2",
+            "\u{1B}[32m[vphoned]\u{1B}[0m ping ok",
+            "\u{1B}[1;31mpanic(cpu 0 caller 0xfffffff0): \u{1B}[0m",
+            "progress 12 100\r",
+            "   \t ",
+            "",
+            "$ vphone-cli restore ios27-rc",
+            "✕ restore failed",
+            "● done",
+            "warning: low space",
+            "\u{1B}[?25l\u{1B}[2K redraw\u{1B}[",
+            "\u{1B}x not a sequence \u{1B}[12;",
+            "Stackshot succeeded",
+            "spanic? ppanic unpanic",
+            "研究 \u{3000} ok",
+        ]
+        var data = Data()
+        for _ in 0 ..< lines {
+            data.append(contentsOf: pieces[Int(random.next() % UInt64(pieces.count))].utf8)
+            switch random.next() % 10 {
+            case 0: data.append(contentsOf: [0x0D, 0x0A])
+            case 1: data.append(0x0D)
+            case 2: data.append(contentsOf: [0xE2, 0x9C])
+            default: data.append(0x0A)
+            }
+        }
+        return data
+    }
+
+    /// `data` cut at random points, some cuts inside a line, a CR LF pair or
+    /// a UTF-8 sequence.
+    static func chunks(of data: Data, seed: UInt64) -> [Data] {
+        var random = SplitMix(seed: seed)
+        var result: [Data] = []
+        var start = data.startIndex
+        while start < data.endIndex {
+            let length = 1 + Int(random.next() % 300)
+            let end = min(start + length, data.endIndex)
+            result.append(Data(data[start ..< end]))
+            start = end
+        }
+        return result
+    }
+
+    struct SplitMix {
+        var state: UInt64
+        init(seed: UInt64) { state = seed }
+        mutating func next() -> UInt64 {
+            state &+= 0x9E37_79B9_7F4A_7C15
+            var z = state
+            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+            return z ^ (z >> 31)
+        }
+    }
+
+    /// The translator's output does not depend on where the reads cut the
+    /// log, and matches the byte-at-a-time and line-at-a-time translation it
+    /// replaced.
+    static func translatorChunks() {
+        for seed in UInt64(1) ... 6 {
+            let log = consoleSample(lines: 3000, seed: seed)
+            let parts = chunks(of: log, seed: seed &* 31)
+            for style in [VPhoneLaunchpadLogStyle.plain, .creation] {
+                var whole = VPhoneLaunchpadLogTranslator(style: style)
+                var cut = VPhoneLaunchpadLogTranslator(style: style)
+                var reference = ReferenceTranslator(style: style)
+                let expected = parts.reduce(into: Data()) { $0.append(reference.translate($1)) }
+                let joined = parts.reduce(into: Data()) { $0.append(cut.translate($1)) }
+                expect(whole.translate(log) == expected, "\(style) whole, seed \(seed)")
+                expect(joined == expected, "\(style) chunked, seed \(seed)")
+            }
+        }
+        var plain = VPhoneLaunchpadLogTranslator()
+        expect(plain.translate(Data()).isEmpty, "empty chunk")
+        expect(plain.translate(Data("a\r".utf8)) == Data("a\r".utf8), "CR at a chunk's end")
+        expect(plain.translate(Data("\nb\n".utf8)) == Data("\nb\r\n".utf8), "its LF gains nothing")
+        expect(plain.translate(Data("\n\n".utf8)) == Data("\r\n\r\n".utf8), "empty lines")
+        var creation = VPhoneLaunchpadLogTranslator(style: .creation)
+        expect(creation.translate(Data("● do".utf8)).isEmpty, "partial mark")
+        let done = String(decoding: creation.translate(Data("ne\nwarn".utf8)), as: UTF8.self)
+        expect(done == "\u{1B}[32m● done\u{1B}[0m\r\n", done.debugDescription)
+        let warning = String(decoding: creation.translate(Data("ing: x\r\nwarn\n".utf8)), as: UTF8.self)
+        expect(warning == "\u{1B}[33mwarning: x\u{1B}[0m\r\nwarn\r\n", warning.debugDescription)
+    }
+
+    /// The translation before it worked a chunk at a time.
+    struct ReferenceTranslator {
+        let style: VPhoneLaunchpadLogStyle
+        var previous: UInt8 = 0
+        var pending = Data()
+
+        mutating func translate(_ data: Data) -> Data {
+            switch style {
+            case .plain:
+                var output = Data()
+                for byte in data {
+                    if byte == 0x0A, previous != 0x0D {
+                        output.append(0x0D)
+                    }
+                    output.append(byte)
+                    previous = byte
+                }
+                return output
+            case .creation:
+                pending.append(data)
+                var output = Data()
+                while let end = pending.firstIndex(of: 0x0A) {
+                    var line = pending[pending.startIndex ..< end]
+                    if line.last == 0x0D {
+                        line = line.dropLast()
+                    }
+                    let text = String(decoding: line, as: UTF8.self)
+                    if let tone = VPhoneLaunchpadLogStyle.creationTone(of: text) {
+                        output.append(Data((VPhoneLaunchpadLogStyle.escape(tone) + text + VPhoneLaunchpadLogStyle.reset).utf8))
+                    } else {
+                        output.append(line)
+                    }
+                    output.append(contentsOf: [0x0D, 0x0A])
+                    pending = Data(pending[pending.index(after: end)...])
+                }
+                return output
+            }
+        }
+    }
+
+    /// The line splitter gives the lines the regular-expression splitter it
+    /// replaced gave, wherever the reads cut the output.
+    static func splitter() {
+        func reference(_ data: Data) -> [String] {
+            var buffer = data
+            var lines: [String] = []
+            func emit(_ bytes: Data) {
+                let text = String(decoding: bytes, as: UTF8.self)
+                    .replacingOccurrences(of: "\u{1B}\\[[0-9;?]*[ -/]*[@-~]", with: "", options: .regularExpression)
+                if !text.trimmingCharacters(in: .whitespaces).isEmpty {
+                    lines.append(text)
+                }
+            }
+            while let end = buffer.firstIndex(where: { $0 == 0x0A || $0 == 0x0D }) {
+                emit(buffer[buffer.startIndex ..< end])
+                buffer.removeSubrange(buffer.startIndex ... end)
+            }
+            emit(buffer)
+            return lines
+        }
+        for seed in UInt64(1) ... 6 {
+            let log = consoleSample(lines: 3000, seed: seed)
+            var splitter = VPhoneLaunchpadLineSplitter()
+            var lines: [String] = []
+            for part in chunks(of: log, seed: seed &* 17) {
+                splitter.feed(part) { lines.append($0) }
+            }
+            splitter.flush { lines.append($0) }
+            let expected = reference(log)
+            expect(lines == expected, "seed \(seed): \(lines.count) lines, expected \(expected.count)")
+        }
+        var splitter = VPhoneLaunchpadLineSplitter()
+        var lines: [String] = []
+        splitter.feed(Data("\u{1B}[1;32mok\u{1B}[0m\r\n \u{2003}\t\nrest".utf8)) { lines.append($0) }
+        expect(lines == ["ok"], "colour dropped, blank lines skipped: \(lines)")
+        splitter.feed(Data(" of it".utf8)) { lines.append($0) }
+        splitter.flush { lines.append($0) }
+        expect(lines == ["ok", "rest of it"], "partial line across chunks: \(lines)")
+        expect(VPhoneLaunchpadLineSplitter.strippingEscapes("a\u{1B}[b\u{1B}") == "a\u{1B}", "ESC [ with no parameters ends at its final byte; a trailing ESC stays")
+        expect(VPhoneLaunchpadLineSplitter.strippingEscapes("a\u{1B}[12;\u{1B}[0m研") == "a\u{1B}[12;研", "an unfinished sequence stays")
+    }
+
+    /// The panic check agrees with the pattern it compiles once.
+    static func panicLines() {
+        let lines = [
+            "panic(cpu 0 caller 0xfffffff0)", "Kernel Panic", "PANIC", "xnu: kernel panic", "https://panic.apple.com/",
+            "spanic", "ppanic", "PPANIC", "Ppanic", "unpanic", "stackshot succeeded", "Stackshot SUCCEEDED",
+            "ſtackshot ſucceeded", "pstackshot succeeded", "stackshot  succeeded", "pani c", "set_dir_stats:3204: disk1s7",
+            "", "p", "panic", "\u{1B}[31mpanic\u{1B}[0m", "研究panic",
+        ]
+        for line in lines {
+            let expected = line.range(of: VPhoneLaunchpadPanicLine.pattern, options: [.regularExpression, .caseInsensitive]) != nil
+            expect(VPhoneLaunchpadPanicLine.matches(line) == expected, "\(line.debugDescription) should be \(expected)")
+        }
+        expect(VPhoneLaunchpadPanicLine.contains("xPaNiC", "panic"), "any ASCII case")
+        expect(!VPhoneLaunchpadPanicLine.contains("pan", "panic"), "shorter than the word")
+        expect(!VPhoneLaunchpadPanicLine.contains("p@nic", "panic"), "only letters fold")
+    }
+
+    /// The writer keeps every line, in order, however many arrive at once,
+    /// and the last twelve for error details.
+    static func writer() {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("writer-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("create.log")
+        let writer = VPhoneLaunchpadLogWriter(url: url)
+        let count = 20000
+        DispatchQueue.concurrentPerform(iterations: 4) { worker in
+            for index in 0 ..< count / 4 {
+                writer.write("\(worker) \(index)")
+            }
+        }
+        var text = ""
+        for _ in 0 ..< 500 {
+            text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            if text.split(separator: "\n").count == count {
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        let lines = text.split(separator: "\n")
+        expect(lines.count == count, "\(lines.count) of \(count) lines written")
+        for worker in 0 ..< 4 {
+            let own = lines.filter { $0.hasPrefix("\(worker) ") }.map { Int($0.split(separator: " ")[1])! }
+            expect(own == Array(0 ..< count / 4), "worker \(worker)'s lines in order")
+        }
+        expect(writer.tail.split(separator: "\n").count == 12, "tail keeps twelve lines")
     }
 }
