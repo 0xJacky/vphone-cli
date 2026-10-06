@@ -7642,7 +7642,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "辅助工具 %@ 已就绪"
+            "value" : "Helper %@ 已就绪"
           }
         }
       }
@@ -7670,7 +7670,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "此构建版本不含辅助工具"
+            "value" : "此构建版本不含 Helper"
           }
         }
       }
@@ -7698,7 +7698,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "未安装辅助工具"
+            "value" : "未安装 Helper"
           }
         }
       }
@@ -7726,7 +7726,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "辅助工具有可用更新"
+            "value" : "Helper 有可用更新"
           }
         }
       }
@@ -13134,7 +13134,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "特权辅助工具"
+            "value" : "特权 Helper"
           }
         }
       }
@@ -19921,7 +19921,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在检查辅助工具…"
+            "value" : "正在检查 Helper…"
           }
         }
       }
@@ -20625,7 +20625,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "辅助工具和网络会最后检查。"
+            "value" : "Helper 和网络会最后检查。"
           }
         }
       }
