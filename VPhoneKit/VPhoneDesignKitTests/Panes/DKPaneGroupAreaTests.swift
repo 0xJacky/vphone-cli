@@ -311,21 +311,33 @@ final class DKFakeDraggingInfo: NSObject, @preconcurrency NSDraggingInfo {
 @MainActor private var dropTrace = ""
 
 extension DKPaneGroupAreaTests {
+    /// The view AppKit sends a drag to: it follows the frontmost subview under
+    /// the pointer down the tree, and takes the deepest view on that path that
+    /// is registered for drags. A frontmost AppKit view registered for nothing,
+    /// such as a terminal, hides every drop target behind it, so the content
+    /// markers here stand in for one.
+    static func dragDestination(in view: NSView, at windowPoint: NSPoint) -> NSView? {
+        guard !view.isHidden, view.bounds.contains(view.convert(windowPoint, from: nil)) else { return nil }
+        let registered = view.registeredDraggedTypes.isEmpty ? nil : view
+        guard let front = view.subviews.reversed().first(where: { !$0.isHidden && $0.bounds.contains($0.convert(windowPoint, from: nil)) }) else {
+            return registered
+        }
+        return dragDestination(in: front, at: windowPoint) ?? registered
+    }
+}
+
+extension DKPaneGroupAreaTests {
     /// Drops `tabID` at `point` (top-left origin, in the area) the way AppKit
     /// would, and waits for the item provider the delegate falls back on
     /// when no drag began in this process.
     private func drop(_ tabID: UUID, at point: CGPoint, on host: NSView, in window: NSWindow) async {
         let location = host.convert(NSPoint(x: point.x, y: host.isFlipped ? point.y : host.bounds.height - point.y), to: nil)
         let info = DKFakeDraggingInfo(window: window, location: location, tabID: tabID, type: .plainText)
-        // AppKit sends a drag to the deepest view registered for its types.
         func targets(_ view: NSView) -> [NSView] {
             (view.registeredDraggedTypes.isEmpty ? [] : [view]) + view.subviews.flatMap(targets)
         }
         let all = targets(host)
-        let destination = all.last { view in
-            let local = view.convert(location, from: nil)
-            return view.bounds.contains(local)
-        } ?? host
+        let destination = Self.dragDestination(in: host, at: location) ?? host
         let entered = destination.draggingEntered(info)
         let updated = destination.draggingUpdated(info)
         let prepared = destination.prepareForDragOperation(info)
@@ -362,6 +374,21 @@ extension DKPaneGroupAreaTests {
         await drop(b, at: CGPoint(x: 600, y: 330), on: host, in: window)
         #expect(model.groupCount == 1)
         #expect(model.groups[right]?.tabs.map(\.id) == [a, b])
+    }
+
+    @Test
+    func `a drop over AppKit content reaches the group, and clicks still reach the content`() throws {
+        let model = DKPaneGroupsModel<String>()
+        let a = model.openTab { tab("a") }
+        let (window, host) = host(area(model).frame(width: 800, height: 600))
+        defer { window.contentView = nil }
+        let point = host.convert(NSPoint(x: 400, y: 300), to: nil)
+        // Over the AppKit content the catcher takes the drag...
+        let destination = try #require(Self.dragDestination(in: host, at: point))
+        #expect(destination is DKPaneDropCatcherView)
+        // ...but while no tab is dragged, a click goes to the content.
+        let hit = host.hitTest(host.superview?.convert(point, from: nil) ?? point)
+        #expect((hit as? MarkerView)?.tabID == a)
     }
 
     @Test

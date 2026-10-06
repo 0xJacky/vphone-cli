@@ -195,3 +195,104 @@ struct DKPaneTabReorderDropDelegate: DropDelegate {
         return true
     }
 }
+
+// MARK: - AppKit Drop Catcher
+
+/// A group's drop target over AppKit content.
+///
+/// SwiftUI gives each `onDrop` an AppKit view of its own beside the content,
+/// and AppKit hands a drag to the frontmost view under the pointer registered
+/// for it. Over an embedded AppKit view such as a terminal, that view wins and
+/// is registered for nothing, so the content's `onDrop` never hears the drag
+/// and a tab dropped on a terminal does nothing. This view lies over the
+/// group's content instead, registered for the tab type only. It answers a
+/// hit test only while a tab is being dragged, so clicks, scrolling and the
+/// keyboard still reach the content.
+struct DKPaneDropCatcher: NSViewRepresentable {
+    let targetID: UUID
+    let dragState: DKPaneDragState
+    let dragType: UTType
+    /// Where this view sits in the whole group: it starts below the tab
+    /// strip, and zones are measured over the whole group.
+    var locationOffset: CGSize = .zero
+    let onDrop: @MainActor (_ tabID: UUID, _ zone: DKPaneDropZone) -> Void
+
+    func makeNSView(context _: Context) -> DKPaneDropCatcherView {
+        let view = DKPaneDropCatcherView()
+        view.registerForDraggedTypes([NSPasteboard.PasteboardType(dragType.identifier)])
+        return view
+    }
+
+    func updateNSView(_ view: DKPaneDropCatcherView, context _: Context) {
+        view.catcher = self
+        let type = NSPasteboard.PasteboardType(dragType.identifier)
+        if view.registeredDraggedTypes != [type] {
+            view.registerForDraggedTypes([type])
+        }
+    }
+
+    /// The zone under `point`, given in this view's flipped coordinates.
+    @MainActor
+    func zone(at point: CGPoint) -> DKPaneDropZone? {
+        let location = CGPoint(x: point.x + locationOffset.width, y: point.y + locationOffset.height)
+        return DKPaneDropZone.at(location, in: dragState.groupBounds[targetID] ?? .zero)
+    }
+}
+
+final class DKPaneDropCatcherView: NSView {
+    var catcher: DKPaneDropCatcher?
+
+    override var isFlipped: Bool {
+        true
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard catcher?.dragState.draggingTabID != nil else { return nil }
+        return super.hitTest(point)
+    }
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        hover(sender)
+    }
+
+    override func draggingUpdated(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        hover(sender)
+    }
+
+    override func draggingExited(_: (any NSDraggingInfo)?) {
+        // A neighbor may already have taken the hover.
+        guard let catcher, catcher.dragState.hover?.groupID == catcher.targetID else { return }
+        catcher.dragState.setHover(nil)
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        guard let catcher else { return false }
+        let zone = catcher.zone(at: location(of: sender)) ?? .center
+        let dragState = catcher.dragState
+        let onDrop = catcher.onDrop
+        if let tabID = dragState.draggingTabID {
+            dragState.end()
+            onDrop(tabID, zone)
+            return true
+        }
+        dragState.end()
+        let type = NSPasteboard.PasteboardType(catcher.dragType.identifier)
+        guard let data = sender.draggingPasteboard.data(forType: type),
+              let tabID = UUID(uuidString: String(decoding: data, as: UTF8.self))
+        else { return false }
+        onDrop(tabID, zone)
+        return true
+    }
+
+    private func hover(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard let catcher else { return [] }
+        if let zone = catcher.zone(at: location(of: sender)) {
+            catcher.dragState.setHover(DKPaneDragHoverTarget(groupID: catcher.targetID, zone: zone))
+        }
+        return .move
+    }
+
+    private func location(of sender: any NSDraggingInfo) -> CGPoint {
+        convert(sender.draggingLocation, from: nil)
+    }
+}

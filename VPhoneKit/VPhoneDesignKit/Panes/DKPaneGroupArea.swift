@@ -99,6 +99,21 @@ public struct DKPaneGroupArea<Payload, Content: View, EmptyGroup: View>: View {
                         .offset(x: item.rect.minX, y: item.rect.minY)
                         .zIndex(item.isFront ? 1 : 0)
                 }
+                // Each group's drop target over its content, in AppKit: a
+                // SwiftUI `onDrop` never hears a drag over AppKit content
+                // such as a terminal (see `DKPaneDropCatcher`).
+                ForEach(layout.panes, id: \.paneID) { pane in
+                    DKPaneDropCatcher(
+                        targetID: pane.paneID,
+                        dragState: dragState,
+                        dragType: dragType,
+                        locationOffset: CGSize(width: 0, height: Self.stripHeight),
+                        onDrop: { tabID, zone in model.moveTab(tabID, toGroup: pane.paneID, zone: zone) },
+                    )
+                    .frame(width: pane.rect.width, height: max(0, pane.rect.height - Self.stripHeight))
+                    .offset(x: pane.rect.minX, y: pane.rect.minY + Self.stripHeight)
+                    .zIndex(1.5)
+                }
                 if showsActiveGroupRing, layout.panes.count > 1 {
                     ForEach(layout.panes, id: \.paneID) { pane in
                         DKPaneFocusRing(groupID: pane.paneID, model: model)
@@ -201,15 +216,8 @@ private struct DKPaneContentHost<Payload, Content: View>: View {
             .onChange(of: item.isActivePane, initial: true) { _, isActive in
                 gate.isActive = isActive
             }
-            // The content covers its group's chrome, so it carries the group's
-            // drop target too, offset by the strip: zones are the whole group's.
-            .onDrop(of: [dragType], delegate: DKPaneGroupDropDelegate(
-                targetID: item.groupID,
-                dragState: dragState,
-                dragType: dragType,
-                locationOffset: CGSize(width: 0, height: DKPaneGroupArea<Payload, EmptyView, EmptyView>.stripHeight),
-                onDrop: { tabID, zone in model.moveTab(tabID, toGroup: item.groupID, zone: zone) },
-            ))
+            // The group's drop target over this content is the area's
+            // `DKPaneDropCatcher`, a layer above it.
             // AppKit content (a terminal, a text view) takes its own mouse-downs,
             // which a SwiftUI tap gesture never sees; the probe sees them all.
             .dkOnPointerDown { _ in
