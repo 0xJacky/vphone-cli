@@ -87,11 +87,24 @@ extension View {
     /// rows on the window ground, the accent tint behind selected rows and no
     /// row separators. A header click still sorts, and its mark stays: it is
     /// the only sign of the order, and SwiftUI draws it in its own header.
+    ///
+    /// The table stays transparent until its first rows are styled: SwiftUI
+    /// draws them with separators first, and they would show for a moment.
     func systemPageTable() -> some View {
-        tableStyle(.inset(alternatesRowBackgrounds: false))
+        modifier(VPhoneSystemPageTable())
+    }
+}
+
+private struct VPhoneSystemPageTable: ViewModifier {
+    @State private var isStyled = false
+
+    func body(content: Content) -> some View {
+        content
+            .tableStyle(.inset(alternatesRowBackgrounds: false))
             .scrollContentBackground(.hidden)
+            .opacity(isStyled ? 1 : 0)
             .background(DK.Palette.window)
-            .background(VPhoneTableChrome())
+            .background(VPhoneTableChrome(onFirstStyle: { isStyled = true }))
     }
 }
 
@@ -100,11 +113,17 @@ extension View {
 /// separators, and puts them back when it updates the table, so they are set
 /// again after each update, scroll and selection.
 private struct VPhoneTableChrome: NSViewRepresentable {
+    /// Called once, when the rows on screen first have the design's look.
+    let onFirstStyle: @MainActor () -> Void
+
     func makeNSView(context _: Context) -> VPhoneTableChromeView {
-        VPhoneTableChromeView()
+        let view = VPhoneTableChromeView()
+        view.onFirstStyle = onFirstStyle
+        return view
     }
 
     func updateNSView(_ view: VPhoneTableChromeView, context _: Context) {
+        view.onFirstStyle = onFirstStyle
         view.setNeedsRestyle()
     }
 }
@@ -115,6 +134,8 @@ private final class VPhoneTableChromeView: NSView {
     private var observers: [NSObjectProtocol] = []
     private var isRestylePending = false
     private var pendingRowRetries = 0
+    var onFirstStyle: (@MainActor () -> Void)?
+    private var hasStyled = false
 
     override func hitTest(_: NSPoint) -> NSView? {
         nil
@@ -148,8 +169,22 @@ private final class VPhoneTableChromeView: NSView {
                 self.isRestylePending = false
                 self.attach()
                 self.restyle()
+                if self.tableView == nil, self.window != nil {
+                    // No table found behind this view: show the page as is
+                    // rather than leave it transparent.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                        MainActor.assumeIsolated { self?.didStyle() }
+                    }
+                }
             }
         }
+    }
+
+    /// Shows the table, the first time its rows are styled.
+    private func didStyle() {
+        guard !hasStyled else { return }
+        hasStyled = true
+        onFirstStyle?()
     }
 
     // MARK: Table
@@ -219,8 +254,13 @@ private final class VPhoneTableChromeView: NSView {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
                 MainActor.assumeIsolated { self?.restyle() }
             }
-        } else if styled >= visible {
-            pendingRowRetries = 0
+        } else {
+            // Styled, or out of retries: either way the rows on screen are
+            // as styled as they will get, so the table may show.
+            if styled >= visible {
+                pendingRowRetries = 0
+            }
+            didStyle()
         }
     }
 
