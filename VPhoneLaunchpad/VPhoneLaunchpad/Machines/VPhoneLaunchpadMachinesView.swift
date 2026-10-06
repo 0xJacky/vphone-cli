@@ -47,6 +47,7 @@ struct VPhoneLaunchpadMachinesView: View {
     /// AppKit draws the library's automatic selection in gray, not in the
     /// accent color.
     @FocusState private var tableIsFocused: Bool
+    @State private var inspectorWidth = DKInspectorColumn<EmptyView>.idealWidth
 
     private var library: VPhoneLaunchpadMachineLibrary {
         model.machines
@@ -79,33 +80,36 @@ struct VPhoneLaunchpadMachinesView: View {
         @Bindable var model = model
         VStack(spacing: 0) {
             header
-            Group {
-                if library.machines.isEmpty {
-                    emptyState
-                } else if rows.isEmpty {
-                    if filter.trimmingCharacters(in: .whitespaces).isEmpty {
-                        ContentUnavailableView("No Machines in This View", systemImage: "iphone")
+            HStack(spacing: 0) {
+                Group {
+                    if library.machines.isEmpty {
+                        emptyState
+                    } else if rows.isEmpty {
+                        if filter.trimmingCharacters(in: .whitespaces).isEmpty {
+                            ContentUnavailableView("No Machines in This View", systemImage: "iphone")
+                        } else {
+                            ContentUnavailableView.search(text: filter)
+                        }
                     } else {
-                        ContentUnavailableView.search(text: filter)
+                        table(selection: $library.selection)
                     }
-                } else {
-                    table(selection: $library.selection)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // The inspector is the page's own column under its header, as
+                // in the design, not a system inspector beside the whole page.
+                // View › Hide Inspector (⌥⌘I) shows and hides it.
+                if model.showsInspector {
+                    DKInspectorColumn(width: $inspectorWidth) {
+                        inspector
+                    }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(DK.Palette.window)
         // A hidden machine stays out of the selection, so Start, Delete and
         // the inspector act only on rows the table shows.
         .onChange(of: filter) { dropHiddenSelection() }
         .onChange(of: scope) { dropHiddenSelection() }
-        .inspector(isPresented: $model.showsInspector) {
-            inspector
-                .inspectorColumnWidth(min: 300, ideal: 380, max: 520)
-                // No toolbar toggle: the design's window has no toolbar, and an
-                // item here would bring one back above the page header. View ›
-                // Hide Inspector (⌥⌘I) shows and hides it.
-        }
         #if DEBUG
         .onReceive(NotificationCenter.default.publisher(for: VPhoneLaunchpadPreview.sheetNotification)) { note in
             library.sheet = note.object as? Sheet

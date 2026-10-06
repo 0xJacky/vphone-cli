@@ -3,32 +3,55 @@ import VPhoneDesignKit
 
 /// The Settings window (⌘,): the app-wide preferences Launchpad keeps, one
 /// tab each for General, Library, Bundles and Advanced.
+///
+/// The window draws its own chrome, as the main window does: DesignKit's
+/// header band holds the window buttons, the tab's name as the title and the
+/// row of tabs, in place of the system title bar and toolbar tabs.
 struct VPhoneLaunchpadSettingsView: View {
     enum Tab: String, Hashable, CaseIterable {
         case general
         case library
         case bundles
         case advanced
+
+        var title: String {
+            switch self {
+            case .general: String(localized: "General")
+            case .library: String(localized: "Library")
+            case .bundles: String(localized: "Bundles")
+            case .advanced: String(localized: "Advanced")
+            }
+        }
+
+        var glyph: DKGlyph {
+            switch self {
+            case .general: .gear
+            case .library: .folder
+            case .bundles: .bundle
+            case .advanced: .sliders
+            }
+        }
     }
 
     @State private var tab = Tab.general
 
+    private var tabs: [DKSettingsTab<Tab>] {
+        Tab.allCases.map { DKSettingsTab(id: $0, title: $0.title, glyph: $0.glyph) }
+    }
+
     var body: some View {
-        TabView(selection: $tab) {
-            VPhoneLaunchpadGeneralSettings()
-                .tabItem { Label("General", systemImage: "gearshape") }
-                .tag(Tab.general)
-            VPhoneLaunchpadLibrarySettings()
-                .tabItem { Label("Library", systemImage: "folder") }
-                .tag(Tab.library)
-            VPhoneLaunchpadBundleSettings()
-                .tabItem { Label("Bundles", systemImage: "shippingbox") }
-                .tag(Tab.bundles)
-            VPhoneLaunchpadAdvancedSettings()
-                .tabItem { Label("Advanced", systemImage: "slider.horizontal.3") }
-                .tag(Tab.advanced)
+        VStack(spacing: 0) {
+            DKSettingsTabBar(tabs: tabs, selection: $tab, label: String(localized: "Settings"))
+            page
         }
         .frame(width: 672)
+        .background(DK.Palette.page)
+        // The window fits the tab's height exactly, header band included.
+        .dkContentUnderTitleBar()
+        .dkWindowChrome()
+        .toolbar(.hidden, for: .windowToolbar)
+        // Not drawn; it names the window in the Window menu and VoiceOver.
+        .navigationTitle(tab.title)
         #if DEBUG
             .onReceive(NotificationCenter.default.publisher(for: VPhoneLaunchpadPreview.settingsNotification)) { note in
                 if let next = note.object as? Tab {
@@ -36,6 +59,16 @@ struct VPhoneLaunchpadSettingsView: View {
                 }
             }
         #endif
+    }
+
+    @ViewBuilder
+    private var page: some View {
+        switch tab {
+        case .general: VPhoneLaunchpadGeneralSettings()
+        case .library: VPhoneLaunchpadLibrarySettings()
+        case .bundles: VPhoneLaunchpadBundleSettings()
+        case .advanced: VPhoneLaunchpadAdvancedSettings()
+        }
     }
 }
 

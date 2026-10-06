@@ -14,6 +14,9 @@ struct VPhoneLaunchpadSidebar: View {
         DKSidebar(
             sections: sections,
             selection: Binding(get: { model.destination }, set: { model.show($0) }),
+            // The window has no title bar; its buttons sit in the sidebar's
+            // top band, above Library.
+            windowControls: true,
             footer: { DKSidebarFooter(footer) },
         )
         .accessibilityLabel(Text("Launchpad"))

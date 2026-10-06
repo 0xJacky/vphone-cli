@@ -22,8 +22,9 @@ struct VPhoneLaunchpadApp: App {
                 .confirmCloseDuringCreation(delegate)
                 .onAppear { delegate.model = model }
         }
-        // Each page names itself in its own header, drawn in the title bar,
-        // and the window moves by any part of it that is not a control.
+        // The window draws its own chrome (see VPhoneLaunchpadRootView): no
+        // system title, toolbar or buttons. Each page names itself in its own
+        // header, and the window moves by any part of it that is not a control.
         .windowStyle(.hiddenTitleBar)
         .windowBackgroundDragBehavior(.enabled)
         // Nor is any saved: the window's frame is kept under its own name.

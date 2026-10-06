@@ -25,7 +25,6 @@ struct VPhoneLaunchpadFirmwaresView: View {
             filter: $filter,
             onRemove: { removal = $0 },
         )
-        .navigationTitle("Firmwares")
         // Again whenever the machines listed change: a creation's download,
         // a machine stopping, one deleted elsewhere.
         .task(id: scanKey) { await rescan() }

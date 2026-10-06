@@ -20,7 +20,6 @@ struct VPhoneLaunchpadDisksView: View {
             onShowLibrary: showLibrary,
             onOpenFirmwares: { model.show(.firmwares) },
         )
-        .navigationTitle("Disks")
         .task(id: VPhoneLaunchpadLibraryScanKey.key(library)) { await rescan() }
     }
 

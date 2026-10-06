@@ -197,8 +197,10 @@ final class VPhoneLaunchpadModel {
         present(.bundleInstall)
     }
 
-    // MARK: - Inspector
+    // MARK: - Sidebar and Inspector
 
+    /// View › Hide Sidebar (⌃⌘S). The window has no toolbar toggle for it.
+    var showsSidebar = true
     var showsInspector = true
 
     /// Refused while a machine is bound to the version; the error lands in

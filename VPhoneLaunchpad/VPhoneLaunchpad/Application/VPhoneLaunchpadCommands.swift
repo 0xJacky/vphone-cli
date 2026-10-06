@@ -5,6 +5,9 @@ import VPhoneDesignKit
 /// menu picks a page (⌘1 to ⌘6) and hides the sidebar and the Machines
 /// inspector, and the Machine menu acts on the selected machines. Settings…
 /// (⌘,) comes with the Settings scene.
+///
+/// The sidebar is DesignKit's, not a split view's, so Hide Sidebar is this
+/// menu's own item rather than `SidebarCommands`, with the same ⌃⌘S.
 struct VPhoneLaunchpadCommands: Commands {
     let model: VPhoneLaunchpadModel
     @Environment(\.openWindow) private var openWindow
@@ -14,13 +17,12 @@ struct VPhoneLaunchpadCommands: Commands {
         CommandGroup(replacing: .newItem) {
             DKMenuContent(Self.fileItems(model) { openWindow(id: "main") })
         }
-        SidebarCommands()
         CommandGroup(before: .toolbar) {
             DKMenuContent(Self.pageItems(model) { openWindow(id: "main") })
             Divider()
         }
-        CommandGroup(after: .sidebar) {
-            DKMenuContent([Self.inspectorItem(model)])
+        CommandGroup(replacing: .sidebar) {
+            DKMenuContent([Self.sidebarItem(model), Self.inspectorItem(model)])
         }
         CommandMenu("Machine") {
             DKMenuContent(VPhoneLaunchpadMachineActions(model: model).menuBarItems())
@@ -53,6 +55,16 @@ struct VPhoneLaunchpadCommands: Commands {
                 open()
             }
             .checked(model.destination == destination)
+        }
+    }
+
+    /// Shows and hides the sidebar, as `SidebarCommands` would for a split view.
+    static func sidebarItem(_ model: VPhoneLaunchpadModel) -> DKMenuItem {
+        DKMenuItem(
+            model.showsSidebar ? String(localized: "Hide Sidebar") : String(localized: "Show Sidebar"),
+            shortcut: DKShortcut("s", [.control, .command]),
+        ) {
+            model.showsSidebar.toggle()
         }
     }
 

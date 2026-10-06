@@ -5,13 +5,14 @@ import VPhoneDesignKit
 /// Setup and Bundles are pages like the others; a bundle install is the one
 /// sheet over all of them.
 ///
-/// The window has no toolbar. Each page's header sits in the title bar
-/// beside the sidebar, which holds the window buttons; View › Hide Sidebar
-/// (⌃⌘S) and Hide Inspector (⌥⌘I) replace the toolbar's toggles. With the
-/// sidebar hidden the header steps below the window buttons.
+/// The window draws all of its chrome: there is no system title bar, toolbar
+/// or window buttons. The sidebar's top band holds DesignKit's window
+/// buttons, and each page's header runs to the window's top edge beside it,
+/// its title level with the buttons. View › Hide Sidebar (⌃⌘S) and Hide
+/// Inspector (⌥⌘I) replace a toolbar's toggles; with the sidebar hidden the
+/// buttons lead the page header instead.
 struct VPhoneLaunchpadRootView: View {
     @Environment(VPhoneLaunchpadModel.self) private var model
-    @State private var columns = NavigationSplitViewVisibility.all
     #if DEBUG
         @Environment(\.openSettings) private var openSettings
     #endif
@@ -19,16 +20,21 @@ struct VPhoneLaunchpadRootView: View {
     var body: some View {
         @Bindable var host = model.host
         @Bindable var bundles = model.bundles
-        NavigationSplitView(columnVisibility: $columns) {
-            VPhoneLaunchpadSidebar()
-                .navigationSplitViewColumnWidth(DK.Metric.sidebarWidth)
-                .toolbar(removing: .sidebarToggle)
-        } detail: {
+        HStack(spacing: 0) {
+            if model.showsSidebar {
+                VPhoneLaunchpadSidebar()
+            }
             page
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .ignoresSafeArea(.container, edges: columns == .detailOnly ? [] : .top)
+                .environment(\.dkPageHeaderWindowControls, !model.showsSidebar)
         }
+        // The content runs under the transparent title bar to the window's
+        // top edge; the headers and the sidebar band take its place.
+        .ignoresSafeArea(.container, edges: .top)
+        .dkWindowChrome()
         .toolbar(.hidden, for: .windowToolbar)
+        // Not drawn, but it names the window in the Window menu, Mission
+        // Control and VoiceOver.
         .navigationTitle(model.destination.title)
         .task { await model.start() }
         // Coming back from System Settings, with or without Host Setup open.

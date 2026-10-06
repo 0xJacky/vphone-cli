@@ -16,9 +16,6 @@
             outputDirectory != nil
         }
 
-        /// The model the run fills, for the sidebar drawn beside each shot.
-        private static weak var previewModel: VPhoneLaunchpadModel?
-
         static let sheetNotification = Notification.Name("VPhoneLaunchpadPreviewSheet")
         /// Opens the Settings window, on the tab given as the object.
         static let settingsNotification = Notification.Name("VPhoneLaunchpadPreviewSettings")
@@ -54,7 +51,6 @@
                 window.setContentSize(NSSize(width: 1200, height: 760))
                 window.center()
             }
-            previewModel = model
             reportShortcutConflicts(to: directory)
 
             for (suffix, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
@@ -101,6 +97,10 @@
                 model.showsInspector = false
                 await shot("05a-machines-no-inspector", suffix)
                 model.showsInspector = true
+                // With the sidebar hidden the window buttons lead the header.
+                model.showsSidebar = false
+                await shot("05d-machines-no-sidebar", suffix)
+                model.showsSidebar = true
                 if let machine = model.machines.selected {
                     await standalone("05b-machine-inspector", suffix, size: NSSize(width: 380, height: 980)) {
                         VPhoneLaunchpadMachineInspector(machine: machine, onShowProgress: { _ in }, onOpenConsole: { _ in })
@@ -206,7 +206,7 @@
             try? await Task.sleep(for: .milliseconds(800))
         }
 
-        /// Opens the Settings window on `tab` and draws it, toolbar and all.
+        /// Opens the Settings window on `tab` and draws it, header band and all.
         private static func settings(_ tab: VPhoneLaunchpadSettingsView.Tab, _ name: String, _ suffix: String) async {
             NotificationCenter.default.post(name: settingsNotification, object: tab)
             try? await Task.sleep(for: .milliseconds(500))
@@ -219,8 +219,8 @@
             }
         }
 
-        /// Draws one view in a plain window of its own. Used for the inspector,
-        /// whose column cacheDisplay cannot draw inside the main window.
+        /// Draws one view in a plain window of its own. Used for the inspector at
+        /// its full height, which the main window scrolls.
         private static func standalone(
             _ name: String,
             _ suffix: String,
@@ -249,32 +249,16 @@
         }
 
         private static func shot(_ name: String, _ suffix: String) async {
-            // cacheDisplay leaves the sidebar's rows out, as it does the
-            // inspector column. The sidebar is drawn in a window of its own
-            // and laid over the column.
-            let sidebar = mainWindow.flatMap { window -> NSWindow? in
-                guard window.attachedSheet == nil, let model = previewModel else { return nil }
-                let size = NSSize(width: DK.Metric.sidebarWidth, height: window.contentLayoutRect.height)
-                let sidebar = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
-                sidebar.isReleasedWhenClosed = false
-                sidebar.appearance = NSApp.appearance
-                sidebar.contentView = NSHostingView(rootView: VPhoneLaunchpadSidebar().environment(model))
-                sidebar.orderBack(nil)
-                return sidebar
-            }
-            defer { sidebar?.close() }
             try? await Task.sleep(for: .milliseconds(1500))
             guard let window = mainWindow else {
                 return
             }
-            if let sheet = window.attachedSheet {
-                draw(sheet, name, suffix)
-            } else {
-                draw(window, name, suffix, overlay: sidebar?.contentView)
-            }
+            draw(window.attachedSheet ?? window, name, suffix)
         }
 
-        private static func draw(_ target: NSWindow, _ name: String, _ suffix: String, overlay: NSView? = nil) {
+        /// Draws the window's frame view, so the content-drawn chrome (window
+        /// buttons, sidebar band, page header) is in the picture.
+        private static func draw(_ target: NSWindow, _ name: String, _ suffix: String) {
             guard let directory = outputDirectory,
                   let view = target.contentView?.superview ?? target.contentView,
                   let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)
@@ -282,13 +266,6 @@
                 return
             }
             view.cacheDisplay(in: view.bounds, to: bitmap)
-            if let overlay, let layer = overlay.bitmapImageRepForCachingDisplay(in: overlay.bounds) {
-                overlay.cacheDisplay(in: overlay.bounds, to: layer)
-                NSGraphicsContext.saveGraphicsState()
-                NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
-                layer.draw(in: NSRect(origin: .zero, size: overlay.bounds.size))
-                NSGraphicsContext.restoreGraphicsState()
-            }
             let url = directory.appendingPathComponent("\(name)-\(suffix).png")
             try? bitmap.representation(using: .png, properties: [:])?.write(to: url)
         }

@@ -24,7 +24,6 @@ struct VPhoneLaunchpadNetworkView: View {
             isLoading: !library.hasListed,
             onRelease: { confirmsRelease = true },
         )
-        .navigationTitle("Network")
         .task {
             #if DEBUG
                 if VPhoneLaunchpadPreview.isActive {
