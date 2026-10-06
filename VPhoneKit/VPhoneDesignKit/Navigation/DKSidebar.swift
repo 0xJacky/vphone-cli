@@ -9,8 +9,12 @@ import SwiftUI
 /// Row glyphs take the accent; the selected row gets the accent tint behind it
 /// and a semibold label. A row selects on mouse-down, as a source list does.
 /// With keyboard focus, the up and down arrow keys move the selection, past
-/// disabled rows. One tracker serves the hover of every row (see `DKRowTracker`),
-/// and hover holds still while the sidebar scrolls.
+/// disabled rows. One tracker serves the hover of every row (see `DKRowTracker`).
+///
+/// The sidebar does not scroll: its rows are a short, fixed list, and their
+/// height is the sidebar's minimum, so a window sized by its content (a
+/// SwiftUI scene, or a hosting controller with `.minSize`) cannot be made
+/// shorter than its rows and footer.
 ///
 /// ```swift
 /// DKSidebar(sections: sections, selection: $selection) {
@@ -64,27 +68,27 @@ public struct DKSidebar<ID: Hashable & Sendable, Header: View, Footer: View>: Vi
             if windowControls {
                 DKSidebarWindowBand()
             }
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: DK.Space.s4) {
-                    if Header.self != EmptyView.self {
-                        header
-                            .padding(.horizontal, 10)
-                            .padding(.top, DK.Space.s1)
-                            .padding(.bottom, 6)
-                    }
-                    ForEach(sections) { section in
-                        DKSidebarSectionView(section: section, selection: $selection, tracker: tracker)
-                    }
+            VStack(alignment: .leading, spacing: DK.Space.s4) {
+                if Header.self != EmptyView.self {
+                    header
+                        .padding(.horizontal, 10)
+                        .padding(.top, DK.Space.s1)
+                        .padding(.bottom, 6)
                 }
-                .dkRowTracking(tracker) { id, _ in
-                    select(id)
+                ForEach(sections) { section in
+                    DKSidebarSectionView(section: section, selection: $selection, tracker: tracker)
                 }
-                .dkScrollHoverGate()
-                .padding(.horizontal, 10)
-                .padding(.top, 14)
-                .padding(.bottom, DK.Space.s3)
             }
-            .scrollIndicators(.automatic)
+            .dkRowTracking(tracker) { id, _ in
+                select(id)
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 14)
+            .padding(.bottom, DK.Space.s3)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Spacer(minLength: 0)
 
             if Footer.self != EmptyView.self {
                 VStack(alignment: .leading, spacing: 0) {
