@@ -27,6 +27,9 @@ struct VPhoneLaunchpadCommands: Commands {
         CommandMenu("Machine") {
             DKMenuContent(VPhoneLaunchpadMachineActions(model: model).menuBarItems())
         }
+        // No Help menu: Launchpad has no help book, so the system one only
+        // offered a search over the menus.
+        CommandGroup(replacing: .help) {}
     }
 
     /// New Machine… and Import…, from any page: each shows the Machines page,

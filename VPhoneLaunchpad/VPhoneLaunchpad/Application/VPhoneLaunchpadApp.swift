@@ -65,12 +65,14 @@ struct VPhoneLaunchpadApp: App {
 final class VPhoneLaunchpadAppDelegate: NSObject, NSApplicationDelegate {
     weak var model: VPhoneLaunchpadModel?
     private let dockPolicy = VPhoneLaunchpadDockPolicy()
+    private let helpMenu = VPhoneLaunchpadHelpMenuRemover()
     /// Set once the user confirms closing the last window while a machine is
     /// being created, so the terminate path that follows does not ask again.
     private var confirmedClose = false
 
     func applicationDidFinishLaunching(_: Notification) {
         dockPolicy.start()
+        helpMenu.start()
     }
 
     /// In menu bar mode the app stays behind in the menu bar. Closing the
@@ -119,6 +121,38 @@ final class VPhoneLaunchpadAppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: String(localized: "Quit"))
         alert.addButton(withTitle: String(localized: "Cancel"))
         return alert.runModal() == .alertFirstButtonReturn
+    }
+}
+
+/// Keeps the menu bar without a Help menu. Launchpad has no help book, so
+/// the menu would hold only the system's menu search. `CommandGroup(replacing:
+/// .help)` empties it but AppKit still shows the empty menu, and SwiftUI
+/// adds it back whenever it rebuilds the menu bar, so it is removed again
+/// after each change.
+@MainActor
+final class VPhoneLaunchpadHelpMenuRemover {
+    private var observers: [NSObjectProtocol] = []
+
+    func start() {
+        remove()
+        let center = NotificationCenter.default
+        for name in [NSMenu.didAddItemNotification, NSMenu.didChangeItemNotification] {
+            // Any menu: `remove()` looks only at the main menu, and does
+            // nothing once the Help menu is gone.
+            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    // Not while AppKit is still changing the menu.
+                    DispatchQueue.main.async { self?.remove() }
+                }
+            })
+        }
+    }
+
+    private func remove() {
+        guard let main = NSApp.mainMenu, let help = NSApp.helpMenu,
+              let index = main.items.firstIndex(where: { $0.submenu === help })
+        else { return }
+        main.removeItem(at: index)
     }
 }
 
