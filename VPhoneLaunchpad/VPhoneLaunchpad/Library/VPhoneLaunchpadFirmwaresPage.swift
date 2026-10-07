@@ -9,8 +9,10 @@ struct VPhoneLaunchpadFirmwaresPage: View {
     /// True until the first scan answers.
     let isLoading: Bool
     @Binding var filter: VPhoneLaunchpadFirmwareFilter
+    /// The downloaded IPSW the header's Delete button acts on.
+    @Binding var selection: VPhoneLaunchpadFirmwareRow.ID?
     var onRemove: (VPhoneLaunchpadRestoreFilesItem) -> Void = { _ in }
-    /// Deleting a downloaded IPSW, from its row's menu.
+    /// Deleting the selected IPSW.
     var onDelete: (VPhoneLaunchpadFirmwareRow) -> Void = { _ in }
 
     private static let columns = [
@@ -37,10 +39,21 @@ struct VPhoneLaunchpadFirmwaresPage: View {
     var body: some View {
         VPhoneLaunchpadLibraryPage(String(localized: "Firmwares"), subtitle: subtitle, roomy: true) {
             DKSegmented(String(localized: "Kind"), selection: $filter, options: filterOptions)
+            DKButton(DKButtonSpec(
+                String(localized: "Delete"),
+                glyph: .trash,
+                isEnabled: selectedRow.map { $0.blockedReason == nil } ?? false,
+                help: selectedRow?.blockedReason ?? String(localized: "Delete the selected IPSW"),
+            ) { selectedRow.map(onDelete) })
         } content: {
             downloaded
             prepared
         }
+    }
+
+    /// The selected row while the filter shows it.
+    private var selectedRow: VPhoneLaunchpadFirmwareRow? {
+        rows.first { $0.id == selection && filter.admits($0.kind) }
     }
 
     private var filterOptions: [DKSegmentOption<VPhoneLaunchpadFirmwareFilter>] {
@@ -67,15 +80,13 @@ struct VPhoneLaunchpadFirmwaresPage: View {
                     String(localized: "Downloaded images"),
                     columns: Self.columns,
                     rows: rows.filter { filter.admits($0.kind) },
+                    selection: $selection,
                     roomy: true,
                     minWidth: 780,
                     scrollsVertically: false,
                     emptyText: rows.isEmpty
                         ? String(localized: "No IPSWs downloaded. New Machine downloads the ones it needs.")
                         : String(localized: "No images of this kind."),
-                    contextMenu: { row in
-                        [DKMenuItem(String(localized: "Delete…"), isDestructive: true) { onDelete(row) }]
-                    },
                 ) { row, column in
                     cell(row, column)
                 }

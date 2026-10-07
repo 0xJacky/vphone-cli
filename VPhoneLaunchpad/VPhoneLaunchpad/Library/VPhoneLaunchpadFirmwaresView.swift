@@ -15,6 +15,7 @@ struct VPhoneLaunchpadFirmwaresView: View {
     @State private var catalog: VPhoneLaunchpadFirmwareCatalogIndex?
     @State private var removal: VPhoneLaunchpadRestoreFilesItem?
     @State private var deletion: VPhoneLaunchpadFirmwareRow?
+    @State private var selection: VPhoneLaunchpadFirmwareRow.ID?
     @State private var isRemoving = false
     @State private var removalError: VPhoneLaunchpadError?
 
@@ -24,8 +25,9 @@ struct VPhoneLaunchpadFirmwaresView: View {
             restoreItems: restoreItems,
             isLoading: scan == nil,
             filter: $filter,
+            selection: $selection,
             onRemove: { removal = $0 },
-            onDelete: confirmDeletion,
+            onDelete: { deletion = $0 },
         )
         // Again whenever the machines listed change: a creation's download,
         // a machine stopping, one deleted elsewhere.
@@ -265,15 +267,6 @@ extension VPhoneLaunchpadFirmwaresView {
         library.creations.values.contains { $0.isRunning }
     }
 
-    /// A row that cannot go says why at once; any other asks first.
-    private func confirmDeletion(_ row: VPhoneLaunchpadFirmwareRow) {
-        if let reason = row.blockedReason {
-            removalError = VPhoneLaunchpadError(String(localized: "Unable to Delete \(row.title)"), detail: reason)
-        } else {
-            deletion = row
-        }
-    }
-
     static func deletionMessage(_ row: VPhoneLaunchpadFirmwareRow) -> String {
         if row.isDownloading {
             return String(localized: "The partial download of \(row.fileName) is deleted.")
@@ -302,6 +295,7 @@ extension VPhoneLaunchpadFirmwaresView {
         defer { isRemoving = false }
         do {
             try await VPhoneLaunchpadLibraryScanner.removeIPSW(file.url, cacheDirectories: scan.cacheDirectories)
+            selection = nil
         } catch {
             removalError = VPhoneLaunchpadError(failure, detail: error.localizedDescription)
         }
