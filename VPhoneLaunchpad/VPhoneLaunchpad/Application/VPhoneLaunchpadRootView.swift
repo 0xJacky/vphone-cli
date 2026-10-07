@@ -38,9 +38,18 @@ struct VPhoneLaunchpadRootView: View {
         // Control and VoiceOver.
         .navigationTitle(model.destination.title)
         .task { await model.start() }
+        // Free space changes as machines restore and IPSWs download; the
+        // Host Setup row and the sidebar warning follow it.
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(5))
+                host.refreshDiskSpace()
+            }
+        }
         // Coming back from System Settings, with or without Host Setup open.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             host.refreshDeveloperTools()
+            host.refreshDiskSpace()
         }
         .sheet(isPresented: Binding(get: { model.panel == .bundleInstall }, set: {
             if !$0 {

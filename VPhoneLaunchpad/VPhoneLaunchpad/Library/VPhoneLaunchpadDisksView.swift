@@ -21,6 +21,7 @@ struct VPhoneLaunchpadDisksView: View {
             onOpenFirmwares: { model.show(.firmwares) },
         )
         .task(id: VPhoneLaunchpadLibraryScanKey.key(library)) { await rescan() }
+        .task { await followFreeSpace() }
     }
 
     private var library: VPhoneLaunchpadMachineLibrary {
@@ -52,6 +53,21 @@ struct VPhoneLaunchpadDisksView: View {
             scan = try await VPhoneLaunchpadLibraryScanner.scan(libraryRoots: library.roots, machines: folders)
         } catch {
             // Cancelled: the page went away or the machines changed again.
+        }
+    }
+
+    /// Measuring the folders is slow and runs when the machines change; the
+    /// space left on each volume is one read, so it follows every few seconds.
+    private func followFreeSpace() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(5))
+            guard let current = scan else {
+                continue
+            }
+            let volumes = VPhoneLaunchpadLibraryScanner.volumes(for: current.volumes.flatMap(\.paths))
+            if volumes != current.volumes {
+                scan?.volumes = volumes
+            }
         }
     }
 
