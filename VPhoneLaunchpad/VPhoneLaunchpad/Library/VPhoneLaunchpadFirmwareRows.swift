@@ -37,6 +37,8 @@ nonisolated struct VPhoneLaunchpadFirmwareRow: Identifiable, Hashable, Sendable 
     var usedBy: [String]
     var status: VPhoneLaunchpadFirmwareStatus?
     var isDownloading: Bool
+    /// Why the IPSW cannot be deleted now; nil when it can.
+    var blockedReason: String? = nil
 }
 
 /// One machine's prepared restore files.
@@ -113,6 +115,9 @@ nonisolated struct VPhoneLaunchpadFirmwareUse: Hashable, Sendable {
     /// URLs, or paths of local files.
     var sources: [String] = []
     var isCreating = false
+    /// A creation that has not finished: under way, or stopped short and
+    /// waiting for a retry, which reads its sources again.
+    var needsSources = false
 
     func uses(_ file: VPhoneLaunchpadLibraryScan.IPSWFile) -> Bool {
         if sources.contains(where: { Self.source($0, is: file) }) {
@@ -174,6 +179,7 @@ nonisolated enum VPhoneLaunchpadFirmwareRows {
         _ files: [VPhoneLaunchpadLibraryScan.IPSWFile],
         catalog: VPhoneLaunchpadFirmwareCatalogIndex?,
         uses: [VPhoneLaunchpadFirmwareUse],
+        isCreating: Bool = false,
     ) -> [VPhoneLaunchpadFirmwareRow] {
         files.map { file in
             let facts = file.facts
@@ -191,6 +197,7 @@ nonisolated enum VPhoneLaunchpadFirmwareRows {
                 },
                 status: status(file, catalog: catalog),
                 isDownloading: file.isDownloading,
+                blockedReason: deletionBlock(file, uses: uses, isCreating: isCreating),
             )
         }
         .sorted { lhs, rhs in
@@ -258,6 +265,30 @@ nonisolated enum VPhoneLaunchpadFirmwareRows {
             counts[filter] = rows.count { filter.admits($0.kind) }
         }
         return counts
+    }
+
+    // MARK: Deleting
+
+    /// Why `file` cannot be deleted now, or nil. A restored machine no longer
+    /// reads its IPSWs: Update Kernel and Update Guest Environment work from
+    /// the machine folder. So only a creation that has not finished holds
+    /// one, since a retry reads its sources again. A partial file is a
+    /// download, and only a creation under way downloads (`isCreating`).
+    static func deletionBlock(
+        _ file: VPhoneLaunchpadLibraryScan.IPSWFile,
+        uses: [VPhoneLaunchpadFirmwareUse],
+        isCreating: Bool,
+    ) -> String? {
+        let creations = uses
+            .filter { use in use.needsSources && use.sources.contains { VPhoneLaunchpadFirmwareUse.source($0, is: file) } }
+            .map(\.machine)
+        if !creations.isEmpty {
+            return String(localized: "Creating \(creations.joined(separator: ", ")) reads this IPSW. Finish or discard the creation first.")
+        }
+        if file.isDownloading, isCreating {
+            return String(localized: "This IPSW is still downloading.")
+        }
+        return nil
     }
 
     // MARK: Restore files

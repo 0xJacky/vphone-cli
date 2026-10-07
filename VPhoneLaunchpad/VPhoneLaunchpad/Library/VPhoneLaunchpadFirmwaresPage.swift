@@ -10,6 +10,8 @@ struct VPhoneLaunchpadFirmwaresPage: View {
     let isLoading: Bool
     @Binding var filter: VPhoneLaunchpadFirmwareFilter
     var onRemove: (VPhoneLaunchpadRestoreFilesItem) -> Void = { _ in }
+    /// Deleting a downloaded IPSW, from its row's menu.
+    var onDelete: (VPhoneLaunchpadFirmwareRow) -> Void = { _ in }
 
     private static let columns = [
         DKTableColumn(String(localized: "Image"), width: .flexible(min: 260, weight: 2.2)),
@@ -71,6 +73,9 @@ struct VPhoneLaunchpadFirmwaresPage: View {
                     emptyText: rows.isEmpty
                         ? String(localized: "No IPSWs downloaded. New Machine downloads the ones it needs.")
                         : String(localized: "No images of this kind."),
+                    contextMenu: { row in
+                        [DKMenuItem(String(localized: "Delete…"), isDestructive: true) { onDelete(row) }]
+                    },
                 ) { row, column in
                     cell(row, column)
                 }

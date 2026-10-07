@@ -21,7 +21,9 @@ struct LibraryScanTests {
         try zips(in: root)
         try await machines(in: root)
         try await removal(in: root)
+        try await ipswRemoval(in: root)
         rows()
+        ipswDeletion()
         sharedNAT(in: root)
         print("LibraryScanTests passed")
     }
@@ -258,6 +260,64 @@ struct LibraryScanTests {
         expect(manager.fileExists(atPath: machine.appendingPathComponent("FirmwareOriginals").path), "originals kept")
         expect(manager.fileExists(atPath: root.appendingPathComponent("elsewhere/big").path), "link target kept")
         expect((try? manager.destinationOfSymbolicLink(atPath: machine.appendingPathComponent("iPhone99,1_1.0_1A1_Restore").path)) != nil, "link kept")
+    }
+
+    /// Only a regular file directly in a cache folder, named as an IPSW or a
+    /// partial download, is deleted.
+    static func ipswRemoval(in root: URL) async throws {
+        let manager = FileManager.default
+        let cache = root.appendingPathComponent("ipsw-delete", isDirectory: true)
+        let other = root.appendingPathComponent("ipsw-delete-other", isDirectory: true)
+        try manager.createDirectory(at: cache, withIntermediateDirectories: true)
+        try manager.createDirectory(at: other, withIntermediateDirectories: true)
+        let ipsw = cache.appendingPathComponent("iPhone17,3_27.0_24A435_Restore.ipsw")
+        let partial = cache.appendingPathComponent(".iPad16,1_27.0.1_24A446_Restore.ipsw.\(UUID().uuidString).partial")
+        let notes = cache.appendingPathComponent("notes.txt")
+        let outside = other.appendingPathComponent("kept.ipsw")
+        let target = other.appendingPathComponent("target.ipsw")
+        let link = cache.appendingPathComponent("link.ipsw")
+        for file in [ipsw, partial, notes, outside, target] {
+            try Data("x".utf8).write(to: file)
+        }
+        try manager.createSymbolicLink(at: link, withDestinationURL: target)
+        func refused(_ url: URL, _ message: String) async {
+            do {
+                try await VPhoneLaunchpadLibraryScanner.removeIPSW(url, cacheDirectories: [cache])
+                expect(false, message)
+            } catch is VPhoneLaunchpadLibraryScanner.RemovalError {} catch {
+                expect(false, "\(message): \(error)")
+            }
+        }
+        await refused(notes, "not an IPSW")
+        await refused(outside, "outside the cache")
+        await refused(link, "a symbolic link")
+        await refused(cache.appendingPathComponent("gone.ipsw"), "missing file")
+        try await VPhoneLaunchpadLibraryScanner.removeIPSW(ipsw, cacheDirectories: [cache])
+        try await VPhoneLaunchpadLibraryScanner.removeIPSW(partial, cacheDirectories: [cache])
+        expect(!manager.fileExists(atPath: ipsw.path) && !manager.fileExists(atPath: partial.path), "IPSW and partial deleted")
+        expect(manager.fileExists(atPath: notes.path) && manager.fileExists(atPath: outside.path), "others kept")
+        expect(manager.fileExists(atPath: target.path) && (try? manager.destinationOfSymbolicLink(atPath: link.path)) != nil, "link and target kept")
+    }
+
+    /// A restored machine does not hold its IPSW; a creation that has not
+    /// finished does, and a partial file waits while any creation runs.
+    static func ipswDeletion() {
+        let url = "https://updates.cdn-apple.com/x/iPhone17,3_27.0_24A435_Restore.ipsw"
+        let cached = VPhoneLaunchpadIPSW.cacheName(for: URL(string: url)!)
+        let phone = file(cached, VPhoneLaunchpadIPSW(fileName: cached))
+        let partial = file(cached, nil, downloading: true)
+        let restored = VPhoneLaunchpadFirmwareUse(machine: "done", productType: "iPhone17,3", ios: .init(version: "27.0", build: "24A435"))
+        let running = VPhoneLaunchpadFirmwareUse(machine: "new", sources: [url], isCreating: true, needsSources: true)
+        let failed = VPhoneLaunchpadFirmwareUse(machine: "retry", sources: [url], needsSources: true)
+        let finished = VPhoneLaunchpadFirmwareUse(machine: "made", sources: [url])
+        typealias Rows = VPhoneLaunchpadFirmwareRows
+        expect(restored.uses(phone) && Rows.deletionBlock(phone, uses: [restored, finished], isCreating: false) == nil, "restored and finished do not hold it")
+        expect(Rows.deletionBlock(phone, uses: [running], isCreating: true)?.contains("new") == true, "a running creation holds it")
+        expect(Rows.deletionBlock(phone, uses: [failed], isCreating: false)?.contains("retry") == true, "an unfinished creation holds it")
+        expect(Rows.deletionBlock(partial, uses: [], isCreating: true) != nil, "a partial file waits while a creation runs")
+        expect(Rows.deletionBlock(partial, uses: [], isCreating: false) == nil, "a stale partial file can go")
+        let rows = Rows.rows([phone], catalog: nil, uses: [restored, failed])
+        expect(rows[0].blockedReason != nil && rows[0].usedBy == ["done", "retry"], "\(rows[0])")
     }
 
     // MARK: - Rows

@@ -14,6 +14,7 @@ struct VPhoneLaunchpadFirmwaresView: View {
     @State private var scan: VPhoneLaunchpadLibraryScan?
     @State private var catalog: VPhoneLaunchpadFirmwareCatalogIndex?
     @State private var removal: VPhoneLaunchpadRestoreFilesItem?
+    @State private var deletion: VPhoneLaunchpadFirmwareRow?
     @State private var isRemoving = false
     @State private var removalError: VPhoneLaunchpadError?
 
@@ -24,6 +25,7 @@ struct VPhoneLaunchpadFirmwaresView: View {
             isLoading: scan == nil,
             filter: $filter,
             onRemove: { removal = $0 },
+            onDelete: confirmDeletion,
         )
         // Again whenever the machines listed change: a creation's download,
         // a machine stopping, one deleted elsewhere.
@@ -39,6 +41,17 @@ struct VPhoneLaunchpadFirmwaresView: View {
             }
         } message: { item in
             Text(String(localized: "\(item.trees.joined(separator: ", ")) will be deleted. The machine starts from its disk without them. Restoring it again prepares the firmware anew, from the IPSW cache while the IPSWs are still there."))
+        }
+        .confirmationDialog(
+            deletion.map { String(localized: "Delete \($0.title)?") } ?? "",
+            isPresented: Binding(get: { deletion != nil }, set: { if !$0 { deletion = nil } }),
+            presenting: deletion,
+        ) { row in
+            Button(String(localized: "Delete \(VPhoneLaunchpadLibraryFormat.size(row.size))"), role: .destructive) {
+                Task { await delete(row) }
+            }
+        } message: { row in
+            Text(Self.deletionMessage(row))
         }
         .errorAlert($removalError)
     }
@@ -86,7 +99,7 @@ struct VPhoneLaunchpadFirmwaresView: View {
         guard let scan else {
             return []
         }
-        return VPhoneLaunchpadFirmwareRows.rows(scan.ipsws, catalog: catalog, uses: uses(scan))
+        return VPhoneLaunchpadFirmwareRows.rows(scan.ipsws, catalog: catalog, uses: uses(scan), isCreating: isCreating)
     }
 
     private func uses(_ scan: VPhoneLaunchpadLibraryScan) -> [VPhoneLaunchpadFirmwareUse] {
@@ -101,6 +114,7 @@ struct VPhoneLaunchpadFirmwaresView: View {
                 cloudOS: machine.restoreInfo.map { .init(version: $0.cloudOS.version, build: $0.cloudOS.build) },
                 sources: creation.map { [$0.options.iphoneSource, $0.options.cloudOSSource] } ?? [],
                 isCreating: creation?.isRunning == true,
+                needsSources: creation.map { !$0.isFinished } ?? false,
             ))
         }
         for (path, creation) in library.creations where !library.machines.contains(where: { $0.path == path }) {
@@ -108,6 +122,7 @@ struct VPhoneLaunchpadFirmwaresView: View {
                 machine: path.name,
                 sources: [creation.options.iphoneSource, creation.options.cloudOSSource],
                 isCreating: creation.isRunning,
+                needsSources: !creation.isFinished,
             ))
         }
         return uses
@@ -237,5 +252,57 @@ enum VPhoneLaunchpadLibraryScanKey {
         }
         let creations = library.creations.map { "\($0.key.libraryRoot)/\($0.key.name):\($0.value.isRunning)" }.sorted()
         return [library.hasListed ? "listed" : "unlisted"] + library.roots + states + creations
+    }
+}
+
+// MARK: - Deleting IPSWs
+
+extension VPhoneLaunchpadFirmwaresView {
+    /// Whether a creation is under way, which is when IPSWs download.
+    private var isCreating: Bool {
+        library.creations.values.contains { $0.isRunning }
+    }
+
+    /// A row that cannot go says why at once; any other asks first.
+    private func confirmDeletion(_ row: VPhoneLaunchpadFirmwareRow) {
+        if let reason = row.blockedReason {
+            removalError = VPhoneLaunchpadError(String(localized: "Unable to Delete \(row.title)"), detail: reason)
+        } else {
+            deletion = row
+        }
+    }
+
+    static func deletionMessage(_ row: VPhoneLaunchpadFirmwareRow) -> String {
+        if row.isDownloading {
+            return String(localized: "The partial download of \(row.fileName) is deleted.")
+        }
+        let deleted = String(localized: "\(row.fileName) is deleted from the IPSW cache.")
+        let again = String(localized: "Creating a machine from this release downloads it again.")
+        guard !row.usedBy.isEmpty else {
+            return "\(deleted) \(again)"
+        }
+        let keep = String(localized: "\(row.usedBy.joined(separator: ", ")) keep working without it.")
+        return "\(deleted) \(keep) \(again)"
+    }
+
+    /// Checks the IPSW again at the moment of deletion: a creation may have
+    /// started since its menu was opened.
+    private func delete(_ row: VPhoneLaunchpadFirmwareRow) async {
+        guard !isRemoving, let scan, let file = scan.ipsws.first(where: { $0.id == row.id }) else {
+            return
+        }
+        let failure = String(localized: "Unable to Delete \(row.title)")
+        if let reason = VPhoneLaunchpadFirmwareRows.deletionBlock(file, uses: uses(scan), isCreating: isCreating) {
+            removalError = VPhoneLaunchpadError(failure, detail: reason)
+            return
+        }
+        isRemoving = true
+        defer { isRemoving = false }
+        do {
+            try await VPhoneLaunchpadLibraryScanner.removeIPSW(file.url, cacheDirectories: scan.cacheDirectories)
+        } catch {
+            removalError = VPhoneLaunchpadError(failure, detail: error.localizedDescription)
+        }
+        await rescan()
     }
 }

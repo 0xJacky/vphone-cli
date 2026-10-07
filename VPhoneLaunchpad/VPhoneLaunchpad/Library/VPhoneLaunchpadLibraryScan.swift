@@ -328,10 +328,12 @@ nonisolated enum VPhoneLaunchpadLibraryScanner {
 
     enum RemovalError: LocalizedError {
         case notRestoreTree(String)
+        case notIPSW(String)
 
         var errorDescription: String? {
             switch self {
             case let .notRestoreTree(name): "\(name) is not a restore tree."
+            case let .notIPSW(name): "\(name) is not an IPSW in the IPSW cache."
             }
         }
     }
@@ -356,5 +358,28 @@ nonisolated enum VPhoneLaunchpadLibraryScanner {
             }
             try manager.removeItem(at: url)
         }
+    }
+}
+
+extension VPhoneLaunchpadLibraryScanner {
+    /// Deletes one IPSW, or the partial file of a download, only while it is
+    /// still a regular file directly inside one of `cacheDirectories` with an
+    /// IPSW's or a partial download's name. A symbolic link is refused, not
+    /// followed.
+    @concurrent
+    static func removeIPSW(_ url: URL, cacheDirectories: [URL]) async throws {
+        let name = url.lastPathComponent
+        let folder = url.deletingLastPathComponent().standardizedFileURL.path
+        let isIPSW = !name.hasPrefix(".") && name.lowercased().hasSuffix(".ipsw")
+        guard isIPSW || VPhoneLaunchpadIPSW.finalName(ofPartial: name) != nil,
+              cacheDirectories.contains(where: { $0.standardizedFileURL.path == folder })
+        else {
+            throw RemovalError.notIPSW(name)
+        }
+        let values = try? url.resourceValues(forKeys: [.isSymbolicLinkKey, .isRegularFileKey])
+        guard values?.isSymbolicLink == false, values?.isRegularFile == true else {
+            throw RemovalError.notIPSW(name)
+        }
+        try FileManager.default.removeItem(at: url)
     }
 }
