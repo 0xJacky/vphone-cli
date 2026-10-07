@@ -283,7 +283,7 @@ nonisolated enum VPhoneLaunchpadFirmwareRows {
             .filter { use in use.needsSources && use.sources.contains { VPhoneLaunchpadFirmwareUse.source($0, is: file) } }
             .map(\.machine)
         if !creations.isEmpty {
-            return String(localized: "Creating \(creations.joined(separator: ", ")) reads this IPSW. Finish or discard the creation first.")
+            return String(localized: "Creating \(creations.joined(separator: ", ")) reads this IPSW until the creation finishes.")
         }
         if file.isDownloading, isCreating {
             return String(localized: "This IPSW is still downloading.")

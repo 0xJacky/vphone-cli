@@ -23327,30 +23327,30 @@
         }
       }
     },
-    "Creating %@ reads this IPSW. Finish or discard the creation first." : {
+    "Creating %@ reads this IPSW until the creation finishes." : {
       "localizations" : {
         "ja" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ の作成でこの IPSW を読み込みます。先に作成を完了するか破棄してください。"
+            "value" : "%@ の作成が完了するまで、この IPSW を読み込みます。"
           }
         },
         "ko" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ 생성에 이 IPSW가 필요합니다. 먼저 생성을 완료하거나 취소하십시오."
+            "value" : "%@ 생성이 끝날 때까지 이 IPSW를 읽습니다."
           }
         },
         "vi" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Quá trình tạo %@ cần đọc IPSW này. Hãy hoàn tất hoặc hủy bỏ lần tạo trước."
+            "value" : "Quá trình tạo %@ đọc IPSW này cho đến khi hoàn tất."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "创建 %@ 需要读取这个 IPSW。请先完成或放弃这次创建。"
+            "value" : "创建 %@ 完成之前需要读取这个 IPSW。"
           }
         }
       }
