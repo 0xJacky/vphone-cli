@@ -98,6 +98,10 @@ nonisolated struct VPhoneLaunchpadMachine: Decodable, Hashable, Identifiable, Se
     let unlocksAtStartup: Bool?
     /// The library `vm list` was run on. Not part of the JSON.
     var libraryRoot = ""
+    /// The guest's product type, such as iPad16,1, read by the library from
+    /// the machine folder. Not part of the JSON: `restoreInfo.device` is the
+    /// restore identity's model (iPhone99,11 for every guest), not the guest's.
+    var guestProductType: String?
 
     private enum CodingKeys: String, CodingKey {
         case name, cpuCount, memoryMB, diskSizeBytes, network, restoreInfo, customFirmwareInstalled, udid, unlocksAtStartup

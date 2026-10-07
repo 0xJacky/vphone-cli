@@ -248,7 +248,7 @@ struct VPhoneLaunchpadMachinesView: View {
             TableColumn("Name", value: \.name) { machine in
                 Self.tableCell(.title(
                     machine.name,
-                    subtitle: machine.restoreInfo?.device,
+                    subtitle: machine.guestProductType,
                     leading: .glyph(machine.glyph),
                 ))
             }
@@ -404,7 +404,7 @@ struct VPhoneLaunchpadMachinesView: View {
             machine.name,
             machine.restoreInfo?.ios.version,
             machine.restoreInfo?.ios.build,
-            machine.restoreInfo?.device,
+            machine.guestProductType,
             machine.udid,
             VPhoneLaunchpadMachineLocations.volumeName(machine.libraryRoot),
         ]

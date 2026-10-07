@@ -152,8 +152,10 @@ struct VPhoneLaunchpadFirmwaresView: View {
         case let pipeline? where pipeline.isFinished: .finished
         default: .unfinished
         }
-        let firmware = listed?.restoreInfo.map { info in
-            String(localized: "iOS \(info.ios.version) (\(info.ios.build)) + cloudOS \(info.cloudOS.version) (\(info.cloudOS.build))")
+        let firmware = listed.flatMap { machine in
+            machine.restoreInfo.map { info in
+                "\(machine.osName) \(info.ios.version) (\(info.ios.build)) + cloudOS \(info.cloudOS.version) (\(info.cloudOS.build))"
+            }
         }
         return VPhoneLaunchpadRestoreOwner(
             activity: activity,

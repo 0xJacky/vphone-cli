@@ -278,9 +278,9 @@ struct VPhoneLaunchpadMachineActions {
 // MARK: - Presentation
 
 extension VPhoneLaunchpadMachine {
-    /// True for an iPad guest, from the device the machine was restored as.
+    /// True for an iPad guest, from its product type.
     var isPad: Bool {
-        restoreInfo?.device?.hasPrefix("iPad") == true
+        guestProductType?.hasPrefix("iPad") == true
     }
 
     var glyph: DKGlyph {

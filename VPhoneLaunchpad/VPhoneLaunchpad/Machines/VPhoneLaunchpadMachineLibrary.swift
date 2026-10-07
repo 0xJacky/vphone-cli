@@ -195,6 +195,7 @@ final class VPhoneLaunchpadMachineLibrary {
                     var machines = try JSONDecoder().decode([VPhoneLaunchpadMachine].self, from: data)
                     for index in machines.indices {
                         machines[index].libraryRoot = root
+                        machines[index].guestProductType = VPhoneLaunchpadLibraryScanner.guestProductType(in: machines[index].path.url)
                     }
                     found += machines
                     listed.insert(root)

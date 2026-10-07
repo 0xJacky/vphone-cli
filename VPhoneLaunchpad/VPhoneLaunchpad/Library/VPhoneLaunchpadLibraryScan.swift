@@ -209,7 +209,7 @@ nonisolated enum VPhoneLaunchpadLibraryScanner {
             folder: folder,
             libraryRoot: machine.libraryRoot,
             name: machine.name,
-            productType: config?["guestProductType"] as? String ?? originalsProductType(folder),
+            productType: guestProductType(in: folder, config: config),
             diskImageSize: nil,
             diskImageAllocated: nil,
             restoreTrees: [],
@@ -256,6 +256,14 @@ nonisolated enum VPhoneLaunchpadLibraryScanner {
     /// The product type a machine was patched for, from the restore tree name
     /// `FirmwareOriginals` mirrors (`iPhoneOS_iPad17,3_26.6.2_23G90_Restore`),
     /// for a config.plist from before `guestProductType` was recorded.
+    /// config.plist's `guestProductType`, else the product type in the name
+    /// of the restore tree kept in `FirmwareOriginals`, for configs written
+    /// before the key.
+    static func guestProductType(in folder: URL, config: NSDictionary? = nil) -> String? {
+        let config = config ?? NSDictionary(contentsOf: folder.appendingPathComponent("config.plist"))
+        return config?["guestProductType"] as? String ?? originalsProductType(folder)
+    }
+
     static func originalsProductType(_ folder: URL) -> String? {
         let originals = folder.appendingPathComponent("FirmwareOriginals", isDirectory: true)
         let names = (try? FileManager.default.contentsOfDirectory(atPath: originals.path)) ?? []

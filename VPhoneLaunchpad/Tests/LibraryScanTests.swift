@@ -215,6 +215,9 @@ struct LibraryScanTests {
         }
         expect(measured.productType == "iPad16,1", "product type")
         expect(VPhoneLaunchpadLibraryScanner.originalsProductType(machine) == "iPad16,1", "product type from FirmwareOriginals")
+        // What the Machines list shows: config.plist first, the restore tree otherwise.
+        expect(VPhoneLaunchpadLibraryScanner.guestProductType(in: machine) == "iPad16,1", "guest product type")
+        expect(VPhoneLaunchpadLibraryScanner.guestProductType(in: machine, config: ["guestProductType": "iPad17,3"]) == "iPad17,3", "config wins")
         expect(measured.restoreTrees == ["iPhoneOS_iPad16,1_26.6.2_23G90_Restore"], "\(measured.restoreTrees)")
         expect(measured.diskImageSize == 64 << 20, "disk size \(String(describing: measured.diskImageSize))")
         let written = measured.diskImageAllocated ?? 0

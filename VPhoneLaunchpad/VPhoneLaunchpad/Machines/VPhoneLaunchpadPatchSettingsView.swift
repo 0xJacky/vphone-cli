@@ -147,8 +147,8 @@ struct VPhoneLaunchpadPatchSettingsView: View {
     /// The machine's OS pairing and the Core Bundle whose catalogue this is.
     private var subtitle: String? {
         var parts: [String] = []
-        if let machine, let restoreInfo = model.machines.machines.first(where: { $0.path == machine })?.restoreInfo {
-            parts.append(String(localized: "iOS \(restoreInfo.ios.version) (\(restoreInfo.ios.build))"))
+        if let machine, let listed = model.machines.machines.first(where: { $0.path == machine }), let restoreInfo = listed.restoreInfo {
+            parts.append("\(listed.osName) \(restoreInfo.ios.version) (\(restoreInfo.ios.build))")
             parts.append(String(localized: "cloudOS \(restoreInfo.cloudOS.version)"))
         }
         if let version = bundleVersion ?? model.bundles.defaultVersion {

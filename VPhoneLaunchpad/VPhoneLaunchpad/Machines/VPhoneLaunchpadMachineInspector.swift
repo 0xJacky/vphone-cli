@@ -156,10 +156,10 @@ struct VPhoneLaunchpadMachineInspector: View {
         }
     }
 
-    /// "iPhone17,3 · iOS 26.6.2 (23G90)"; a machine not yet restored has
+    /// "iPad16,1 · iPadOS 26.6.2 (23G90)"; a machine not yet restored has
     /// neither.
     private var subtitle: String {
-        let parts = [machine.restoreInfo?.device, machine.osDescription].compactMap(\.self)
+        let parts = [machine.guestProductType, machine.osDescription].compactMap(\.self)
         return parts.isEmpty ? String(localized: "Not restored") : parts.joined(separator: " · ")
     }
 

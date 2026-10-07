@@ -376,6 +376,8 @@
                 machines[index].libraryRoot = machines[index].name == labMachine.name
                     ? labMachine.libraryRoot
                     : VPhoneLaunchpadMachineLocations.defaultRoot
+                // Read from config.plist in a real library; frida-lab is an iPad.
+                machines[index].guestProductType = ["research-01": "iPhone17,3", "frida-lab": "iPad16,1"][machines[index].name]
             }
             return machines
         }()
