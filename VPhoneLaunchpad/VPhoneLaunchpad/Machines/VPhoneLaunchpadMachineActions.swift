@@ -195,6 +195,7 @@ struct VPhoneLaunchpadMachineActions {
         case .rename: String(localized: "Rename…")
         case .clone: String(localized: "Clone…")
         case .export: String(localized: "Export…")
+        case .snapshots: String(localized: "Snapshots…")
         case .coreBundle: String(localized: "Core Bundle")
         case .changeBundle: String(localized: "Change Core Bundle…")
         case .updateGuestEnvironment: String(localized: "Update Guest Environment")
@@ -256,6 +257,8 @@ struct VPhoneLaunchpadMachineActions {
             present(.clone(path))
         case .export:
             present(.export(paths))
+        case .snapshots:
+            present(.snapshots(path))
         case .changeBundle:
             present(.changeBundle(machines))
         case .updateGuestEnvironment:

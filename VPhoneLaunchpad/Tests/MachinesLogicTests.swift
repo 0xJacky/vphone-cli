@@ -59,7 +59,7 @@ struct MachinesLogicTests {
         let stopped = Menu.Machine(run: .stopped, hasPatchLog: true)
         expect(
             outline(Menu.entries(for: [stopped])) ==
-                "start startHeadless - openConsole showInFinder logs[consoleLog patchLog] - settings rename clone export - coreBundle[changeBundle updateGuestEnvironment installCustomFirmware!] - delete",
+                "start startHeadless - openConsole showInFinder logs[consoleLog patchLog] - settings rename clone export snapshots - coreBundle[changeBundle updateGuestEnvironment installCustomFirmware!] - delete",
             outline(Menu.entries(for: [stopped])),
         )
 
@@ -68,7 +68,7 @@ struct MachinesLogicTests {
         let running = Menu.Machine(run: .running)
         expect(
             outline(Menu.entries(for: [running])) ==
-                "stop - openConsole showInFinder logs[consoleLog patchLog!] - settings! rename! clone! export! - coreBundle[changeBundle updateGuestEnvironment! installCustomFirmware!] - delete!",
+                "stop - openConsole showInFinder logs[consoleLog patchLog!] - settings! rename! clone! export! snapshots - coreBundle[changeBundle updateGuestEnvironment! installCustomFirmware!] - delete!",
             outline(Menu.entries(for: [running])),
         )
 
@@ -77,7 +77,7 @@ struct MachinesLogicTests {
         let creating = Menu.Machine(run: .busy, isCreating: true, isRestored: false, customFirmwareInstalled: nil, canChangeBundle: false)
         expect(
             outline(Menu.entries(for: [creating])) ==
-                "showProgress - openConsole showInFinder logs[consoleLog patchLog!] - settings! rename! clone! export! - coreBundle![changeBundle! updateGuestEnvironment! installCustomFirmware!] - delete!",
+                "showProgress - openConsole showInFinder logs[consoleLog patchLog!] - settings! rename! clone! export! snapshots! - coreBundle![changeBundle! updateGuestEnvironment! installCustomFirmware!] - delete!",
             outline(Menu.entries(for: [creating])),
         )
 
@@ -140,7 +140,7 @@ struct MachinesLogicTests {
         let none = Menu.entries(for: [], placement: .menuBar)
         expect(
             outline(none) ==
-                "start! startHeadless! stop! - openConsole! showInFinder! logs![consoleLog! patchLog!] - settings! rename! clone! export! - coreBundle![changeBundle! updateGuestEnvironment! installCustomFirmware!] - delete!",
+                "start! startHeadless! stop! - openConsole! showInFinder! logs![consoleLog! patchLog!] - settings! rename! clone! export! snapshots! - coreBundle![changeBundle! updateGuestEnvironment! installCustomFirmware!] - delete!",
             outline(none),
         )
     }

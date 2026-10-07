@@ -73,7 +73,7 @@ struct ShellTests {
         expectEqual(Variant.aboutBuildLine(info: ["VPhoneBuildVariant": "ui"]), "ui")
         expectEqual(Variant.aboutBuildLine(info: ["CFBundleVersion": "13"]), nil)
         // The variant never reaches the version, so series matching is unchanged.
-        expectEqual(VPhoneLaunchpadNames.isCompatibleBundleVersion("2.6.1-local.ab12cd34"), true)
+        expectEqual(VPhoneLaunchpadNames.isCompatibleBundleVersion("\(VPhoneLaunchpadNames.minimumBundleVersion)-local.ab12cd34"), true)
     }
 
     static func windowSize() {
@@ -211,12 +211,13 @@ struct ShellTests {
         func badge(_ version: String, _ status: VPhoneLaunchpadStatus, policyPassed: Bool = true) -> DKListItem.Badge {
             Text.checkBadge(version: version, status: status, policyPassed: policyPassed)
         }
-        expectEqual(badge("2.6.0", .passed), DKListItem.Badge("Preflight passed", tone: .success))
-        expectEqual(badge("2.6.0", .warning), DKListItem.Badge("Preflight skipped", tone: .warning))
-        expectEqual(badge("2.6.0", .pending), DKListItem.Badge("Not checked", tone: .neutral))
-        expectEqual(badge("2.6.0", .running), DKListItem.Badge("Checking…", tone: .info))
-        expectEqual(badge("2.6.0", .failed), DKListItem.Badge("Preflight failed", tone: .danger))
-        expectEqual(badge("2.6.0", .failed, policyPassed: false), DKListItem.Badge("Not allowed to run", tone: .danger))
+        let current = VPhoneLaunchpadNames.minimumBundleVersion
+        expectEqual(badge(current, .passed), DKListItem.Badge("Preflight passed", tone: .success))
+        expectEqual(badge(current, .warning), DKListItem.Badge("Preflight skipped", tone: .warning))
+        expectEqual(badge(current, .pending), DKListItem.Badge("Not checked", tone: .neutral))
+        expectEqual(badge(current, .running), DKListItem.Badge("Checking…", tone: .info))
+        expectEqual(badge(current, .failed), DKListItem.Badge("Preflight failed", tone: .danger))
+        expectEqual(badge(current, .failed, policyPassed: false), DKListItem.Badge("Not allowed to run", tone: .danger))
         // An older series is never checked here; its badge names the Launchpad it needs.
         expectEqual(badge("2.4.0", .pending), DKListItem.Badge("Needs Launchpad 2.4", tone: .neutral))
         expectEqual(badge("2.5.0-local.3013d16d", .passed), DKListItem.Badge("Needs Launchpad 2.5", tone: .neutral))

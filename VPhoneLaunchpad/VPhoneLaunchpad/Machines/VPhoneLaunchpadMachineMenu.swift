@@ -26,6 +26,7 @@ nonisolated enum VPhoneLaunchpadMachineMenu {
         case rename
         case clone
         case export
+        case snapshots
         case coreBundle
         case changeBundle
         case updateGuestEnvironment
@@ -146,6 +147,9 @@ nonisolated enum VPhoneLaunchpadMachineMenu {
         entries.append(.item(.rename, isEnabled: isStopped))
         entries.append(.item(.clone, isEnabled: isStopped))
         entries.append(.item(.export, isEnabled: isStopped))
+        // Open while the machine runs too, to read the list; taking,
+        // reverting and deleting wait for it to stop.
+        entries.append(.item(.snapshots, isEnabled: !machine.isCreating))
 
         // Maintain. Update Guest Environment redeploys a finished install's
         // guest resources; Install Custom Firmware finishes an unfinished one,

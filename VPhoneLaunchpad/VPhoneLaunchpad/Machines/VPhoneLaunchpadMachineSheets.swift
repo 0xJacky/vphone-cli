@@ -396,7 +396,9 @@ struct VPhoneLaunchpadMachineSettingsView: View {
 
 // MARK: - Rename and clone
 
-struct VPhoneLaunchpadNameSheet: View {
+/// A new name for a machine, and for a clone whatever else it takes, in
+/// sections of `options` under the name.
+struct VPhoneLaunchpadNameSheet<Options: View>: View {
     let title: String.LocalizationValue
     let action: String.LocalizationValue
     let initial: String
@@ -408,8 +410,8 @@ struct VPhoneLaunchpadNameSheet: View {
     @State private var name = ""
 
     init(
-        title: LocalizedStringKey,
-        action: LocalizedStringKey,
+        title: String.LocalizationValue,
+        action: String.LocalizationValue,
         initial: String,
         machine: VPhoneLaunchpadMachinePath,
         @ViewBuilder options: () -> Options,
@@ -443,22 +445,25 @@ struct VPhoneLaunchpadNameSheet: View {
                 },
             ],
         ) {
-            VStack(alignment: .leading, spacing: DK.Space.s2) {
-                DKCard {
-                    DKFormRow(String(localized: "Name"), fill: true, labelWidth: 60) {
-                        TextField("Name", text: $name)
-                            .textFieldStyle(.dkField)
+            VStack(alignment: .leading, spacing: DK.Space.s5) {
+                VStack(alignment: .leading, spacing: DK.Space.s2) {
+                    DKCard {
+                        DKFormRow(String(localized: "Name"), fill: true, labelWidth: 60) {
+                            TextField("Name", text: $name)
+                                .textFieldStyle(.dkField)
+                        }
+                    }
+                    if fitsLocation {
+                        Text("Use letters, numbers, periods, hyphens, and underscores.")
+                            .font(DK.Typeface.caption)
+                            .foregroundStyle(DK.Palette.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, DK.Space.s1)
+                    } else {
+                        VPhoneLaunchpadFieldProblem(text: String(localized: "The path is too long. Use a shorter name, or a location with a shorter path."))
                     }
                 }
-                if fitsLocation {
-                    Text("Use letters, numbers, periods, hyphens, and underscores.")
-                        .font(DK.Typeface.caption)
-                        .foregroundStyle(DK.Palette.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, DK.Space.s1)
-                } else {
-                    VPhoneLaunchpadFieldProblem(text: String(localized: "The path is too long. Use a shorter name, or a location with a shorter path."))
-                }
+                options
             }
         }
         .vphoneLaunchpadSheetChrome()
@@ -468,8 +473,8 @@ struct VPhoneLaunchpadNameSheet: View {
 
 extension VPhoneLaunchpadNameSheet where Options == EmptyView {
     init(
-        title: LocalizedStringKey,
-        action: LocalizedStringKey,
+        title: String.LocalizationValue,
+        action: String.LocalizationValue,
         initial: String,
         machine: VPhoneLaunchpadMachinePath,
         onConfirm: @escaping (String) -> Void,
@@ -493,13 +498,13 @@ struct VPhoneLaunchpadCloneSheet: View {
             initial: "\(machine.name)-clone",
             machine: machine,
         ) {
-            Section {
-                Toggle("New device identity", isOn: $newIdentity)
-            } footer: {
-                Text(newIdentity
-                    ? "The clone gets its own ECID, UDID and MAC address, so it can run alongside the original. The guest asks to trust this Mac again the first time it connects."
-                    : "The clone is the same device as the original. Run only one of them at a time.")
-                    .foregroundStyle(.secondary)
+            DKSection(footnote: newIdentity
+                ? String(localized: "The clone gets its own ECID, UDID and MAC address, so it can run alongside the original. The guest asks to trust this Mac again the first time it connects.")
+                : String(localized: "The clone is the same device as the original. Run only one of them at a time."))
+            {
+                VPhoneLaunchpadSwitchRow(isOn: $newIdentity) {
+                    Text("New device identity")
+                }
             }
         } onConfirm: { name in
             onConfirm(name, newIdentity)

@@ -1,4 +1,5 @@
 import SwiftUI
+import VPhoneDesignKit
 
 // MARK: - Snapshots
 
@@ -240,40 +241,45 @@ struct VPhoneLaunchpadTakeSnapshotSheet: View {
     }
 
     var body: some View {
-        VPhoneLaunchpadSheet(Text("Take Snapshot of \(machine.name)")) {
-            Form {
-                Section {
-                    TextField("Name", text: $name)
-                } footer: {
-                    if isTaken {
-                        Text("A snapshot with this name already exists.")
-                            .foregroundStyle(.red)
-                    } else {
-                        Text("Use letters, numbers, periods, hyphens, and underscores.")
-                            .foregroundStyle(.secondary)
+        DKSheet(
+            String(localized: "Take Snapshot of \(machine.name)"),
+            width: 440,
+            trailing: [
+                .cancel(String(localized: "Cancel")) { dismiss() },
+                .primary(String(localized: "Take Snapshot"), isEnabled: isValid) {
+                    onConfirm(name, note)
+                    dismiss()
+                },
+            ],
+        ) {
+            VStack(alignment: .leading, spacing: DK.Space.s2) {
+                DKCard {
+                    DKFormRow(String(localized: "Name"), fill: true, labelWidth: 60) {
+                        TextField("Name", text: $name)
+                            .textFieldStyle(.dkField)
+                    }
+                    DKFormRow(String(localized: "Note"), fill: true, labelWidth: 60) {
+                        TextField("Note", text: $note, prompt: Text("Optional"))
+                            .textFieldStyle(.dkField)
                     }
                 }
-                Section {
-                    TextField("Note", text: $note, prompt: Text("Optional"), axis: .vertical)
-                        .lineLimit(2 ... 4)
-                } footer: {
-                    Text("The snapshot keeps the machine's disk, SEP storage and NVRAM as they are now. Its settings and Core Bundle are not part of it.")
-                        .foregroundStyle(.secondary)
+                if isTaken {
+                    VPhoneLaunchpadFieldProblem(text: String(localized: "A snapshot with this name already exists."))
+                } else {
+                    caption("Use letters, numbers, periods, hyphens, and underscores.")
                 }
             }
-            .formStyle(.grouped)
-        } actions: {
-            Button("Cancel") { dismiss() }
-                .keyboardShortcut(.cancelAction)
-            Button("Take Snapshot") {
-                onConfirm(name, note)
-                dismiss()
-            }
-            .keyboardShortcut(.defaultAction)
-            .disabled(!isValid)
+            caption("The snapshot keeps the machine's disk, SEP storage and NVRAM as they are now. Its settings and Core Bundle are not part of it.")
         }
-        .frame(width: 420)
-        .fixedSize(horizontal: false, vertical: true)
+        .vphoneLaunchpadSheetChrome()
         .onAppear { name = VPhoneLaunchpadMachineSnapshot.defaultName(at: Date(), taken: taken) }
+    }
+
+    private func caption(_ text: LocalizedStringKey) -> some View {
+        Text(text)
+            .font(DK.Typeface.caption)
+            .foregroundStyle(DK.Palette.muted)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, DK.Space.s1)
     }
 }

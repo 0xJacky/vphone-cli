@@ -125,6 +125,12 @@ enum DKPageHeaderMetrics {
 }
 
 public extension EnvironmentValues {
+    /// Whether page headers are their window's title bar: the window draws
+    /// its own chrome and each page's header runs to its top edge, beside
+    /// the window buttons. Such a header drags the window and keeps its
+    /// title in line with the buttons. Guest Tools sets it.
+    @Entry var dkPageHeaderIsTitleBar = false
+
     /// Puts the window buttons at the leading end of each `DKPageHeader` below,
     /// for a page that reaches the window's top-left corner, such as one whose
     /// sidebar is hidden.
