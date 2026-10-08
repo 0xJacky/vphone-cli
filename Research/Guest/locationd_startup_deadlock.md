@@ -6,6 +6,8 @@ good: vphoned's `location.current` and `location.set` time out after 120 s
 ("The machine closed the connection without answering"), and Maps, navd,
 nearbyd, PerfPowerServices, usernotificationsd and the rest sit on the same
 port. vphoned now restarts such a locationd (`GuestLocationdWatchdog`).
+It comes from running iOS 27's libdispatch on the cloudOS 26.4 kernel: an iOS
+26.6.2 guest on the same kernel never shows it (see "Cause" below).
 
 Measured on 2026-10-07 on a new `standard` VM: iPhone17,3, iOS 27.0 (24A435),
 cloudOS 26.4 (23E5207q) kernel, 8 vCPUs, 8 GiB, Location Services off, no
@@ -105,10 +107,56 @@ locationd crash reports with `EXC_ARM_PAC_FAIL` 0.13 s after launch, the
 faulting thread draining a `Cohort:8` queue and calling a block whose invoke
 pointer was garbage: a second startup race, in the unmodified binary.
 
-Why the guest hits these so often is open. The guest runs an iOS 27 userland
-on the cloudOS 26.4 kernel (xnu 25.4), and both failures sit in libdispatch
-workloop and `dispatch_sync` paths. Nothing here tests that; it is the
-difference from a real iPhone most likely to matter.
+## Cause: an iOS 27 userland on the cloudOS 26.4 kernel (2026-10-08)
+
+The guest runs an iOS 27 userland on the cloudOS 26.4 kernel (xnu 25.4). An
+iOS 26.6.2 guest on the same kernel never showed any of this. Two new
+iPhone17,3 `standard` VMs, the same bundle (2.7.0 with the watchdog), the same
+cloudOS 26.4 (23E5207q) boot chain, run side by side so they shared the host
+load; 15 headless boots each, Location Services off, sync off. A boot is
+counted bad when launchd started locationd more than once in it
+(`services.print {label:"com.apple.locationd"}` `runs`, read at about 60 s of
+uptime), whether a crash or the watchdog restarted it.
+
+| Guest | Bad boots | locationd starts per boot | Watchdog kills |
+| --- | --- | --- | --- |
+| iOS 26.6.2 (23G90) | 0 of 15 | 1 every time | 0 |
+| iOS 27.0 (24A435) | 14 of 15 | 1–21, median 8 | 1 |
+
+Under that load the iOS 27 guest mostly crashed rather than hung. Its 25
+locationd crash reports all fault inside libdispatch on LocationSupport
+`Cohort:0` or `Cohort:8` queues:
+
+- 12 `EXC_ARM_PAC_FAIL` and 7 `KERN_INVALID_ADDRESS` or `EXC_ARM_DA_ALIGN`:
+  wild or wrongly signed pointers in queue items;
+- `BUG IN CLIENT OF LIBDISPATCH: Invalid workloop owner, possible memory
+  corruption` (2) and `BUG IN LIBDISPATCH: Invalid wlh` (2);
+- `BUG IN LIBDISPATCH: Unexpected error from kevent` in
+  `_dispatch_event_loop_cancel_waiter` ← `_dispatch_event_loop_wake_owner` ←
+  `_dispatch_waiter_wake`, abort cause `0x2800060002`: the kernel answered a
+  workloop sync-wait kevent with error 2 (ENOENT);
+- `BUG IN LIBDISPATCH: _pthread_set_properties_self failed` (abort cause 2)
+  in `_dispatch_set_priority_and_mach_voucher_slow`.
+
+The last two are libdispatch refusing an error the kernel returned. All of
+them sit on the kernel-backed `dispatch_sync` waiter of a workloop (kevent
+`EVFILT_WORKLOOP` sync waits, turnstiles, thread QoS and voucher handoff),
+which is what the hang and the spin above are made of too: a sync waiter
+parked on a queue "in a transient state", or a drainer spinning in
+`__DISPATCH_WAIT_FOR_ENQUEUER__`. A user's iPad16,1 on iOS 27.0.1 showed the
+same three forms (a hung locationd, one spinning at 90 % of a core in
+`_dispatch_lane_drain_barrier_waiter`, and launch crashes with `Invalid
+workloop owner` and `EXC_ARM_PAC_FAIL` on `Cohort:0`), with three locationd
+launches in 10 s. Of about 400 processes in its spindumps only locationd was
+in either state; its silos make the heaviest use of nested workloop
+`dispatch_sync` in the system. The iOS 27 guest also logged 29 duetexpertd
+crashes (`Failed to initialize datavault`), the iOS 26 one none.
+
+So the main-thread cycle in "The wait cycle" is how the hang looks, not a bug
+locationd has on real hardware: iOS 27's libdispatch expects workloop
+behaviour the 26.4 kernel does not have. No guest-side patch can supply that;
+the watchdog only restarts locationd until a launch gets through, and a guest
+that fails most launches can use up its 20 restarts.
 
 ## Workaround: vphoned restarts it
 
