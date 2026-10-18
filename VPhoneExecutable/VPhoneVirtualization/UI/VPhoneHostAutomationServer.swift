@@ -48,6 +48,16 @@ import VPhoneCoreKit
 ///                                                 directory. The file replaces `local` only once complete
 ///   {"t":"network"}                             → the NIC's state, in `"result"`
 ///   {"t":"network","link":"down"}               → unplug (`up` replugs); not saved
+///   {"t":"vmstate"}                             → VM state, disk (NBD connection), layout, in `"result"`;
+///                                                 `"check":true` adds `save_restore`, the
+///                                                 validateSaveRestoreSupport verdict and its blockers
+///   {"t":"pause"} / {"t":"resume"}              → pause or resume the VM in place (memory is kept)
+///   {"t":"save-state","path":"/abs/dir","after":"stop|pause|resume","replace":false}
+///                                               → pause, save the machine state into that directory,
+///                                                 then stop (default: the process exits), stay paused
+///                                                 or resume. Refused with `save_restore` in `"result"`
+///                                                 when Virtualization cannot save this configuration,
+///                                                 unless `"ignore_validation":true` (PoC only)
 ///
 /// All commands except "screenshot", "rpc", "push", "pull" and "network" wait
 /// briefly then capture a compact screen image returned as
@@ -315,6 +325,54 @@ class VPhoneHostAutomationServer {
                     try virtualMachine.setNetworkLink(up: link == "up")
                 }
                 return Self.reply(ok: true, result: virtualMachine.networkStatus)
+
+            case "vmstate":
+                guard let virtualMachine else {
+                    return Self.reply(ok: false, error: "the VM is not running")
+                }
+                var status = virtualMachine.statusDictionary
+                if json["check"] as? Bool == true {
+                    status["save_restore"] = virtualMachine.saveRestoreSupport().dictionary
+                }
+                return Self.reply(ok: true, result: status)
+
+            case "pause", "resume":
+                guard let virtualMachine else {
+                    return Self.reply(ok: false, error: "the VM is not running")
+                }
+                if type == "pause" {
+                    try await virtualMachine.pause()
+                } else {
+                    try await virtualMachine.resume()
+                }
+                return Self.reply(ok: true, result: virtualMachine.statusDictionary)
+
+            case "save-state":
+                guard let virtualMachine else {
+                    return Self.reply(ok: false, error: "the VM is not running")
+                }
+                guard let path = json["path"] as? String, path.hasPrefix("/") else {
+                    return Self.reply(ok: false, error: "save-state requires path, an absolute directory path to create")
+                }
+                guard let after = VPhoneVirtualMachine.SaveFollowUp(rawValue: json["after"] as? String ?? "stop") else {
+                    return Self.reply(ok: false, error: "after must be stop, pause or resume")
+                }
+                do {
+                    let saved = try await virtualMachine.saveState(
+                        to: URL(fileURLWithPath: path, isDirectory: true),
+                        then: after,
+                        replacing: json["replace"] as? Bool ?? false,
+                        ignoringValidation: json["ignore_validation"] as? Bool ?? false,
+                    )
+                    return Self.reply(ok: true, result: saved.dictionary)
+                } catch let error as VPhoneVirtualMachineError {
+                    guard case .saveRestoreUnsupported = error else { throw error }
+                    return Self.reply(
+                        ok: false,
+                        error: "\(error)",
+                        result: ["save_restore": virtualMachine.saveRestoreSupport().dictionary],
+                    )
+                }
 
             default:
                 return Self.reply(ok: false, error: "unknown command: \(type)")

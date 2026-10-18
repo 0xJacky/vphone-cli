@@ -34,9 +34,13 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
     /// How long a quit waits for the guest to shut down before turning it
     /// off. `vm stop` sends SIGKILL after 20 s by default, so it stays below.
     private static let guestShutdownTimeout: Duration = .seconds(15)
+    /// `--restore-state`, used by the first start only: a restart for a
+    /// keyboard change boots normally.
+    private var pendingRestoreState: URL?
 
     init(command: VPhoneBootCommand) {
         self.command = command
+        pendingRestoreState = command.restoreState
         super.init()
     }
 
@@ -87,7 +91,8 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
 
         print("=== vphone-cli ===")
         print("ROM     : \(options.romURL?.path ?? "None")")
-        print("Disk    : \(options.diskURL.path)")
+        print("Disk    : \(options.diskDescription)")
+        print("State   : \(options.stateLayout.rawValue) layout")
         print("NVRAM   : \(options.nvramURL.path)")
         print("Config  : \(options.configURL.path)")
         print("CPU     : \(options.cpuCount)")
@@ -107,8 +112,32 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
 
         let vm = try VPhoneVirtualMachine(options: options)
         self.vm = vm
+        vm.onStoppedAfterSave = { [weak self] in
+            self?.stopControlServices()
+            exit(EXIT_SUCCESS)
+        }
 
-        try await vm.start(forceDFU: command.dfu)
+        let defaultSavedState = VPhoneSavedMachineState.defaultDirectory(
+            of: options.configURL.deletingLastPathComponent(),
+        )
+        if let restore = pendingRestoreState {
+            pendingRestoreState = nil
+            do {
+                try await vm.restoreState(from: restore, allowOtherHost: command.restoreFromOtherHost)
+            } catch {
+                print("[vphone] Could not resume from \(restore.path): \(error)")
+                guard command.coldBootFallback else { throw error }
+                print("[vphone] Booting cold instead (pass --no-cold-boot-fallback to exit instead)")
+                vm.invalidateOwnSavedState(in: restore, reason: "the restore failed and the machine booted cold at \(Date())")
+                vm.invalidateOwnSavedState(in: defaultSavedState, reason: "the machine booted cold at \(Date())")
+                try await vm.start(forceDFU: command.dfu)
+            }
+        } else {
+            // Booting without the saved state moves the disk on, so the state
+            // could never be resumed safely afterwards.
+            vm.invalidateOwnSavedState(in: defaultSavedState, reason: "the machine booted cold at \(Date())")
+            try await vm.start(forceDFU: command.dfu)
+        }
 
         let control = VPhoneGuestControl()
         self.control = control
@@ -601,7 +630,8 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor
     private var canShutDownGuest: Bool {
-        guard !command.dfu, let control else { return false }
+        // A paused guest cannot answer; quitting turns it off.
+        guard !command.dfu, let control, vm?.virtualMachine.state == .running else { return false }
         return control.isConnected && control.guestCapabilities.contains("system_shutdown")
     }
 

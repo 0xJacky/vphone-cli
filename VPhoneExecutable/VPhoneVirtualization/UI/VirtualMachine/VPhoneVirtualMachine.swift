@@ -7,6 +7,24 @@ import VPhoneCoreKit
 @MainActor
 class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
     let virtualMachine: VZVirtualMachine
+    /// What `virtualMachine` was built from, kept for save/restore checks:
+    /// Virtualization only takes the configuration when the VM is created.
+    let configuration: VZVirtualMachineConfiguration
+    let options: Options
+    /// `dataRepresentation`s a saved state is bound to.
+    let hardwareModelData: Data
+    let machineIdentifierData: Data
+    /// The manifest after first-boot identity was settled.
+    let manifest: VPhoneVirtualMachineManifest
+    /// The NBD disk's connection, for `vphone.sock`'s `vmstate`; nil for a file disk.
+    private(set) var networkDiskStatus: NetworkDiskStatus?
+    /// The NBD attachment's delegate. Set before the VM is created, since
+    /// Virtualization takes its configuration then; held because the
+    /// attachment keeps its delegate weakly.
+    private let networkDiskObserver: VPhoneNBDAttachmentObserver?
+    /// Called after `vm save-state` stopped the VM, to end the process once the
+    /// reply is out.
+    var onStoppedAfterSave: (() -> Void)?
     /// The configuration actually used by this VM, rather than a pending preference.
     let usesHardwareKeyboard: Bool
     /// The manifest's unlock-at-startup setting as the VM started with it.
@@ -23,7 +41,7 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
     private var batterySource: AnyObject?
     /// The in-process network backing `.tunnel` mode; nil for every other mode.
     /// Held because the sockets live only as long as this reference does.
-    private var userspaceNetwork: VPhoneUserspaceNetwork?
+    var userspaceNetwork: VPhoneUserspaceNetwork?
     /// How the manifest's network was realized: attachment, MAC, the address
     /// vphoned should hold the guest to, and the ports forwarded into it.
     private(set) var networkPlan: VPhoneNetworkPlan?
@@ -35,7 +53,7 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
         var configURL: URL
         var romURL: URL?
         var nvramURL: URL
-        var diskURL: URL
+        var disk: Disk
         var cpuCount: Int = 8
         var memorySize: UInt64 = 8 * 1024 * 1024 * 1024
         var sepStorageURL: URL
@@ -51,6 +69,46 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
         /// The guest runs watchOS: its side button is a key of its own (consumer
         /// Help), apart from the crown (Home) and the power key.
         var isWatchGuest = false
+        var stateLayout: VPhoneMachineStateLayout.Kind = .legacy
+
+        enum Disk {
+            case file(URL)
+            case networkBlockDevice(VPhoneNBDLocation, VPhoneVirtualMachineManifest.NBDOptions)
+        }
+
+        var diskDescription: String {
+            switch disk {
+            case let .file(url): url.path
+            case let .networkBlockDevice(location, nbd):
+                "\(location.urlString) (NBD, timeout \(nbd.effectiveTimeout) s, sync \(nbd.effectiveSynchronization.rawValue), no TLS)"
+            }
+        }
+    }
+
+    struct NetworkDiskStatus {
+        let url: String
+        let timeoutSeconds: Double
+        var connected = false
+        var connections = 0
+        var lastConnected: Date?
+        var fatalError: String?
+
+        var dictionary: [String: Any] {
+            var d: [String: Any] = [
+                "url": url,
+                "timeout_seconds": timeoutSeconds,
+                "connected": connected,
+                "connections": connections,
+                "tls": false,
+            ]
+            if let lastConnected {
+                d["last_connected"] = ISO8601DateFormatter().string(from: lastConnected)
+            }
+            if let fatalError {
+                d["fatal_error"] = fatalError
+            }
+            return d
+        }
     }
 
     private struct DeviceIdentity {
@@ -70,6 +128,37 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
         // --- Load or create machineIdentifier from manifest ---
         let machineIdentifier: VZMacMachineIdentifier
         var manifest = try VPhoneVirtualMachineManifest.load(from: options.configURL)
+        let identityURL = options.configURL.deletingLastPathComponent()
+            .appendingPathComponent(VPhoneMachineStateLayout.directoryName, isDirectory: true)
+            .appendingPathComponent(VPhoneMachineStateLayout.identityFileName)
+
+        // In the state-directory layout the identity is checked against the
+        // NVRAM and SEP storage it belongs to before anything is generated: a
+        // config.plist recreated without one (cold start on another Mac)
+        // takes it, and another machine's state directory is refused.
+        var identityRecord: VPhoneMachineIdentityRecord?
+        if options.stateLayout == .stateDirectory {
+            identityRecord = try VPhoneMachineIdentityRecord.load(from: identityURL)
+            switch VPhoneMachineIdentityReconciliation.reconcile(
+                manifestIdentifier: manifest.machineIdentifier,
+                manifestMAC: manifest.networkConfig.macAddress,
+                hardwareModel: hwModel.dataRepresentation,
+                record: identityRecord,
+            ) {
+            case .useManifest:
+                break
+            case let .adopt(identifier, mac):
+                manifest = manifest.updating(
+                    machineIdentifier: identifier,
+                    networkConfig: manifest.networkConfig.with(macAddress: mac),
+                )
+                try manifest.write(to: options.configURL)
+                try VPhoneHostFilePermissions.makeAccessible(at: options.configURL)
+                print("[vphone] Adopted the machine identity from MachineState/identity.plist")
+            case let .mismatch(reason):
+                throw VPhoneVirtualMachineError.machineIdentityMismatch(reason)
+            }
+        }
 
         if !manifest.machineIdentifier.isEmpty,
            let savedID = VZMacMachineIdentifier(dataRepresentation: manifest.machineIdentifier)
@@ -136,6 +225,22 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
             print("[vphone] Warning: failed to resolve ECID from machineIdentifier")
         }
 
+        if options.stateLayout == .stateDirectory {
+            let identity = Self.resolveDeviceIdentity(machineIdentifier: machineIdentifier)
+            let record = VPhoneMachineIdentityRecord(
+                machineIdentifier: machineIdentifier.dataRepresentation,
+                macAddress: manifest.networkConfig.macAddress,
+                hardwareModel: hwModel.dataRepresentation,
+                ecid: identity.map { "0x\($0.ecidHex)" },
+                udid: identity?.udid,
+                machineName: options.configURL.deletingLastPathComponent().lastPathComponent,
+            )
+            if identityRecord.map({ !$0.sameIdentity(as: record) || $0.udid != record.udid }) ?? true {
+                try record.write(to: identityURL)
+                print("[vphone] Wrote MachineState/identity.plist")
+            }
+        }
+
         let auxStorage: VZMacAuxiliaryStorage = if try VPhoneVirtualMachineManifest.requireRegularFileIfPresent(at: options.nvramURL) {
             VZMacAuxiliaryStorage(url: options.nvramURL)
         } else {
@@ -192,11 +297,32 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
         config.audioDevices = [afg]
 
         // Storage
-        guard try VPhoneVirtualMachineManifest.requireRegularFileIfPresent(at: options.diskURL) else {
-            throw VPhoneVirtualMachineError.diskNotFound(options.diskURL.path)
+        let storageAttachment: VZStorageDeviceAttachment
+        var observer: VPhoneNBDAttachmentObserver?
+        switch options.disk {
+        case let .file(url):
+            guard try VPhoneVirtualMachineManifest.requireRegularFileIfPresent(at: url) else {
+                throw VPhoneVirtualMachineError.diskNotFound(url.path)
+            }
+            storageAttachment = try VPhoneDiskAttachment.make(url: url, readOnly: false)
+        case let .networkBlockDevice(location, nbd):
+            // Connects when the VM starts, and reconnects by itself after a
+            // timeout or a recoverable error; the guest only sees requests
+            // stall meanwhile. TLS is not available in this client.
+            let attachment = try VZNetworkBlockDeviceStorageDeviceAttachment(
+                url: location.url,
+                timeout: nbd.effectiveTimeout,
+                isForcedReadOnly: false,
+                synchronizationMode: nbd.effectiveSynchronization == .full ? .full : .none,
+            )
+            let nbdObserver = VPhoneNBDAttachmentObserver()
+            attachment.delegate = nbdObserver
+            observer = nbdObserver
+            storageAttachment = attachment
+            networkDiskStatus = NetworkDiskStatus(url: location.urlString, timeoutSeconds: nbd.effectiveTimeout)
+            print("[vphone] NBD disk: \(options.diskDescription)")
         }
-        let attachment = try VPhoneDiskAttachment.make(url: options.diskURL, readOnly: false)
-        config.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: attachment)]
+        config.storageDevices = [VZVirtioBlockDeviceConfiguration(attachment: storageAttachment)]
 
         // Network (mode, MAC, address and forwards from the bundle manifest)
         let plan = try VPhoneNetworking.plan(manifest.networkConfig)
@@ -316,10 +442,18 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
         try config.validate()
         print("[vphone] Configuration validated")
 
+        configuration = config
+        self.options = options
+        hardwareModelData = hwModel.dataRepresentation
+        machineIdentifierData = machineIdentifier.dataRepresentation
+        self.manifest = manifest
+        networkDiskObserver = observer
         virtualMachine = VZVirtualMachine(configuration: config)
         bootAttachment = virtualMachine.networkDevices.first?.attachment
         super.init()
         virtualMachine.delegate = self
+        networkDiskObserver?.onConnected = { [weak self] url in self?.networkDiskConnected(url) }
+        networkDiskObserver?.onFailed = { [weak self] url, message in self?.networkDiskFailed(url, message) }
 
         // Forward VM serial output -> host stdout
         if let readHandle = serialOutputReadHandle {
@@ -353,8 +487,10 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
         guard try VPhoneVirtualMachineManifest.requireRegularFileIfPresent(at: options.configURL) else {
             throw VPhoneManifestError.loadFailed(path: options.configURL.path)
         }
-        guard try VPhoneVirtualMachineManifest.requireRegularFileIfPresent(at: options.diskURL) else {
-            throw VPhoneVirtualMachineError.diskNotFound(options.diskURL.path)
+        if case let .file(url) = options.disk {
+            guard try VPhoneVirtualMachineManifest.requireRegularFileIfPresent(at: url) else {
+                throw VPhoneVirtualMachineError.diskNotFound(url.path)
+            }
         }
         let others = [options.nvramURL, options.sepStorageURL, options.romURL, options.sepRomURL]
         for case let url? in others {
@@ -545,5 +681,56 @@ class VPhoneVirtualMachine: NSObject, VZVirtualMachineDelegate {
         attachmentWasDisconnectedWithError error: Error,
     ) {
         print("[vphone] Network error: \(error)")
+    }
+
+    // MARK: - NBD disk
+
+    private func networkDiskConnected(_ url: String) {
+        guard var status = networkDiskStatus else { return }
+        status.connected = true
+        status.connections += 1
+        status.lastConnected = Date()
+        networkDiskStatus = status
+        print(status.connections == 1
+            ? "[nbd] connected to \(url)"
+            : "[nbd] reconnected to \(url) (connection \(status.connections))")
+    }
+
+    /// The client gives up for good: the guest's disk is gone, and every
+    /// request it makes from now on fails or hangs. The VM is stopped rather
+    /// than left running without a disk, so whoever supervises it sees the
+    /// process end and can cold-start it once the export is back.
+    private func networkDiskFailed(_ url: String, _ message: String) {
+        networkDiskStatus?.connected = false
+        networkDiskStatus?.fatalError = message
+        print("[nbd] lost \(url) for good: \(message). Stopping the VM.")
+        virtualMachine.delegate = nil
+        nonisolated(unsafe) let vm = virtualMachine
+        Task { @MainActor in
+            try? await vm.stop()
+            exit(EXIT_FAILURE)
+        }
+    }
+}
+
+/// Receives `VZNetworkBlockDeviceStorageDeviceAttachment`'s callbacks, on
+/// whatever queue Virtualization uses, and hands them to the main actor.
+@MainActor
+final class VPhoneNBDAttachmentObserver: NSObject, VZNetworkBlockDeviceStorageDeviceAttachmentDelegate {
+    var onConnected: ((String) -> Void)?
+    var onFailed: ((String, String) -> Void)?
+
+    /// On every connection, including each reconnect after a timeout or a
+    /// recoverable error; reconnects are invisible to the guest.
+    nonisolated func attachmentWasConnected(_ attachment: VZNetworkBlockDeviceStorageDeviceAttachment) {
+        let url = attachment.url.absoluteString
+        Task { @MainActor [weak self] in self?.onConnected?(url) }
+    }
+
+    /// The client is non-functional from now on.
+    nonisolated func attachment(_ attachment: VZNetworkBlockDeviceStorageDeviceAttachment, didEncounterError error: Error) {
+        let url = attachment.url.absoluteString
+        let message = "\(error)"
+        Task { @MainActor [weak self] in self?.onFailed?(url, message) }
     }
 }
