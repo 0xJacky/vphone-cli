@@ -8,6 +8,7 @@ Start with the [Launchpad quick start](../README.md#get-started). For terminal u
 | [Host Setup](Guides/host-setup.md) | Apple Silicon, SIP and AMFI settings, signing and preflight |
 | [Create and Run](Guides/create-and-run.md) | Firmware inputs, full or manual pipeline, vphoned, storage and backups |
 | [Snapshots](Guides/snapshots.md) | Saving a stopped VM's disk state and reverting to it |
+| [Freezing, NBD Disks and Cold Migration](Guides/suspend-and-migration.md) | Pause and save-state on the same Mac, disks on an NBD server, the `MachineState/` layout |
 | [Compatibility](Guides/compatibility.md) | Verified firmware pairs and what the checks prove |
 | [iPadOS Guests](Guides/ipados.md) | Running iPadOS from an iPad restore IPSW instead of iOS |
 | [Other iPhone Models](Guides/iphone-models.md) | Running iOS from an iPhone 16 Pro, 17, 17 Pro, Air or other model's IPSW |
