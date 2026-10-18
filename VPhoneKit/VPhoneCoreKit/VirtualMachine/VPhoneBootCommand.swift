@@ -72,6 +72,21 @@ public struct VPhoneBootCommand: ParsableCommand {
     )
     public var installIPA: URL?
 
+    @Option(
+        help: "Resume from a state saved by `vm save-state` (a directory) instead of booting. Same Mac only.",
+        transform: URL.init(fileURLWithPath:),
+    )
+    public var restoreState: URL?
+
+    @Flag(
+        inversion: .prefixedNo,
+        help: "When --restore-state cannot be used, boot the guest normally instead of exiting.",
+    )
+    public var coldBootFallback: Bool = true
+
+    @Flag(help: "PoC only: hand a state saved on another Mac to Virtualization instead of refusing it first. It still fails there.")
+    public var restoreFromOtherHost: Bool = false
+
     public init() {}
 
     /// Construct a forwarding command without leaving any ArgumentParser
@@ -84,6 +99,9 @@ public struct VPhoneBootCommand: ParsableCommand {
         kernelDebugPort: Int? = nil,
         vphonedBin: String = ".vphoned.signed",
         installIPA: URL? = nil,
+        restoreState: URL? = nil,
+        coldBootFallback: Bool = true,
+        restoreFromOtherHost: Bool = false,
     ) {
         self.config = config
         self.dfu = dfu
@@ -92,6 +110,9 @@ public struct VPhoneBootCommand: ParsableCommand {
         self.kernelDebugPort = kernelDebugPort
         self.vphonedBin = vphonedBin
         self.installIPA = installIPA
+        self.restoreState = restoreState
+        self.coldBootFallback = coldBootFallback
+        self.restoreFromOtherHost = restoreFromOtherHost
     }
 
     /// DFU mode is always headless.
@@ -133,6 +154,10 @@ public struct VPhoneBootCommand: ParsableCommand {
         if dfu, apiListen != nil {
             throw ValidationError("`--api-listen` is unavailable with `--dfu`.")
         }
+        if dfu, restoreState != nil {
+            throw ValidationError("`--restore-state` is unavailable with `--dfu`: a saved state resumes a running guest.")
+        }
+        try VPhoneMachineStateLayout.requireLaunchable(bundle)
         if let apiListen {
             let address = URLComponents(string: "tcp://\(apiListen)")
             guard let address, let host = address.host, !host.isEmpty,
@@ -187,6 +212,15 @@ public struct VPhoneBootCommand: ParsableCommand {
         }
         if let ipa = installIPA {
             args += ["--install-ipa", ipa.path]
+        }
+        if let restoreState {
+            args += ["--restore-state", restoreState.path]
+        }
+        if !coldBootFallback {
+            args.append("--no-cold-boot-fallback")
+        }
+        if restoreFromOtherHost {
+            args.append("--restore-from-other-host")
         }
         return args
     }

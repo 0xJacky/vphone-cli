@@ -76,7 +76,8 @@ public enum VPhoneBundleTransfer {
         in library: VPhoneLibrary,
         progress: ((Int64, Int64) -> Void)? = nil,
     ) throws -> URL {
-        _ = try library.bundle(named: name) // validate it exists
+        // An archive of an NBD machine would hold its SEP storage without the disk it pairs with.
+        try library.bundle(named: name).requireLocalDisk(for: "export")
         var isDir: ObjCBool = false
         let outFile = FileManager.default.fileExists(atPath: outFile.path, isDirectory: &isDir)
             && isDir.boolValue

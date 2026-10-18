@@ -18,9 +18,16 @@ import Foundation
 /// may not connect to is running.
 public enum VPhoneBundleActivity {
     /// The files a running VM holds open, and the ones a clone, snapshot or
-    /// revert must take together, by their names inside the bundle.
+    /// revert must take together, by their paths inside the bundle
+    /// (`MachineState/nvram.bin` in the state-directory layout). An NBD disk
+    /// is not a file here and is left out; operations that must take the disk
+    /// along refuse such a machine first (`VPhoneBundle.requireLocalDisk`).
     public static func stateFileNames(of bundle: VPhoneBundle) -> [String] {
-        [bundle.manifest.diskImage, bundle.manifest.sepStorage, bundle.manifest.nvramStorage]
+        var names: [String] = []
+        if let disk = bundle.manifest.diskLocation.fileName {
+            names.append(disk)
+        }
+        return names + [bundle.manifest.sepStorage, bundle.manifest.nvramStorage]
     }
 
     /// Throws `VPhoneBundleActivityError.running` unless the machine is stopped.

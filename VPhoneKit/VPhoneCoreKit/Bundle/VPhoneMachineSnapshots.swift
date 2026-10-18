@@ -159,6 +159,7 @@ public enum VPhoneMachineSnapshots {
         now: Date = Date(),
     ) throws -> VPhoneMachineSnapshot {
         try requireValidName(name)
+        try bundle.requireLocalDisk(for: "snapshot")
         let root = directory(of: bundle)
         let destination = root.appendingPathComponent(name, isDirectory: true)
         if FileManager.default.fileExists(atPath: destination.path) {
@@ -168,11 +169,11 @@ public enum VPhoneMachineSnapshots {
 
         var files: [String] = []
         var absent: [String] = []
-        for file in VPhoneBundleActivity.stateFileNames(of: bundle) {
-            guard isRegularFile(bundle.url.appendingPathComponent(file)) else {
-                throw VPhoneMachineSnapshotError.missingStateFile(machine: bundle.name, file: file)
+        for live in VPhoneBundleActivity.stateFileNames(of: bundle) {
+            guard isRegularFile(bundle.url.appendingPathComponent(live)) else {
+                throw VPhoneMachineSnapshotError.missingStateFile(machine: bundle.name, file: live)
             }
-            files.append(file)
+            files.append(snapshotName(of: live))
         }
         for file in optionalStateFileNames {
             if isRegularFile(bundle.url.appendingPathComponent(file)) {
@@ -187,9 +188,10 @@ public enum VPhoneMachineSnapshots {
         let staging = root.appendingPathComponent(".creating-\(UUID().uuidString)", isDirectory: true)
         try fm.createDirectory(at: staging, withIntermediateDirectories: false)
         do {
+            let live = liveNames(of: bundle)
             for file in files {
                 try cloneFile(
-                    bundle.url.appendingPathComponent(file),
+                    bundle.url.appendingPathComponent(live[file] ?? file),
                     to: staging.appendingPathComponent(file),
                 )
             }
@@ -236,6 +238,7 @@ public enum VPhoneMachineSnapshots {
     /// one or the snapshot's, never a mix.
     @discardableResult
     public static func revert(to name: String, of bundle: VPhoneBundle) throws -> VPhoneMachineSnapshot {
+        try bundle.requireLocalDisk(for: "revert")
         let snapshot = try snapshot(named: name, of: bundle)
         let source = directory(of: bundle).appendingPathComponent(name, isDirectory: true)
         try requireValidFileLists(of: snapshot, bundle: bundle)
@@ -280,10 +283,11 @@ public enum VPhoneMachineSnapshots {
     /// are undone in reverse.
     private static func replaceLiveFiles(with snapshot: VPhoneMachineSnapshot, staged staging: URL, in bundle: VPhoneBundle) throws {
         let absent = Set(snapshot.absentFiles)
+        let liveNames = liveNames(of: bundle)
         var steps: [SwapStep] = []
         do {
             for file in snapshot.files + snapshot.absentFiles {
-                let live = bundle.url.appendingPathComponent(file).path
+                let live = bundle.url.appendingPathComponent(liveNames[file] ?? file).path
                 let aside = staging.appendingPathComponent("old-\(file)").path
                 let movedAside = rename(live, aside) == 0
                 if !movedAside, errno != ENOENT {
@@ -316,8 +320,9 @@ public enum VPhoneMachineSnapshots {
     /// the files it could not put back.
     private static func undo(_ steps: [SwapStep], staging: URL, bundle: VPhoneBundle) -> [String] {
         var notRestored: [String] = []
+        let liveNames = liveNames(of: bundle)
         for step in steps.reversed() {
-            let live = bundle.url.appendingPathComponent(step.file).path
+            let live = bundle.url.appendingPathComponent(liveNames[step.file] ?? step.file).path
             if step.movedAside {
                 // Replaces the placed snapshot copy, if any, in one rename.
                 if rename(staging.appendingPathComponent("old-\(step.file)").path, live) != 0 {
@@ -360,7 +365,7 @@ public enum VPhoneMachineSnapshots {
         func damaged(_ reason: String) -> VPhoneMachineSnapshotError {
             .damaged(name: snapshot.name, reason: reason)
         }
-        let required = VPhoneBundleActivity.stateFileNames(of: bundle)
+        let required = VPhoneBundleActivity.stateFileNames(of: bundle).map(snapshotName(of:))
         let known = Set(required + optionalStateFileNames)
         let listed = snapshot.files + snapshot.absentFiles
         if let unknown = listed.first(where: { !known.contains($0) }) {
@@ -375,6 +380,23 @@ public enum VPhoneMachineSnapshots {
         if Set(listed).count != listed.count {
             throw damaged("it lists a state file more than once")
         }
+    }
+
+    /// A snapshot keeps each state file under its own name, flat, whichever
+    /// layout the machine had (`MachineState/nvram.bin` is kept as
+    /// `nvram.bin`), so the snapshot format is the same in both layouts and a
+    /// snapshot taken before a move between layouts still reverts after it.
+    static func snapshotName(of live: String) -> String {
+        (live as NSString).lastPathComponent
+    }
+
+    /// Snapshot name to live path inside the bundle, for this machine's layout.
+    static func liveNames(of bundle: VPhoneBundle) -> [String: String] {
+        var names: [String: String] = [:]
+        for live in VPhoneBundleActivity.stateFileNames(of: bundle) {
+            names[snapshotName(of: live)] = live
+        }
+        return names
     }
 
     /// An APFS clone, never a copy. Symbolic links are not followed.
