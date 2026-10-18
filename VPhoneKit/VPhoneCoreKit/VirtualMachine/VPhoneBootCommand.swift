@@ -84,7 +84,7 @@ public struct VPhoneBootCommand: ParsableCommand {
     )
     public var coldBootFallback: Bool = true
 
-    @Flag(help: "PoC only: hand a state saved on another Mac to Virtualization instead of refusing it first. It still fails there.")
+    @Flag(help: "PoC only: hand a state saved on another Mac (and its copied disk) to Virtualization instead of refusing it first. It still fails there.")
     public var restoreFromOtherHost: Bool = false
 
     public init() {}
