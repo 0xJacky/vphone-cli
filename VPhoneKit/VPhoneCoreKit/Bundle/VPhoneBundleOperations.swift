@@ -332,6 +332,7 @@ public enum VPhoneBundleOperations {
         afterCopy: () throws -> Void,
     ) throws -> VPhoneBundle {
         try requireValidName(newName)
+        try source.requireLocalDisk(for: "clone")
         let src = source.url
         let dst = library.url(forName: newName)
         let fm = FileManager.default
@@ -383,10 +384,13 @@ public enum VPhoneBundleOperations {
     /// Left out of every clone: snapshots record the source's history, not
     /// the copy's, the control socket is the stopped source's, and a
     /// template's record would make its clone a template that never boots.
+    /// A saved machine state is the source's memory, bound to its disk as it
+    /// was, and to this Mac.
     private static let droppedFromClone: Set<String> = [
         VPhoneMachineSnapshots.directoryName,
         "vphone.sock",
         VPhoneMachineTemplates.recordFileName,
+        VPhoneSavedMachineState.defaultDirectoryName,
     ]
 
     /// The network settings a new-identity clone drops, described for display.
@@ -453,6 +457,8 @@ public enum VPhoneBundleOperations {
         let updated = bundle.manifest.updating(machineIdentifier: Data(), networkConfig: network)
         try updated.write(to: bundle.configURL)
         try removeIfPresent(bundle.url.appendingPathComponent("udid-prediction.txt"))
+        // Otherwise the first boot would adopt the source's identity from it.
+        try removeIfPresent(VPhoneMachineStateLayout.identityURL(of: bundle))
         return VPhoneBundle(url: bundle.url, manifest: updated)
     }
 
@@ -491,6 +497,8 @@ public enum VPhoneBundleOperations {
         VPhoneMachineSnapshots.directoryName,
         ".snapshot-revert-*",
         VPhoneDiskRebase.stagingPrefix + "*",
+        // Only restorable on the Mac that saved it.
+        VPhoneSavedMachineState.defaultDirectoryName,
         // An imported machine is a full copy that shares no block with the
         // template its source was cloned from.
         VPhoneMachineTemplates.sourceFileName,

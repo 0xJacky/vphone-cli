@@ -33,6 +33,14 @@ public struct VPhoneBundleReport: Codable, Equatable, Sendable {
     /// The SEP ROM the machine starts its SEP from: `opensep` or `apple`, nil
     /// as for `bootROM`. Added with OpenSEP.
     public let sepROM: String?
+    /// The NBD URL when the disk is on an NBD server; nil for a disk file.
+    /// Optional, like everything added after 2.10, so reports from older
+    /// bundles still decode.
+    public let networkDisk: String?
+    /// `legacy` or `state-directory` (`VPhoneMachineStateLayout`).
+    public let stateLayout: String?
+    /// Whether `SavedState/` holds a state `vm restore-state` would use.
+    public let hasSavedState: Bool?
 
     public init(bundle: VPhoneBundle) {
         name = bundle.name
@@ -57,5 +65,14 @@ public struct VPhoneBundleReport: Codable, Equatable, Sendable {
         syncsHostLocation = bundle.manifest.sharesHostLocation
         bootROM = VPhoneBootROM.kind(ofMachineAt: bundle.url)?.rawValue
         sepROM = VPhoneSEPROM.kind(ofMachineAt: bundle.url)?.rawValue
+        if case let .networkBlockDevice(location) = bundle.manifest.diskLocation {
+            networkDisk = location.urlString
+        } else {
+            networkDisk = nil
+        }
+        stateLayout = VPhoneMachineStateLayout.kind(of: bundle.manifest)?.rawValue
+        hasSavedState = VPhoneSavedMachineState.hasUsableState(
+            in: VPhoneSavedMachineState.defaultDirectory(of: bundle.url),
+        )
     }
 }

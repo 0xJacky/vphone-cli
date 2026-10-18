@@ -295,6 +295,8 @@ public enum VPhoneDiskRebase {
         guard target.name != base.name else {
             throw VPhoneDiskRebaseError.sameMachine(name: target.name)
         }
+        try target.requireLocalDisk(for: "rebase")
+        try base.requireLocalDisk(for: "rebase onto")
         let targetImage = target.url.appendingPathComponent(target.manifest.diskImage)
         let baseImage = base.url.appendingPathComponent(base.manifest.diskImage)
         for (bundle, image) in [(target, targetImage), (base, baseImage)] {

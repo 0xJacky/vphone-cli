@@ -84,6 +84,7 @@ enum VPhoneMachineTemplateTrimmer {
     /// `Disk.img`: a regular file with one link, owned by the account that
     /// started a sudo run when there is one.
     private static func diskImage(of bundle: VPhoneBundle) throws -> URL {
+        try bundle.requireLocalDisk(for: "trim")
         let disk = bundle.url.appendingPathComponent(bundle.manifest.diskImage)
         var info = stat()
         guard lstat(disk.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_nlink == 1 else {

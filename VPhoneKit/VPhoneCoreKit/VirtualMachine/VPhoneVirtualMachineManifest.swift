@@ -131,10 +131,16 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
 
     // MARK: - Storage
 
-    /// Disk image filename
+    /// Disk image file name, or an `nbd://host[:port]/export` URL; see
+    /// `diskLocation`.
     public let diskImage: String
 
-    /// NVRAM storage filename
+    /// How an NBD disk is attached. Nil for a file disk, and for an NBD disk
+    /// that takes the defaults.
+    public let nbd: NBDOptions?
+
+    /// NVRAM (`VZMacAuxiliaryStorage`) file name: `nvram.bin` at the folder
+    /// root, or `MachineState/nvram.bin` (see `VPhoneMachineStateLayout`).
     public let nvramStorage: String
 
     // MARK: - ROMs
@@ -144,7 +150,7 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
 
     // MARK: - SEP
 
-    /// SEP storage filename
+    /// SEP storage file name, laid out like `nvramStorage`.
     public let sepStorage: String
 
     // MARK: - Guest Device
@@ -371,6 +377,7 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
         hardwareKeyboardEnabled: Bool? = nil,
         unlocksAtStartup: Bool? = nil,
         syncsHostLocation: Bool? = nil,
+        nbd: NBDOptions? = nil,
     ) {
         schemaVersion = Self.currentSchemaVersion
         self.platformType = platformType
@@ -388,6 +395,7 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
         self.hardwareKeyboardEnabled = hardwareKeyboardEnabled
         self.unlocksAtStartup = unlocksAtStartup
         self.syncsHostLocation = syncsHostLocation
+        self.nbd = nbd
     }
 
     // MARK: - Creation
@@ -489,10 +497,44 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
     /// imported config.plist is untrusted, and vphone-vm overwrites the NVRAM
     /// file and attaches the disk read-write, so a `../` name would reach any
     /// file the user can write.
+    ///
+    /// Two exceptions, each spelled so that builds from before it refuse the
+    /// manifest instead of misreading it: the disk may be an `nbd://` URL,
+    /// and NVRAM and SEP storage may both sit in `MachineState/`.
     func validateFileNames(configPath: String) throws {
-        for (field, name) in bundleFileNames where !Self.isPlainFileName(name) {
-            throw VPhoneManifestError.invalidPath(path: configPath, field: field)
+        for (field, name) in bundleFileNames {
+            switch field {
+            case "diskImage":
+                guard (try? VPhoneDiskLocation(manifestValue: name)) != nil else {
+                    throw VPhoneManifestError.invalidPath(path: configPath, field: field)
+                }
+            case "nvramStorage", "sepStorage":
+                guard Self.isStateFileName(name) else {
+                    throw VPhoneManifestError.invalidPath(path: configPath, field: field)
+                }
+            default:
+                guard Self.isPlainFileName(name) else {
+                    throw VPhoneManifestError.invalidPath(path: configPath, field: field)
+                }
+            }
         }
+        guard VPhoneMachineStateLayout.kind(of: self) != nil else {
+            throw VPhoneManifestError.invalidPath(path: configPath, field: "nvramStorage and sepStorage (one is in MachineState/, the other is not)")
+        }
+        do {
+            try nbd?.validate()
+        } catch {
+            throw VPhoneManifestError.invalidPath(path: configPath, field: "nbd.timeoutSeconds")
+        }
+    }
+
+    /// A plain name, or `MachineState/` and a plain name.
+    static func isStateFileName(_ name: String) -> Bool {
+        if isPlainFileName(name) {
+            return true
+        }
+        let prefix = VPhoneMachineStateLayout.directoryName + "/"
+        return name.hasPrefix(prefix) && isPlainFileName(String(name.dropFirst(prefix.count)))
     }
 
     // MARK: - Convenience
@@ -502,15 +544,22 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
     /// `load(from:)` already rejects names that are not plain; this refuses
     /// them again so no caller can reach outside the bundle with a manifest
     /// built some other way.
+    ///
+    /// `MachineState/<name>` resolves inside that subfolder; nothing else may
+    /// name a subfolder. An `nbd://` disk is not a file and is refused here:
+    /// callers switch on `diskLocation` first.
     public func resolve(path: String, in vmDirectory: URL) throws -> URL {
         let configPath = vmDirectory.appendingPathComponent("config.plist").path
-        guard Self.isPlainFileName(path) else {
+        guard Self.isStateFileName(path) else {
             throw VPhoneManifestError.invalidPath(path: configPath, field: "file name \"\(path)\"")
         }
         let url = vmDirectory.appendingPathComponent(path, isDirectory: false)
-        guard url.deletingLastPathComponent().standardizedFileURL.path
-            == vmDirectory.standardizedFileURL.path
-        else {
+        let parent = url.deletingLastPathComponent().standardizedFileURL.path
+        let root = vmDirectory.standardizedFileURL.path
+        let stateDirectory = vmDirectory
+            .appendingPathComponent(VPhoneMachineStateLayout.directoryName, isDirectory: true)
+            .standardizedFileURL.path
+        guard parent == root || parent == stateDirectory else {
             throw VPhoneManifestError.invalidPath(path: configPath, field: "file name \"\(path)\"")
         }
         return url
@@ -574,6 +623,53 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
             hardwareKeyboardEnabled: hardwareKeyboardEnabled ?? self.hardwareKeyboardEnabled,
             unlocksAtStartup: unlocksAtStartup ?? self.unlocksAtStartup,
             syncsHostLocation: syncsHostLocation ?? self.syncsHostLocation,
+            nbd: nbd,
+        )
+    }
+
+    /// This manifest with another disk, or other NBD options. Passing
+    /// `nbd: .some(nil)` clears the options.
+    public func updating(diskImage: String? = nil, nbd: NBDOptions?? = nil) -> VPhoneVirtualMachineManifest {
+        VPhoneVirtualMachineManifest(
+            platformType: platformType,
+            platformFusing: platformFusing,
+            machineIdentifier: machineIdentifier,
+            cpuCount: cpuCount,
+            memorySize: memorySize,
+            screenConfig: screenConfig,
+            networkConfig: networkConfig,
+            diskImage: diskImage ?? self.diskImage,
+            nvramStorage: nvramStorage,
+            romImages: romImages,
+            sepStorage: sepStorage,
+            guestProductType: guestProductType,
+            hardwareKeyboardEnabled: hardwareKeyboardEnabled,
+            unlocksAtStartup: unlocksAtStartup,
+            syncsHostLocation: syncsHostLocation,
+            nbd: nbd ?? self.nbd,
+        )
+    }
+
+    /// This manifest with NVRAM and SEP storage at other names, for moving
+    /// them in or out of `MachineState/`.
+    public func updating(nvramStorage: String, sepStorage: String) -> VPhoneVirtualMachineManifest {
+        VPhoneVirtualMachineManifest(
+            platformType: platformType,
+            platformFusing: platformFusing,
+            machineIdentifier: machineIdentifier,
+            cpuCount: cpuCount,
+            memorySize: memorySize,
+            screenConfig: screenConfig,
+            networkConfig: networkConfig,
+            diskImage: diskImage,
+            nvramStorage: nvramStorage,
+            romImages: romImages,
+            sepStorage: sepStorage,
+            guestProductType: guestProductType,
+            hardwareKeyboardEnabled: hardwareKeyboardEnabled,
+            unlocksAtStartup: unlocksAtStartup,
+            syncsHostLocation: syncsHostLocation,
+            nbd: nbd,
         )
     }
 
@@ -595,6 +691,7 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
             hardwareKeyboardEnabled: hardwareKeyboardEnabled,
             unlocksAtStartup: unlocksAtStartup,
             syncsHostLocation: syncsHostLocation,
+            nbd: nbd,
         )
     }
 
@@ -618,6 +715,7 @@ public struct VPhoneVirtualMachineManifest: Codable, Sendable {
             hardwareKeyboardEnabled: hardwareKeyboardEnabled,
             unlocksAtStartup: unlocksAtStartup,
             syncsHostLocation: syncsHostLocation,
+            nbd: nbd,
         )
     }
 }
