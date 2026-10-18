@@ -228,8 +228,10 @@ public struct VPhoneSavedStateBinding: Codable, Equatable, Sendable {
         }
     }
 
-    /// `allowOtherHost` only skips vphone's own host check, so PoC F2 can see
-    /// Virtualization's answer; it never makes a restore on another Mac work.
+    /// `allowOtherHost` only skips vphone's own host check, and the disk
+    /// fingerprint, which a copy on another Mac never matches (another device
+    /// and inode), so PoC F2 can see Virtualization's answer; it never makes a
+    /// restore on another Mac work.
     public func verify(against current: Current, allowOtherHost: Bool = false) -> Verification {
         var result = Verification()
         if let invalidated {
@@ -255,7 +257,12 @@ public struct VPhoneSavedStateBinding: Codable, Equatable, Sendable {
         }
         switch (disk, current.disk) {
         case let (saved?, now?) where saved != now:
-            result.refusals.append("the disk image changed since it was saved; the guest's memory would no longer match its disk")
+            let reason = "the disk image changed since it was saved; the guest's memory would no longer match its disk"
+            if allowOtherHost {
+                result.warnings.append(reason)
+            } else {
+                result.refusals.append(reason)
+            }
         case (_?, nil):
             result.refusals.append("the disk image it was saved with is gone")
         case (nil, _):

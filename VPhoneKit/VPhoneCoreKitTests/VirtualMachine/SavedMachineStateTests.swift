@@ -89,9 +89,12 @@ struct SavedMachineStateTests {
     @Test func `another Mac is refused unless the PoC flag asks to try`() {
         let refused = binding(disk: disk).verify(against: current(host: "HOST-B", disk: disk))
         #expect(refused.refusals.contains { $0.contains("another Mac") })
-        let tried = binding(disk: disk).verify(against: current(host: "HOST-B", disk: disk), allowOtherHost: true)
+        // A copy on the other Mac has another device and inode.
+        let copied = VPhoneDiskFingerprint(device: 9, inode: 9, size: 3, modifiedSeconds: 4, modifiedNanoseconds: 5)
+        let tried = binding(disk: disk).verify(against: current(host: "HOST-B", disk: copied), allowOtherHost: true)
         #expect(tried.isRestorable)
         #expect(tried.warnings.contains { $0.contains("another Mac") })
+        #expect(tried.warnings.contains { $0.contains("disk image changed") })
     }
 
     @Test func `a macOS update only warns`() {
