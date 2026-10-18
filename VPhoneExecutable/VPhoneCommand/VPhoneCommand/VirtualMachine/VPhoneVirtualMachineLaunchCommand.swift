@@ -28,15 +28,39 @@ struct VPhoneVirtualMachineLaunchCommand: ParsableCommand {
     }
 
     func run() throws {
+        try Self.launch(
+            name: name,
+            library: lib.library,
+            dfu: dfu,
+            headless: headless,
+            apiListen: apiListen,
+            kernelDebugPort: kernelDebugPort,
+            projectRoot: projectRoot,
+            verboseCount: verboseCount,
+        )
+    }
+
+    /// Shared with `vm restore-state`, which is this with a saved state.
+    static func launch(
+        name: String?,
+        library: VPhoneLibrary,
+        dfu: Bool,
+        headless: Bool,
+        apiListen: String?,
+        kernelDebugPort: Int?,
+        projectRoot: String?,
+        verboseCount: Int,
+        restore: (state: URL, coldBootFallback: Bool, fromOtherHost: Bool)? = nil,
+    ) throws {
         let v = VPhoneVerbosity(count: verboseCount)
         if name == nil {
-            let scan = try lib.library.scan()
+            let scan = try library.scan()
             if scan.bundles.isEmpty, let incompatible = scan.skipped.first {
                 throw ValidationError("VM '\(incompatible.name)' cannot launch: \(incompatible.reason)")
             }
         }
-        let name = try VPhoneVirtualMachineSelection.resolveExisting(name, in: lib.library)
-        let bundle = try lib.library.bundle(named: name)
+        let name = try VPhoneVirtualMachineSelection.resolveExisting(name, in: library)
+        let bundle = try library.bundle(named: name)
         try VPhoneMachineTemplates.requireBootable(bundleURL: bundle.url)
         defer {
             do { try VPhoneHostFilePermissions.makeAccessible(at: bundle.url) }
@@ -74,6 +98,9 @@ struct VPhoneVirtualMachineLaunchCommand: ParsableCommand {
             headless: headless,
             apiListen: apiListen,
             kernelDebugPort: kernelDebugPort,
+            restoreState: restore?.state,
+            coldBootFallback: restore?.coldBootFallback ?? true,
+            restoreFromOtherHost: restore?.fromOtherHost ?? false,
         )
         let args = boot.bootArguments
 
@@ -118,7 +145,11 @@ struct VPhoneVirtualMachineStopCommand: ParsableCommand {
         // it must be the bundle's own disk: a plain name inside the bundle and
         // a regular file, never a symbolic link to something shared like
         // /dev/null.
-        let disk = try bundle.manifest.resolve(path: bundle.manifest.diskImage, in: bundle.url)
+        //
+        // An NBD disk is not a file here; the SEP storage stands in for it,
+        // which Virtualization's service holds open the same way.
+        let held = bundle.manifest.diskLocation.fileName ?? bundle.manifest.sepStorage
+        let disk = try bundle.manifest.resolve(path: held, in: bundle.url)
         guard try VPhoneVirtualMachineManifest.requireRegularFileIfPresent(at: disk) else {
             print("\(name): not running")
             return

@@ -16,12 +16,20 @@ extension VPhoneBootCommand {
         print("[vphone] Loaded VM manifest from \(config.path)")
 
         let vmDir = config.deletingLastPathComponent()
+        try VPhoneMachineStateLayout.requireLaunchable(VPhoneBundle(url: vmDir, manifest: manifest))
+
+        let disk: VPhoneVirtualMachine.Options.Disk = switch manifest.diskLocation {
+        case .file:
+            try .file(manifest.resolve(path: manifest.diskImage, in: vmDir))
+        case let .networkBlockDevice(location):
+            .networkBlockDevice(location, manifest.nbd ?? .init())
+        }
 
         return try VPhoneVirtualMachine.Options(
             configURL: config,
             romURL: manifest.romImages.map { try manifest.resolve(path: $0.avpBooter, in: vmDir) },
             nvramURL: manifest.resolve(path: manifest.nvramStorage, in: vmDir),
-            diskURL: manifest.resolve(path: manifest.diskImage, in: vmDir),
+            disk: disk,
             cpuCount: Int(manifest.cpuCount),
             memorySize: manifest.memorySize,
             sepStorageURL: manifest.resolve(path: manifest.sepStorage, in: vmDir),
@@ -37,7 +45,8 @@ extension VPhoneBootCommand {
             isHomePodGuest: manifest.guestDevice.family == .homePod,
             isHomeViewGuest: manifest.guestDevice.family == .homeView,
             isWatchGuest: manifest.guestDevice.family == .watch,
-            isFoldableGuest: manifest.guestDevice == .iPhone19_4
+            isFoldableGuest: manifest.guestDevice == .iPhone19_4,
+            stateLayout: VPhoneMachineStateLayout.kind(of: manifest) ?? .legacy,
         )
     }
 }

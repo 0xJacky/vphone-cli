@@ -6,6 +6,9 @@ enum VPhoneVirtualMachineError: Error, CustomStringConvertible {
     case diskNotFound(String)
     case invalidKernelDebugPort(Int)
     case apiSocketUnavailable
+    case machineIdentityMismatch(String)
+    case notRunning(String)
+    case saveRestoreUnsupported(String)
 
     var description: String {
         switch self {
@@ -25,6 +28,12 @@ enum VPhoneVirtualMachineError: Error, CustomStringConvertible {
             "Invalid kernel debug port: \(port) (expected 6000...65535)"
         case .apiSocketUnavailable:
             "VM has no VSOCK device for the API proxy"
+        case let .machineIdentityMismatch(reason):
+            "Refusing to start: \(reason)"
+        case let .notRunning(state):
+            "The VM is \(state); it must be running or paused."
+        case let .saveRestoreUnsupported(reason):
+            "Virtualization cannot save this VM's state. Blocked by: \(reason)"
         }
     }
 }
