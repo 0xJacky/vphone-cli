@@ -206,6 +206,55 @@
 > donor tree only into its installed identity. No new kernel instruction patch.
 > See [HomePod mini support](Firmware/homepod_mini_support.md) for evidence,
 > validation status and limitations.
+
+> **VirtualAudio device-state guard (2026-10-23):**
+> `system-virtualaudio-cfw-device_state_guard` (guest system set, iOS 27, on
+> in `standard`, blocked in `tvos` and `tvos-4k`; verb `cfw
+> patch-virtualaudio-device-state-guard`, riding the shared staged copy with
+> the other four VirtualAudio verbs) stands down the two device-state updates
+> that read the DeviceStateManager singleton before deferred initialization
+> publishes it — the audiomxd crash loop on the iPhone Duo guest, ~0.6 s
+> after every launch, once the four speaker-route patches let the route
+> through. Each gate's `cbz w0, <skip>` becomes an unconditional `b` to the
+> same target. The plugin header gates the patch to arm64e.x1 (cpusubtype 12,
+> iOS 27.1's iPhone19,4): the 26.6.2 and 27.0 plugins are plain arm64e and
+> are left byte-identical. The five other TheInstance callers are
+> HapticAttenuationIODelegate's and are not touched — see the full section
+> below. Live validation on `duotest-m5` is pending a bundle install.
+
+> **ARM64E_X1 whole-cache lowering (2026-10-23):** `dyld-cfw-arm64e_x1_cache`
+> (guest system set, iOS 27, on in `standard`, blocked in `tvos` and
+> `tvos-4k`; verb `cfw patch-arm64e-x1-cache`) lowers the X1 instructions of
+> every shared-cache image outside `dyld-boot-arm64e_x1_bootstrap`'s 38-image
+> closure, with the same planner and replacement table, and re-attests each
+> modified page. Without it every other image faults into launchd's
+> single-threaded on-demand handler once per site per process; on iPhone19,4
+> 27.1 (24A94425) that left launchd at 685 CPU-seconds 18 minutes after boot
+> and FrontBoard killing SwiftUI-heavy extensions at the 10-second scene
+> watchdog. On that cache it writes 24,606,083 instructions in 212,573 page
+> runs across 4,508 images, skips none, and leaves 250,443 unvisited
+> candidates to the on-demand handler; a full pass takes about 95 s on an
+> M5 Pro. The planner's speedups (parallel images, thread-local locale,
+> word-keyed decode cache, verified PC-relative moves, bitmap sets) were each
+> checked to produce byte-identical caches, including the bootstrap patch's
+> output against HEAD. The 27.1 VirtualAudio reveal now accepts
+> `PACIBSPPC`/`RETABSPPC` prologues and returns; the audiomxd crash those
+> four patches triggered on 27.1 is root-caused as the pre-init
+> DeviceStateManager read and fixed by
+> `system-virtualaudio-cfw-device_state_guard` above.
+> See [Duo bring-up](Guest/iphone_duo_bringup.md).
+
+> **Foldable VM sub-type (2026-10-23):** `preboot-cfw-devicetree_foldable_vm_subtype`
+> (guest system set, Preboot device-tree repair, on in `standard`, blocked in
+> `tvos` and `tvos-4k`, not applicable to boards without an entry; verb
+> `cfw patch-dt-foldable-vm-subtype`) rewrites the installed tree's root
+> `target-sub-type` from `V68AP` to Apple's `V68VM2025` during `cfw install`
+> and `cfw update-environment`, never during restore. SpringBoardFoundation
+> then takes its VM path for the fold pose (restore at launch, persist after
+> transitions). vphoned's new `display.posture` drives the pose through the
+> test-automation override (`com.apple.springboard.testautomation` added to
+> `VPhoneDaemon.entitlements`). See [Duo bring-up](Guest/iphone_duo_bringup.md#fold-posture-2026-10-23).
+
 > **iPhone Duo bring-up (2026-10-23, first boot fails):**
 > `iPhone19,4` / V68AP, iOS 27.1 (24A94425), is registered with one outer
 > display and paired with cloudOS 26.4 (23E5207q). Its device tree reports
@@ -4049,3 +4098,79 @@ stderr/stdin streams, legacy fixed-address NAT reporting, patch catalog and reci
 consistency, plus full bundle/Launchpad builds. Firmware fixture tests still
 require the separately held reference IPSWs; a build or synthetic test is not a
 claim that every newly supported OS has been restored and booted on this host.
+
+## VirtualAudio's device-state guard — the null singleton before deferred init (2026-10-23)
+
+`system-virtualaudio-cfw-device_state_guard` (new), same
+`VirtualAudio.plugin` binary, verb `cfw patch-virtualaudio-device-state-guard`,
+riding the same `patchMachO` staged copy as the other four VirtualAudio
+verbs in both `cfw install` and `cfw update-environment`. Patcher:
+`FirmwarePatcher/CustomFirmware/ExecutablePatches/VirtualAudio/CustomFirmwareVirtualAudio.swift`
+(`patchDeviceStateGuard`, anchoring in `locateDeviceStateGuard` and
+`gatedDeviceStateSite`).
+
+**Fault.** With the four speaker-route patches live on iPhone19,4 27.1
+(24A94425, arm64e.x1), audiomxd segfaults (EXC_BAD_ACCESS far=0) ~0.6 s
+after every launch, on queue AudioControl, in the plugin at 0xa16b0
+reached `HALS_AHPPlugIn::ObjectSetPropertyData` ←
+`__vaemVADSerializationListener_block_invoke`. Publishing the route wakes
+`VirtualAudio_Device`'s update (function at 0xa08bc), which pushes the
+route's state at `DeviceStateManager` twice, each push behind its own
+capability gate (checks at 0xfe810 and 0x225b88): gate `bl`, `cbz w0,
+<skip>`, `bl` TheInstance (0x2b2988), `mov x20, x0`, `ldr x21, [x0]` —
+the faulting unchecked read. The singleton's global (0x74ff28) is stored
+only at 0x3ad0a8, inside "Deferred Initialization", after a wait of up to
+8 s for a haptic actuator port a VM does not have; asked earlier,
+TheInstance logs "TheInstance() called before SetInstance()" and returns
+null. The saved VAD serialization state replays the same property write
+into every launch, so one fault is a crash loop. 27.0 carries the same
+gated code (update at 0xa1ee4, TheInstance at 0x2b64ec) but its graph
+never takes the path; none of the other four patches' sites is on it.
+
+**Reveal** (all Capstone-decoded, no literal address). TheInstance is
+found from its own diagnostic: the "TheInstance() called before
+SetInstance()" cstring, referenced exactly once in `__text`; the prologue
+above the reference (`pacibsppc`) is TheInstance's entry. Every direct
+`bl` to that entry — six on 27.1 — is filtered to the gated shape above:
+a call at −8 (the gate check), a `cbz w0` at −4 whose decoded target
+skips forward past the whole update (target beyond the `ldr` at +8), the
+return moved aside at +4 (`mov xN, x0`), and the unchecked dereference at
++8 (`ldr xM, [x0]`). Exactly two callers carry the shape; a build with a
+different count is refused rather than half-patched. The plugin header
+gates everything first: cputype arm64 and cpusubtype (masked of the
+LIB64 bit) 12 — arm64e.x1. Any other subtype reports "nothing to do" and
+writes nothing, which is what keeps 26.6.2 and 27.0 byte-identical; a
+file that is not a thin arm64 image falls through to the anchor's own
+refusal.
+
+**The write.** Each gate's `cbz w0, <skip>` becomes an unconditional `b`
+to the same target (`ARM64Encoder.encodeB`): the gate-check call still
+runs, its answer is no longer read, and the device-state update is
+skipped exactly as when the gate's check answers false — the state the
+VM is always in before SetInstance. After deferred initialization
+completes, TheInstance answers a real singleton and every later update
+reaches the manager. Idempotent: a re-run finds the unconditional branch
+in the gate slot, requires it to skip past the dereference, and writes
+nothing. Verified on the real binaries: 27.1 resolves TheInstance at
+0x2b2988 and rewrites exactly the two gates (0xa16a4 `cbz w0, 0xa16d8`
+→ `b 0xa16d8`, 0x340001a0 → 0x1400000d; 0xa16e0 `cbz w0, 0xa1720` →
+`b 0xa1720`, 0x34000200 → 0x14000010) — six bytes move, a second run is
+byte-identical — and the 27.0 and 26.6.2 plugins report "not an
+arm64e.x1 plugin" with unchanged SHA-256s.
+
+**The callers left alone.** The other five TheInstance callers
+(0x4f7b94, 0x4f7dec, 0x4f9114, 0x5013ac, and the coordinator) all live
+in `HapticAttenuationIODelegate.mm`. The 0x4f7dec caller dereferences
+the singleton unguarded exactly like the crash site (`mov x20, x0; ldr
+x21, [x0]`, field 0x170), but its whole block sits behind a capability
+flag (`tbz w8, #0` at 0x4f7d0c skipping past it) that reads false
+without a Taptic Engine — the same absence that makes deferred
+initialization time out; the other three pass the singleton into
+0x2b30b4, which does dereference unchecked (0x2b30d8) but is reached
+only through the coordinator's activation ("Coordinator active
+(subscriptions set)"), which needs an actuator port. Across the observed
+crash loop neither path ever faulted — every crash is the device-state
+site — so they are unpatched; if a future build ever faults there, the
+guard's matcher refuses (it requires the gate shape) and the site gets
+its own patch. Research detail:
+`Research/Guest/virtualaudio_speaker_route_throws.md`.

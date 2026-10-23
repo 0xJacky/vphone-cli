@@ -685,3 +685,99 @@ its I/O context is `PuffinOutput (VAD [vdef] AggDev N)`. Volume adjusts
 (`Setting hardware volume to -11.97 dB` on device `PuffinOutput`). What still
 kept the tone silent after that was not routing: see `virtio_sound.md` §6 for
 the plugin faults and §7 for the haptic track.
+
+## Layer 5 — the null DeviceStateManager singleton on arm64e.x1 (2026-10-23, decoded)
+
+On iPhone19,4 iOS 27.1 (24A94425) — the arm64e.x1 userland — all four
+patches above apply cleanly (the reveal now reads `pacibsppc` /
+`retabsppc <label>` frames) and the route goes through, and audiomxd
+then segfaults ~0.6 s after every launch: EXC_BAD_ACCESS far=0, queue
+AudioControl, plugin offset 0xa16b0, reached
+`HALS_AHPPlugIn::ObjectSetPropertyData` ←
+`__vaemVADSerializationListener_block_invoke`. Both saved crash reports
+fault at exactly that offset.
+
+The faulting function is `VirtualAudio_Device`'s update (0xa08bc; its
+`retabsppc` names it). After the route is published it pushes the
+route's state at `DeviceStateManager` **twice**, each push gated by a
+capability check:
+
+```
+a169c  ldr  x0, [x19, #0x368]        ; the HAL device
+a16a0  bl   0xfe810                  ; gate 1: DSP-graph property check
+a16a4  cbz  w0, 0xa16d8              ; skip the update when false
+a16a8  bl   0x2b2988                 ; DeviceStateManager::TheInstance()
+a16ac  mov  x20, x0
+a16b0  ldr  x21, [x0]                ; <-- faults: singleton is null
+   …    lock / ldr w20,[vtable+0x150] / unlock / bl 0x225748 …
+a16d8  ldr  x0, [x19, #0x368]
+a16dc  bl   0x225b88                 ; gate 2: capability check
+a16e0  cbz  w0, 0xa1720
+a16e4  bl   0x2b2988                 ; TheInstance again
+a16ec  ldr  x21, [x0]                ; same unchecked read
+   …    lock / read / unlock / ldarb global / bl 0x2259b4 …
+a1720  add  x0, sp, #0xf             ; past both gates
+```
+
+`TheInstance()` (0x2b2988) loads the global at 0x74ff28 and returns it
+on the fast path; when the global is null it logs
+"TheInstance() called before SetInstance()", reloads the global and
+returns that — null. The global is stored exactly once, at 0x3ad0a8
+inside "Deferred Initialization", *after* waiting up to 8 s for a
+haptic actuator port the VM does not have. So the ordering on a 27.1
+guest is: route published → serialization listener pushes saved state →
+device update runs → TheInstance is null → fault. The saved state
+replays on every launch: the crash loop. None of the four patches'
+sites is on this path, and 27.0 (update at 0xa1ee4, TheInstance at
+0x2b64ec, same gated shape) never takes it — its graph's gates answer
+false before the singleton is read.
+
+**The fix** is the fifth binary patch,
+`system-virtualaudio-cfw-device_state_guard` (verb
+`cfw patch-virtualaudio-device-state-guard`, declared in
+FirmwareGuestSystemPatchSet, on in `standard` for iOS 27, blocked for
+tvOS; see `Research/0_binary_patch_comparison.md` for the entry): each
+gate's `cbz w0, <skip>` becomes an unconditional `b` to the same target
+— 0xa16a4: `cbz w0, 0xa16d8` → `b 0xa16d8` (0x340001a0 → 0x1400000d)
+and 0xa16e0: `cbz w0, 0x1720` → `b 0xa1720` (0x34000200 → 0x14000010).
+The gate-check calls still run; their answers are no longer read, and
+both device-state updates are skipped exactly as when a gate answers
+false. Once deferred initialization finishes, TheInstance answers a
+real singleton and every later update reaches the manager.
+
+**Anchoring** follows the file's rules: nothing is a literal address.
+The "TheInstance() called before SetInstance()" cstring is referenced
+exactly once in `__text`; the prologue above that reference is
+TheInstance. Every direct `bl` to it (six on 27.1) is filtered to the
+gated shape — call at −8, `cbz w0` at −4 skipping past the whole
+update, `mov xN, x0` at +4, `ldr xM, [x0]` at +8 — and exactly two
+callers match; any other count refuses. The plugin header gates the
+whole patch to arm64e.x1 (cputype arm64, cpusubtype masked of the
+LIB64 bit == 12): the 26.6.2 and 27.0 plugins (cpusubtype 2) report
+"not an arm64e.x1 plugin", exit 0 and keep their SHA-256s, so the
+installer's shared staged copy costs them nothing.
+
+**The other five callers, examined and left alone.** All are in
+`HapticAttenuationIODelegate.mm`:
+
+| Call | Shape | Why it cannot fault pre-init on this guest |
+| --- | --- | --- |
+| 0x4f7dec | `mov x20,x0; ldr x21,[x0]` — unguarded deref like ours, field 0x170 | The whole block sits behind a capability flag (`tbz w8,#0` @0x4f7d0c skips past it) that reads false without a Taptic Engine — the same absence that makes deferred init time out. |
+| 0x4f7b94, 0x4f9114, 0x5013ac | pass the singleton into 0x2b30b4, which derefs unchecked at 0x2b30d8 | Reached only through the coordinator's activation ("Coordinator active (subscriptions set)" @0x4f91a8), which needs an actuator port to subscribe to. |
+| 0x4f7b94's sibling reads | — | Same coordinator. |
+
+Across the whole observed crash loop neither path ever faulted — both
+crash reports are the device-state site — so they stay unpatched. The
+guard's matcher would refuse them anyway: it requires the `cbz w0` gate
+under the call, which is exactly what distinguishes the two device-state
+updates. If a future build ever faults in the delegate, that site needs
+its own patch.
+
+**Status.** Patcher, declaration, verb, installer wiring, tvOS block
+lists and unit tests are in; the verb patches a copy of the stock 27.1
+plugin (six bytes, the two gate words above) and a second run is
+byte-identical; the 27.0 and 26.6.2 copies are untouched.
+`FirmwarePatcherTests` shows no new failures against a HEAD baseline
+(the fixture suites fail identically on both trees). Not yet done:
+live validation on `duotest-m5` through a bundle install +
+`vphone-launchpad-cli vm set-bundle duotest-m5 <ver> --update-environment`.

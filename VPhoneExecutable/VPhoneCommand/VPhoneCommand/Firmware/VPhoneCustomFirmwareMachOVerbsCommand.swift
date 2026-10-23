@@ -351,7 +351,8 @@ struct VPhoneCustomFirmwarePatchVirtualAudioMuteCommand: ParsableCommand {
         "Unable to set property data." EXCEPTION log directly above the
         throw — iOS 27's wrapper holds a second, unrelated CAException that
         the window rules out. The epilogue is the wrapper's single `retab`
-        walked back to its entry. No address is literal.
+        (`retabsppc` on an X1 userland) walked back to its entry. No address
+        is literal.
 
         Idempotent: a site already holding the branch is reported and left
         alone, byte for byte.
@@ -489,6 +490,68 @@ struct VPhoneCustomFirmwarePatchVirtualAudioVolumeGateCommand: ParsableCommand {
     }
 }
 
+// MARK: - patch-virtualaudio-device-state-guard
+
+struct VPhoneCustomFirmwarePatchVirtualAudioDeviceStateGuardCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "patch-virtualaudio-device-state-guard",
+        abstract: "Keep VirtualAudio's device-state updates off the null DeviceStateManager singleton",
+        discussion: """
+        Publishing the speaker route wakes VirtualAudio_Device's update,
+        which pushes the route's state at DeviceStateManager — but the
+        manager's singleton is published only at the end of deferred
+        initialization, which first waits for a haptic actuator port a VM
+        does not have. Asked earlier, the singleton's accessor logs
+        "TheInstance() called before SetInstance()", returns null, and the
+        update dereferences it: audiomxd crash-loops seconds after every
+        launch on an arm64e.x1 guest once the speaker-route patches let
+        the route through.
+
+        The patch stands the two device-state updates down. Each sits
+        behind its own gate — a capability check whose `cbz w0` already
+        skips the whole update when the check answers false — and that
+        branch is made unconditional, to the same target. The gate-check
+        call keeps running; its answer is no longer read. After deferred
+        initialization completes, the singleton exists and every later
+        update reaches the manager.
+
+        The sites are anchored on the singleton's own diagnostic string,
+        whose reference lives inside the accessor; every direct call to it
+        is then filtered to the gated shape both updates share — the
+        gate-check call, its `cbz w0` skipping forward past the update, the
+        singleton's return moved aside, and that return dereferenced
+        unchecked. Exactly two callers carry the shape; both are
+        rewritten. No address is literal.
+
+        Applies only to an arm64e.x1 plugin (cpusubtype 12 — iOS 27.1's
+        iPhone19,4). Every other build is reported and left byte-identical,
+        and the verb still exits 0: the install shares one staged copy
+        between all five VirtualAudio patches, and the earlier builds are
+        meant to keep their bytes.
+
+        Idempotent: a gate already holding the unconditional skip is
+        reported and left alone, byte for byte.
+        """,
+    )
+
+    @Argument(help: "Path to the VirtualAudio plugin Mach-O, patched in place", transform: URL.init(fileURLWithPath:))
+    var binary: URL
+
+    @Flag(name: .customLong("dry-run"), help: "Report the sites and write nothing")
+    var dryRun = false
+
+    func run() throws {
+        try requireUntruncatedMachO(at: binary)
+        // reattest: false — the caller re-signs.
+        try CustomFirmwareVirtualAudio.patchDeviceStateGuard(
+            fileAt: binary,
+            reattest: false,
+            dryRun: dryRun,
+            log: machOVerbLog,
+        )
+    }
+}
+
 // MARK: - patch-virtualaudio
 
 struct VPhoneCustomFirmwarePatchVirtualAudioCommand: ParsableCommand {
@@ -586,6 +649,7 @@ enum VPhoneCustomFirmwareMachOVerbs {
             VPhoneCustomFirmwarePatchVirtualAudioMuteCommand.self,
             VPhoneCustomFirmwarePatchVirtualAudioSPGateCommand.self,
             VPhoneCustomFirmwarePatchVirtualAudioVolumeGateCommand.self,
+            VPhoneCustomFirmwarePatchVirtualAudioDeviceStateGuardCommand.self,
             VPhoneCustomFirmwarePatchParavirtGPUIndexOffsetCommand.self,
         ]
     }

@@ -28,6 +28,7 @@ public enum FirmwareGuestSystemPatchSet {
     public static let attitude = "system-apps-cfw-attitude"
     public static let arm64eX1DyldBootstrap = "system-dyld-boot-arm64e_x1_bootstrap"
     public static let arm64eX1CacheBootstrap = "dyld-boot-arm64e_x1_bootstrap"
+    public static let arm64eX1CacheRemaining = "dyld-cfw-arm64e_x1_cache"
     public static let arm64eX1LaunchdBootstrap = "system-launchd-boot-arm64e_x1_bootstrap"
     public static let arm64eX1FsckBootstrap = "system-fsck-boot-arm64e_x1_bootstrap"
     public static let arm64eX1MountBootstrap = "system-mount-boot-arm64e_x1_bootstrap"
@@ -215,6 +216,13 @@ public enum FirmwareGuestSystemPatchSet {
                 target: .dyldSharedCache,
                 applicability: ios27,
                 bootEssential: true,
+            ),
+            VPhonePatchDeclaration(
+                identifier: arm64eX1CacheRemaining,
+                title: "ARM64E_X1 cache lowering",
+                summary: "Lowers X1 instructions in every other shared-cache image ahead of time, so apps and extensions do not queue on launchd's on-demand handler until FrontBoard's watchdog kills them.",
+                target: .dyldSharedCache,
+                applicability: ios27,
             ),
             VPhonePatchDeclaration(
                 identifier: arm64eX1LaunchdBootstrap,
@@ -486,6 +494,24 @@ public enum FirmwareGuestSystemPatchSet {
                 target: .guestExecutable(path: "/Library/Audio/Plug-Ins/HAL/VirtualAudio.plugin/VirtualAudio"),
             ),
             VPhonePatchDeclaration(
+                identifier: virtualAudioDeviceStateGuard,
+                title: "VirtualAudio device-state guard",
+                summary: """
+                Stands down the two device-state updates VirtualAudio_Device pushes at \
+                DeviceStateManager while the manager's singleton does not exist yet. \
+                The singleton is published only at the end of deferred initialization, \
+                which first waits for a haptic actuator port a VM does not have; with \
+                the speaker-route patches on, the published route reaches the update \
+                first, and its unchecked read of the null singleton crash-loops \
+                audiomxd about half a second after every launch. Each gate's \
+                skip-when-false branch is made unconditional, so both updates wait for \
+                the manager like every later one. Applies only to the arm64e.x1 \
+                plugin (iOS 27.1's iPhone19,4); earlier builds are left byte-identical.
+                """,
+                target: .guestExecutable(path: "/Library/Audio/Plug-Ins/HAL/VirtualAudio.plugin/VirtualAudio"),
+                applicability: VPhonePatchApplicability(iOSBase: .major(27)),
+            ),
+            VPhonePatchDeclaration(
                 identifier: virtualAudioGraphConfigurations,
                 title: "VirtualAudio speaker graph chains",
                 summary: """
@@ -553,6 +579,17 @@ public enum FirmwareGuestSystemPatchSet {
                 target: .prebootDeviceTree,
             ),
             VPhonePatchDeclaration(
+                identifier: prebootFoldableVMSubtype,
+                title: "Foldable VM sub-type",
+                summary: """
+                Reports Apple's own VM sub-type for a foldable board in the restored Preboot device \
+                tree (iPhone Duo's V68AP becomes V68VM2025). SpringBoard then treats the device as a \
+                VM and restores its fold pose from settings, instead of waiting for hinge hardware \
+                the VM does not have. Restore keeps the board's own sub-type.
+                """,
+                target: .prebootDeviceTree,
+            ),
+            VPhonePatchDeclaration(
                 identifier: prebootHaptics,
                 title: "Haptics node",
                 summary: """
@@ -614,6 +651,12 @@ public enum FirmwareGuestSystemPatchSet {
     /// the virtio aggregate it already built.
     public static let virtualAudioVolumeModePrecondition = "system-virtualaudio-cfw-volume_mode_precondition"
 
+    /// The two gated device-state updates that read the DeviceStateManager
+    /// singleton before deferred initialization publishes it, stood down so
+    /// audiomxd cannot crash on the null singleton an arm64e.x1 guest is
+    /// always asked about first.
+    public static let virtualAudioDeviceStateGuard = "system-virtualaudio-cfw-device_state_guard"
+
     /// The speaker chains in graph_configurations.plist, moved onto the
     /// generic graph path so the DSP chain factory never needs the physical
     /// Speaker device a VM does not have.
@@ -645,6 +688,10 @@ public enum FirmwareGuestSystemPatchSet {
     /// The iPhone product description in the restored Preboot device tree,
     /// taken from the iPhone's own tree: see `DeviceTreePatcher.presentPhoneProduct`.
     public static let prebootIPhoneProduct = "preboot-cfw-devicetree_iphone_product"
+
+    /// Apple's VM sub-type for a foldable board in the restored Preboot
+    /// device tree.
+    public static let prebootFoldableVMSubtype = "preboot-cfw-devicetree_foldable_vm_subtype"
 
     /// The haptics node removal in the restored Preboot device tree, for any
     /// VM patched before `fw patch` removed it from every guest's tree.
