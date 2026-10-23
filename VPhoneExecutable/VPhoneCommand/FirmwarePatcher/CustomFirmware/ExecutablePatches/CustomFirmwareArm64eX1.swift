@@ -1,6 +1,7 @@
 // Static ARM64E_X1 lowering for the pre-handler and fork-sensitive boot closure.
 
 import Foundation
+import os
 import MachO
 import VPhonePatchKit
 
@@ -95,17 +96,30 @@ public enum CustomFirmwareArm64eX1 {
         return retargeted(item, bytes: item.bytes, to: address, delta: delta)
     }
 
+    /// `String(value, radix: 16)` for a non-negative value, without the generic
+    /// formatting path that showed in profiles of a whole-cache run.
+    static func hex(_ value: Int64) -> String {
+        let digits = Array("0123456789abcdef".utf8)
+        var number = UInt64(value), buffer = [UInt8](repeating: 0, count: 16), index = 16
+        repeat {
+            index -= 1
+            buffer[index] = digits[Int(number & 15)]
+            number >>= 4
+        } while number != 0
+        return String(decoding: buffer[index...], as: UTF8.self)
+    }
+
     /// `item` at `address` with `bytes`, its target operand shifted by `delta`;
     /// nil unless the target is a last immediate operand that ends the operand
     /// text and no flag a rebuild would drop is set.
     static func retargeted(_ item: ARM64Instruction, bytes: [UInt8], to address: Int, delta: Int64) -> ARM64Instruction? {
         guard let detail = item.detail, !detail.writeback, let last = detail.operands.last,
               last.type == .immediate, !last.writesRegister, last.imm >= 0,
-              item.operandString.hasSuffix("0x" + String(last.imm, radix: 16))
+              case let old = hex(last.imm), item.operandString.hasSuffix("0x" + old)
         else { return nil }
         let (target, overflow) = last.imm.addingReportingOverflow(delta)
         guard !overflow, target >= 0 else { return nil }
-        let text = item.operandString.dropLast(String(last.imm, radix: 16).count) + String(target, radix: 16)
+        let text = item.operandString.dropLast(old.utf8.count) + hex(target)
         // Capstone's operand is a union: an immediate's register and memory
         // views alias its low and high words, and the decode copies them all.
         let low = ARM64Register(rawValue: UInt32(truncatingIfNeeded: target))
@@ -210,7 +224,10 @@ public enum CustomFirmwareArm64eX1 {
                 (0 ..< raw.count / 4).map { UInt32(littleEndian: raw.loadUnaligned(fromByteOffset: $0 * 4, as: UInt32.self)) }
             }
         }
-        var dataRanges = excluded
+        // Data inside the code, as one bit per word: a linear scan of the ranges
+        // on every step went quadratic in images with many switch tables.
+        var dataWords = AddressSet(ranges: ranges.map { ($0.address, $0.data.count) })
+        for span in excluded { dataWords.insertWords(in: span) }
         var candidates: [Int] = [], frameEntries: [Int] = []
         // Recover coalesced entries from return-PAC plus an SP frame setup.
         for (range, words) in zip(ranges, rangeWords) {
@@ -240,10 +257,13 @@ public enum CustomFirmwareArm64eX1 {
         // exactly as it would inside its page. Decoding whole pages behind a
         // small cache thrashed on large cache images, whose traversal jumps
         // between distant pages.
-        func decodedInstruction(at address: Int) -> ARM64Instruction? {
-            guard address & 3 == 0, !dataRanges.contains(where: { $0.contains(address) }),
+        func word(at address: Int) -> UInt32? {
+            guard address & 3 == 0, !dataWords.contains(address),
                   let index = ranges.firstIndex(where: { address >= $0.address && address + 4 <= $0.address + $0.data.count }) else { return nil }
-            return decode(rangeWords[index][(address - ranges[index].address) / 4], at: address)
+            return rangeWords[index][(address - ranges[index].address) / 4]
+        }
+        func decodedInstruction(at address: Int) -> ARM64Instruction? {
+            word(at: address).flatMap { decode($0, at: address) }
         }
         var scheduled = AddressSet(ranges: ranges.map { ($0.address, $0.data.count) }), visited = scheduled
         var pending = Set(seeds + frameEntries).sorted(by: >)
@@ -256,33 +276,44 @@ public enum CustomFirmwareArm64eX1 {
         var records: [PatchRecord] = []
         while let entry = pending.popLast() {
             var offset = entry
-            while visited.insert(offset).inserted, let instruction = decodedInstruction(at: offset), instruction.isDecoded, instruction.size == 4 {
+            while visited.insert(offset).inserted, let word = word(at: offset) {
                 // The top byte rules out most words before any mnemonic is
                 // compared: only these can be lowered or refused, or end or
-                // redirect the walk.
-                let top = instruction.bytes[3]
-                if Self.loweredTopBytes[Int(top)], let replacement = try replacement(for: instruction) {
-                    let after = decoder.disassembleOne(replacement, at: instruction.address)
+                // redirect the walk. Any other word only has to decode.
+                let top = Int(word >> 24)
+                guard Self.loweredTopBytes[top] || Self.flowTopBytes[top] else {
+                    guard words.decodes(word) else { break }
+                    offset += 4
+                    continue
+                }
+                guard let instruction = decode(word, at: offset), instruction.isDecoded, instruction.size == 4 else { break }
+                if Self.loweredTopBytes[top], let replacement = try replacement(for: instruction) {
+                    // A few dozen replacement words recur millions of times
+                    // across a cache; the word cache answers for them.
+                    let after = replacement.count == 4
+                        ? decode(replacement.withUnsafeBytes { UInt32(littleEndian: $0.loadUnaligned(as: UInt32.self)) },
+                                 at: offset)
+                        : decoder.disassembleOne(replacement, at: instruction.address)
                     records.append(PatchRecord(patchID: identifier + ".\(offset)", component: "Mach-O", fileOffset: offset,
                         originalBytes: Data(instruction.bytes), patchedBytes: replacement,
                         beforeDisasm: "\(instruction.mnemonic) \(instruction.operandString)",
                         afterDisasm: "\(after?.mnemonic ?? "?") \(after?.operandString ?? "")",
                         description: "X1 compatibility lowering; PC PAC/CPA checks reduced"))
                 }
-                guard Self.flowTopBytes[Int(top)] else {
+                guard Self.flowTopBytes[top] else {
                     offset += 4
                     continue
                 }
                 let mnemonic = instruction.mnemonic
                 if mnemonic == "br", let readMemory,
                    let table = try switchTable(at: offset, instructionAt: decodedInstruction(at:), readMemory: readMemory) {
-                    dataRanges.append(table.data)
+                    dataWords.insertWords(in: table.data)
                     for target in table.targets { schedule(target) }
                 }
                 if mnemonic == "braa", let authenticatedPointer,
                    let table = try authenticatedDispatch(at: offset, instructionAt: decodedInstruction(at:),
                                                          pointer: authenticatedPointer) {
-                    dataRanges.append(table.data)
+                    dataWords.insertWords(in: table.data)
                     for target in table.targets {
                         guard decodedInstruction(at: target)?.isDecoded == true else {
                             throw PatcherError.invalidFormat("authenticated X1 dispatch target outside executable code")
@@ -302,8 +333,8 @@ public enum CustomFirmwareArm64eX1 {
                 offset += 4
             }
         }
-        records.removeAll { record in dataRanges.contains(where: { $0.contains(record.fileOffset) }) }
-        let unvisited = candidates.filter { address in !visited.contains(address) && !dataRanges.contains(where: { $0.contains(address) }) }
+        records.removeAll { dataWords.contains($0.fileOffset) }
+        let unvisited = candidates.filter { address in !visited.contains(address) && !dataWords.contains(address) }
         records.sort { $0.fileOffset < $1.fileOffset }
         return Result(records: records, unvisitedCandidates: unvisited.count, unvisitedExamples: Array(unvisited.prefix(16)))
     }
@@ -696,11 +727,40 @@ struct AddressSet {
         bits[slot.range][slot.word] |= slot.mask
         return (inserted, address)
     }
+
+    /// Every word address of `span` that lies in the ranges. A set of data
+    /// words is only ever asked about addresses inside them.
+    mutating func insertWords(in span: Range<Int>) {
+        var address = (span.lowerBound + 3) & ~3
+        while address < span.upperBound {
+            if slot(address) != nil { insert(address) }
+            address += 4
+        }
+    }
 }
 
 // MARK: - Decoder
 
 extension CustomFirmwareArm64eX1 {
+    /// Decodability answers shared by every worker of one run: an answer
+    /// belongs to the word, not to the image or worker that asked. Striped so
+    /// that workers rarely wait on one another.
+    final class SharedDecodability: Sendable {
+        private let stripes = (0 ..< 64).map { _ in OSAllocatedUnfairLock(initialState: [UInt32: Bool]()) }
+
+        private func stripe(_ word: UInt32) -> OSAllocatedUnfairLock<[UInt32: Bool]> {
+            stripes[Int((word &* 0x9E37_79B1) >> 26)]
+        }
+
+        func answer(_ word: UInt32) -> Bool? {
+            stripe(word).withLock { $0[word] }
+        }
+
+        func record(_ word: UInt32, _ decodes: Bool) {
+            stripe(word).withLock { $0[word] = decodes }
+        }
+    }
+
     /// Capstone behind two word-keyed caches, kept for as long as its owner
     /// plans: one worker reuses it across every image it takes.
     ///
@@ -715,6 +775,30 @@ extension CustomFirmwareArm64eX1 {
         private var plain: [UInt32: ARM64Instruction] = [:]
         private var relative: [UInt32: (item: ARM64Instruction, move: Move?, settled: Bool)] = [:]
         private var families: [UInt32: (item: ARM64Instruction, target: Int64, settled: Bool, agrees: Bool)] = [:]
+        private var decodable: [UInt32: Bool] = [:]
+        private let shared: SharedDecodability?
+
+        init(shared: SharedDecodability? = nil) {
+            self.shared = shared
+        }
+
+        /// Whether Capstone decodes `word` as one 4-byte instruction. That does
+        /// not depend on the address, and costs far less to keep than a decode.
+        /// A miss here asks the workers' shared answers before Capstone.
+        func decodes(_ word: UInt32) -> Bool {
+            if let known = decodable[word] { return known }
+            let decodes: Bool
+            if let known = shared?.answer(word) {
+                decodes = known
+            } else {
+                let item = plain[word] ?? capstone.disassembleOne(ARM64.encodeU32(word), at: 0)
+                decodes = item.map { $0.isDecoded && $0.size == 4 } ?? false
+                shared?.record(word, decodes)
+            }
+            if decodable.count >= 1 << 22 { decodable.removeAll(keepingCapacity: true) }
+            decodable[word] = decodes
+            return decodes
+        }
 
         func decode(_ word: UInt32, at address: Int) -> ARM64Instruction? {
             if let known = plain[word] { return moved(known, by: .none, to: address) }

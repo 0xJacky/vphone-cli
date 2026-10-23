@@ -173,6 +173,7 @@ HEAD wrote), and every comparison was identical:
 | Decode cache keyed by instruction word; code ranges unpacked to `[UInt32]` once (a generic `loadLE` across PatchKit's resilient boundary cost a metadata lookup per word) | 200 s |
 | Bitmap visited/scheduled sets, largest images first, PC-relative words cached once Capstone confirms a single address/page/no move at a second address, top-byte gates before mnemonic comparisons | 95 s |
 | One decoder per worker reused across images; branch, literal and ADR/ADRP words keyed by family (offset field cleared, target computed from the encoding, the operand's aliased register/memory views rebuilt), each family trusted only after Capstone agrees at a second target; planning readers map each chunk once | 1,241 → 914 user CPU-s (wall time not comparable: load average 24–31) |
+| Words outside the lowered and flow top bytes checked for decodability only (a word-keyed answer shared by all workers); data-in-code and dispatch tables as a bitmap instead of a scanned range list; replacement text through the word cache | 914 → 291 user CPU-s, 41 s wall at load 5–8 |
 
 The planning core, `CustomFirmwareArm64eX1.planCode`, is shared with the
 standalone-executable patches; its output is unchanged by these edits.

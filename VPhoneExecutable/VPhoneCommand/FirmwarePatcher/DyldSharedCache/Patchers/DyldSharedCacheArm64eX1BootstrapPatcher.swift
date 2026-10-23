@@ -150,7 +150,8 @@ public enum DyldSharedCacheArm64eX1BootstrapPatcher {
         let readers = try (0 ..< workers).map { _ in try DyldSharedCacheChunkSet(directory: directory, mappedReads: true) }
         // One decoder per worker, reused across its images: cached decodes
         // belong to the word, not to the image.
-        let decoders = (0 ..< workers).map { _ in CustomFirmwareArm64eX1.Decoder() }
+        let decodability = CustomFirmwareArm64eX1.SharedDecodability()
+        let decoders = (0 ..< workers).map { _ in CustomFirmwareArm64eX1.Decoder(shared: decodability) }
         let queue = Mutex((
             next: 0,
             plans: [Result<ImagePlan, any Error>?](repeating: nil, count: selected.count),
