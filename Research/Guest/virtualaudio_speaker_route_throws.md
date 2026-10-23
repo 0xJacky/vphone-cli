@@ -778,6 +778,19 @@ lists and unit tests are in; the verb patches a copy of the stock 27.1
 plugin (six bytes, the two gate words above) and a second run is
 byte-identical; the 27.0 and 26.6.2 copies are untouched.
 `FirmwarePatcherTests` shows no new failures against a HEAD baseline
-(the fixture suites fail identically on both trees). Not yet done:
-live validation on `duotest-m5` through a bundle install +
-`vphone-launchpad-cli vm set-bundle duotest-m5 <ver> --update-environment`.
+(the fixture suites fail identically on both trees).
+
+**Verified in the guest (2026-10-23, night).** Bundle `2.12.0-local.34ce2075`
+(built from this tree) installed through `bundle install-local`; after
+stopping the machine, `vm set-bundle duotest-m5 … --update-environment` and
+`cfw update-environment` put the patch in the receipt's live list. (The
+machine carried a stale owner block of the identifier, written 22:56 from a
+bundle built while the patcher was still being written; `fw set-patches
+duotest-m5` cleared it.) After boot: audiomxd survives past a minute at a
+stable pid — it previously died ~0.6 s after every launch, 28 crash reports
+all faulting 0xa16b0 on AudioControl — the crash count stays at 28 with zero
+new reports, and RTAID telemetry shows a SystemSounds stream routed on
+`PuffinOutput` (`rout: 1`, PreDSP/PostDSP running): the route on the virtio
+aggregate, not Null_Device. The widget-extension crashes on this machine
+(WorldClockWidget, WidgetRenderer) predate the update and are the known Duo
+bring-up issue, not audio.

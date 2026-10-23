@@ -220,7 +220,10 @@
 > iOS 27.1's iPhone19,4): the 26.6.2 and 27.0 plugins are plain arm64e and
 > are left byte-identical. The five other TheInstance callers are
 > HapticAttenuationIODelegate's and are not touched — see the full section
-> below. Live validation on `duotest-m5` is pending a bundle install.
+> below. Verified live on `duotest-m5` (2026-10-23 night): audiomxd survives
+> at a stable pid where it previously died ~0.6 s after every launch (28
+> crash reports before, zero new after), with the system-sound stream
+> routed on `PuffinOutput` and its DSP chain running.
 
 > **ARM64E_X1 whole-cache lowering (2026-10-23):** `dyld-cfw-arm64e_x1_cache`
 > (guest system set, iOS 27, on in `standard`, blocked in `tvos` and

@@ -200,8 +200,11 @@ publishes it. Root-caused and fixed by
 device-state update down while the singleton is absent; arm64e.x1
 plugins only, earlier builds byte-identical) — see
 `Research/Guest/virtualaudio_speaker_route_throws.md` § "Layer 5" and
-`Research/0_binary_patch_comparison.md`. Offline validation is done;
-live validation on this VM is pending a bundle install.
+`Research/0_binary_patch_comparison.md`. Verified on this VM
+(2026-10-23 night, bundle `2.12.0-local.34ce2075`): audiomxd survives at
+a stable pid where it previously died ~0.6 s after every launch (28
+crash reports before, zero new after), and the system-sound stream
+routes on `PuffinOutput` with its DSP chain running.
 
 ## Fold posture (2026-10-23)
 
