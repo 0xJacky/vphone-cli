@@ -133,7 +133,7 @@
 			<string>system-systemhook-cfw-metal_cache_reuse</string>
 			<string>system-systemversion-cfw-build_version</string>
 			<string>system-virtiosound-cfw-hal_plugin</string>
-			<string>system-virtualaudio-cfw-device_state_guard</string>
+			<string>system-virtualaudio-cfw-device_state_null_gate</string>
 			<string>system-virtualaudio-cfw-microphone_graph_chains</string>
 			<string>system-virtualaudio-cfw-mute_set_throw</string>
 			<string>system-virtualaudio-cfw-speaker_graph_chains</string>

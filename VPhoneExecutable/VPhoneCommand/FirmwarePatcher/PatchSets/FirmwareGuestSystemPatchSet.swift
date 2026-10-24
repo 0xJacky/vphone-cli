@@ -494,19 +494,20 @@ public enum FirmwareGuestSystemPatchSet {
                 target: .guestExecutable(path: "/Library/Audio/Plug-Ins/HAL/VirtualAudio.plugin/VirtualAudio"),
             ),
             VPhonePatchDeclaration(
-                identifier: virtualAudioDeviceStateGuard,
-                title: "VirtualAudio device-state guard",
+                identifier: virtualAudioDeviceStateNullGate,
+                title: "VirtualAudio device-state null gate",
                 summary: """
-                Stands down the two device-state updates VirtualAudio_Device pushes at \
-                DeviceStateManager while the manager's singleton does not exist yet. \
-                The singleton is published only at the end of deferred initialization, \
-                which first waits for a haptic actuator port a VM does not have; with \
-                the speaker-route patches on, the published route reaches the update \
-                first, and its unchecked read of the null singleton crash-loops \
-                audiomxd about half a second after every launch. Each gate's \
-                skip-when-false branch is made unconditional, so both updates wait for \
-                the manager like every later one. Applies only to the arm64e.x1 \
-                plugin (iOS 27.1's iPhone19,4); earlier builds are left byte-identical.
+                Makes VirtualAudio_Device's two device-state updates wait for the
+                DeviceStateManager singleton instead of dereferencing it when it does
+                not exist. On a guest with no haptic hardware deferred initialization
+                never constructs the manager, and a route push that arrives while the
+                gates answer true reads the null singleton and crash-loops audiomxd.
+                Each update's gate-check call is redirected to TheInstance, so the
+                branch that already skips the update on a failed check now tests the
+                singleton itself: no manager, the update is skipped through the
+                function's own path; manager present, the update runs exactly as
+                designed. Applies only to the arm64e.x1 plugin (iOS 27.1's
+                iPhone19,4); earlier builds are left byte-identical.
                 """,
                 target: .guestExecutable(path: "/Library/Audio/Plug-Ins/HAL/VirtualAudio.plugin/VirtualAudio"),
                 applicability: VPhonePatchApplicability(iOSBase: .major(27)),
@@ -651,11 +652,10 @@ public enum FirmwareGuestSystemPatchSet {
     /// the virtio aggregate it already built.
     public static let virtualAudioVolumeModePrecondition = "system-virtualaudio-cfw-volume_mode_precondition"
 
-    /// The two gated device-state updates that read the DeviceStateManager
-    /// singleton before deferred initialization publishes it, stood down so
-    /// audiomxd cannot crash on the null singleton an arm64e.x1 guest is
-    /// always asked about first.
-    public static let virtualAudioDeviceStateGuard = "system-virtualaudio-cfw-device_state_guard"
+    /// The two device-state updates made to wait for the DeviceStateManager
+    /// singleton instead of dereferencing it when no manager was ever
+    /// constructed — the null gate audiomxd crash-loops without.
+    public static let virtualAudioDeviceStateNullGate = "system-virtualaudio-cfw-device_state_null_gate"
 
     /// The speaker chains in graph_configurations.plist, moved onto the
     /// generic graph path so the DSP chain factory never needs the physical

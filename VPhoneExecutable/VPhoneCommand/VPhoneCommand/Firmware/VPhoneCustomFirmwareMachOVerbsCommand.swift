@@ -490,47 +490,52 @@ struct VPhoneCustomFirmwarePatchVirtualAudioVolumeGateCommand: ParsableCommand {
     }
 }
 
-// MARK: - patch-virtualaudio-device-state-guard
+// MARK: - patch-virtualaudio-device-state-null-gate
 
-struct VPhoneCustomFirmwarePatchVirtualAudioDeviceStateGuardCommand: ParsableCommand {
+struct VPhoneCustomFirmwarePatchVirtualAudioDeviceStateNullGateCommand: ParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "patch-virtualaudio-device-state-guard",
-        abstract: "Keep VirtualAudio's device-state updates off the null DeviceStateManager singleton",
+        commandName: "patch-virtualaudio-device-state-null-gate",
+        abstract: "Make VirtualAudio's device-state updates wait for the DeviceStateManager singleton",
         discussion: """
         Publishing the speaker route wakes VirtualAudio_Device's update,
-        which pushes the route's state at DeviceStateManager — but the
-        manager's singleton is published only at the end of deferred
-        initialization, which first waits for a haptic actuator port a VM
-        does not have. Asked earlier, the singleton's accessor logs
-        "TheInstance() called before SetInstance()", returns null, and the
-        update dereferences it: audiomxd crash-loops seconds after every
-        launch on an arm64e.x1 guest once the speaker-route patches let
-        the route through.
+        which pushes the route's state at DeviceStateManager twice, each
+        push behind its own capability gate. On a guest with no haptic
+        hardware deferred initialization never constructs the manager —
+        no "Ending Deferred Initialization" is ever logged and no thread
+        is parked inside it; it exits early — so TheInstance() returns
+        null forever, and a push that arrives while the gates answer true
+        dereferences it: audiomxd dies, at any time from seconds to
+        minutes into its life.
 
-        The patch stands the two device-state updates down. Each sits
-        behind its own gate — a capability check whose `cbz w0` already
-        skips the whole update when the check answers false — and that
-        branch is made unconditional, to the same target. The gate-check
-        call keeps running; its answer is no longer read. After deferred
-        initialization completes, the singleton exists and every later
-        update reaches the manager.
+        The patch makes each update wait for the manager to exist: the
+        gate-check call above each `cbz w0, <skip>` is redirected to
+        TheInstance itself, so the branch the function already carries —
+        the one that skips the update when its check answers false — now
+        tests the singleton. Null manager: the update is skipped through
+        the function's own path, exactly as on any build whose gates
+        answer false. Manager present: the fall-through re-calls
+        TheInstance and the whole update — the save, the dereference,
+        the lock, the push — runs untouched, as designed. Nothing is
+        removed; the update happens whenever there is a manager to
+        receive it.
 
-        The sites are anchored on the singleton's own diagnostic string,
-        whose reference lives inside the accessor; every direct call to it
-        is then filtered to the gated shape both updates share — the
-        gate-check call, its `cbz w0` skipping forward past the update, the
-        singleton's return moved aside, and that return dereferenced
-        unchecked. Exactly two callers carry the shape; both are
-        rewritten. No address is literal.
+        The sites are anchored on the singleton's own diagnostic string
+        ("TheInstance() called before SetInstance()"), whose reference
+        lives inside the accessor; every direct call to it is filtered to
+        the gated shape both updates share — the gate-check call, its
+        `cbz w0` skipping forward past the update, the singleton's return
+        moved aside, and that return dereferenced unchecked. Exactly two
+        callers carry the shape; both gate-check calls are redirected. No
+        address is literal.
 
         Applies only to an arm64e.x1 plugin (cpusubtype 12 — iOS 27.1's
-        iPhone19,4). Every other build is reported and left byte-identical,
-        and the verb still exits 0: the install shares one staged copy
-        between all five VirtualAudio patches, and the earlier builds are
-        meant to keep their bytes.
+        iPhone19,4). Every other build is reported and left
+        byte-identical, and the verb still exits 0: the install shares
+        one staged copy between all five VirtualAudio patches, and the
+        earlier builds are meant to keep their bytes.
 
-        Idempotent: a gate already holding the unconditional skip is
-        reported and left alone, byte for byte.
+        Idempotent: a gate slot already calling TheInstance is reported
+        and left alone, byte for byte.
         """,
     )
 
@@ -543,7 +548,7 @@ struct VPhoneCustomFirmwarePatchVirtualAudioDeviceStateGuardCommand: ParsableCom
     func run() throws {
         try requireUntruncatedMachO(at: binary)
         // reattest: false — the caller re-signs.
-        try CustomFirmwareVirtualAudio.patchDeviceStateGuard(
+        try CustomFirmwareVirtualAudio.patchDeviceStateNullGate(
             fileAt: binary,
             reattest: false,
             dryRun: dryRun,
@@ -552,6 +557,7 @@ struct VPhoneCustomFirmwarePatchVirtualAudioDeviceStateGuardCommand: ParsableCom
     }
 }
 
+// MARK: - patch-virtualaudio
 // MARK: - patch-virtualaudio
 
 struct VPhoneCustomFirmwarePatchVirtualAudioCommand: ParsableCommand {
@@ -649,7 +655,7 @@ enum VPhoneCustomFirmwareMachOVerbs {
             VPhoneCustomFirmwarePatchVirtualAudioMuteCommand.self,
             VPhoneCustomFirmwarePatchVirtualAudioSPGateCommand.self,
             VPhoneCustomFirmwarePatchVirtualAudioVolumeGateCommand.self,
-            VPhoneCustomFirmwarePatchVirtualAudioDeviceStateGuardCommand.self,
+            VPhoneCustomFirmwarePatchVirtualAudioDeviceStateNullGateCommand.self,
             VPhoneCustomFirmwarePatchParavirtGPUIndexOffsetCommand.self,
         ]
     }

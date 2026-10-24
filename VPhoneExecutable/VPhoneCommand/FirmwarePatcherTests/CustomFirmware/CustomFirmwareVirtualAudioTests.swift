@@ -300,7 +300,7 @@ struct CustomFirmwareVirtualAudioTests {
         }
     }
 
-    // MARK: - Device-state guard
+    // MARK: - Device-state null gate
 
     @Test(
         arguments: [Self.junk, Data()],
@@ -308,7 +308,7 @@ struct CustomFirmwareVirtualAudioTests {
     func `a binary without the singleton diagnostic is refused, not searched past`(_ input: Data) throws {
         var data = input
         #expect(throws: PatcherError.self) {
-            try CustomFirmwareVirtualAudio.patchDeviceStateGuard(
+            try CustomFirmwareVirtualAudio.patchDeviceStateNullGate(
                 &data,
                 reattest: false,
                 dryRun: true,
@@ -318,9 +318,9 @@ struct CustomFirmwareVirtualAudioTests {
     }
 
     @Test
-    func `the device-state anchor strings and record identity are stable`() {
+    func `the null-gate anchor strings and record identity are stable`() {
         #expect(CustomFirmwareVirtualAudio.deviceStateInstanceMissing == "TheInstance() called before SetInstance()")
-        #expect(CustomFirmwareVirtualAudio.deviceStateGuardPatchID == "system-virtualaudio-cfw-device_state_guard")
+        #expect(CustomFirmwareVirtualAudio.deviceStateNullGatePatchID == "system-virtualaudio-cfw-device_state_null_gate")
     }
 
     /// The arm64e.x1 header word iOS 27.1's plugin carries, and the plain
@@ -344,41 +344,35 @@ struct CustomFirmwareVirtualAudioTests {
         #expect(CustomFirmwareVirtualAudio.arm64Subtype(of: Data()) == .notArm64)
     }
 
-    // A synthetic plugin carrying the guarded device-state shape: TheInstance
-    // with its diagnostic reference, two gated updates, and the two callers
-    // the shape must refuse — the haptic delegate's unguarded deref and a
-    // caller that passes the singleton on. Every instruction comes from the
-    // encoder or the frozen constants, and the layout is fixed so the gate,
-    // call and skip addresses are the same in every test.
+    // A synthetic plugin carrying the guarded device-state shape:
+    // TheInstance with its diagnostic reference, two gated updates, and
+    // the caller the shape must refuse — the haptic delegate's unguarded
+    // deref. Every instruction comes from the encoder or the frozen
+    // constants, and the layout is fixed so the addresses are the same in
+    // every test.
     //
     //   text+0x00 pacibsppc              TheInstance
     //   text+0x04 adrp x3, <cstring>     the diagnostic's reference
     //   text+0x08 add  x3, x3, #0
     //   text+0x0c retab
-    //   text+0x10 bl   retab             gate check, site 1
-    //   text+0x14 cbz  w0, +0x20         the gate the patch rewrites
+    //   text+0x10 bl   stub              gate check, site 1 — the slot the patch rewrites
+    //   text+0x14 cbz  w0, +0x20         the branch that tests the answer
     //   text+0x18 bl   TheInstance
     //   text+0x1c mov  x20, x0
     //   text+0x20 ldr  x21, [x0]         the deref that faults
     //   text+0x24-0x2c nops              the rest of the update
     //   text+0x30 …site 2, the same shape…
-    //   text+0x58 bl   retab             the haptic caller's release call
-    //   text+0x5c bl   TheInstance       unguarded: no gate above it
-    //   text+0x60 mov  x20, x0
-    //   text+0x64 ldr  x21, [x0]
-    //   text+0x68 nop
-    //   text+0x6c bl   TheInstance       pass-through caller: no deref after
-    static let deviceStateTextStart = 0x108
-    static let deviceStateGate1 = 0x11C
-    static let deviceStateCall1 = 0x120
-    static let deviceStateSkip1 = 0x13C
-    static let deviceStateGate2 = 0x140
-    static let deviceStateCall2 = 0x144
-    static let deviceStateSkip2 = 0x160
-    static let deviceStateHapticStart = 0x160
+    //   text+0x54 bl   stub              the haptic caller's release call
+    //   text+0x58 bl   TheInstance       unguarded: no gate above it
+    //   text+0x5c mov  x20, x0
+    //   text+0x60 ldr  x21, [x0]
+    //   text+0x64 nop, bl TheInstance    a pass-through caller
+    static let deviceStateText = 0x108
+    static let deviceStateGateCall1 = 0x118
+    static let deviceStateGateCall2 = 0x138
 
     /// The guarded plugin image. `gatedSites` builds only that many gated
-    /// updates (the refusal test wants fewer than two); the two mismatching
+    /// updates (the refusal test wants fewer than two); the mismatching
     /// callers ride along every time.
     static func deviceStateImage(cpuSubtype: UInt32, gatedSites: Int = 2) throws -> Data {
         func word(_ encoded: Data?) throws -> UInt32 {
@@ -391,15 +385,14 @@ struct CustomFirmwareVirtualAudioTests {
                 | UInt32(encoded[encoded.startIndex + 3]) << 24
         }
 
-        let theInstance = deviceStateTextStart
+        let theInstance = deviceStateText
         let stub = theInstance + 0xC
         func gatedSite(start: Int) throws -> [UInt32] {
-            let gate = start + 4
             let call = start + 8
             let skip = call + 0x1C
             return [
                 try word(ARM64Encoder.encodeBL(from: start, to: stub)),
-                try word(ARM64Encoder.encodeCompareBranch(nonzero: false, register: 0, from: gate, to: skip)),
+                try word(ARM64Encoder.encodeCompareBranch(nonzero: false, register: 0, from: start + 4, to: skip)),
                 try word(ARM64Encoder.encodeBL(from: call, to: theInstance)),
                 try word(ARM64Encoder.encodeMovX(rd: 20, rm: 0)),
                 try word(ARM64Encoder.encodeLdrXUnsignedOffset(rt: 21, rn: 0, offset: 0)),
@@ -414,17 +407,12 @@ struct CustomFirmwareVirtualAudioTests {
             ARM64.retabU32,
         ]
         for index in 0 ..< gatedSites {
-            code += try gatedSite(start: deviceStateTextStart + 0x10 + index * 0x24)
-            // The gap word the 0x24 spacing runs through — a call, like the
-            // release call the real haptic site carries above its own.
-            let gap = deviceStateTextStart + 0x30 + index * 0x24
-            code += [try word(ARM64Encoder.encodeBL(from: gap, to: stub))]
+            code += try gatedSite(start: deviceStateText + 0x10 + index * 0x20)
         }
         // The haptic delegate's shape: the same unguarded deref, but the
-        // instruction above the call is a release call, not a gate; then a
-        // caller that passes the singleton on instead of reading it, closed
-        // by two nops so the scan reads deterministic words past it.
-        let haptic = deviceStateHapticStart
+        // instruction above the call is a release call without a gate
+        // branch below it; then a caller that passes the singleton on.
+        let haptic = deviceStateText + 0x10 + gatedSites * 0x20
         code += [
             try word(ARM64Encoder.encodeBL(from: haptic, to: stub)),
             try word(ARM64Encoder.encodeBL(from: haptic + 4, to: theInstance)),
@@ -434,17 +422,26 @@ struct CustomFirmwareVirtualAudioTests {
             try word(ARM64Encoder.encodeBL(from: haptic + 0x14, to: theInstance)),
             ARM64.nopU32, ARM64.nopU32,
         ]
-        return pluginImage(cpuSubtype: cpuSubtype, text: code)
+        return pluginImage(
+            cpuSubtype: cpuSubtype,
+            text: code,
+            cstrings: [CustomFirmwareVirtualAudio.deviceStateInstanceMissing],
+        )
     }
 
     /// A thin arm64 plugin image: one __TEXT segment carrying `text` as
-    /// __text (address == file offset, like the real plugin) and the
-    /// singleton's diagnostic as __cstring at 0x2000.
-    static func pluginImage(cpuSubtype: UInt32, text: [UInt32]) -> Data {
+    /// __text (address == file offset, like the real plugin) and
+    /// `cstrings` in __cstring from 0x2000, each page-aligned.
+    static func pluginImage(cpuSubtype: UInt32, text: [UInt32], cstrings: [String]) -> Data {
         let textOffset = 32 + 72 + 2 * 80
         let cstringOffset = textOffset + text.count * 4
-        let diagnostic = Array("TheInstance() called before SetInstance()\0".utf8)
-        let total = cstringOffset + diagnostic.count
+        var cstringBytes = [UInt8]()
+        for string in cstrings {
+            let padding = (0x1000 - cstringBytes.count % 0x1000) % 0x1000
+            cstringBytes += Array(repeating: 0, count: padding)
+            cstringBytes += Array("\(string)\0".utf8)
+        }
+        let total = cstringOffset + cstringBytes.count
 
         func padded(_ name: String) -> [UInt8] {
             Array(name.utf8) + Array(repeating: 0, count: 16 - name.utf8.count)
@@ -466,58 +463,50 @@ struct CustomFirmwareVirtualAudioTests {
         command += word32([UInt32(textOffset), 2, 0, 0, 0x8000_0400, 0, 0, 0])
         // __cstring
         command += padded("__cstring") + padded("__TEXT")
-        command += word64([0x2000, UInt64(diagnostic.count)])
+        command += word64([0x2000, UInt64(cstringBytes.count)])
         command += word32([UInt32(cstringOffset), 3, 0, 0, 2, 0, 0, 0])
 
         var image = word32([0xFEED_FACF, 0x0100_000C, cpuSubtype, 6, 1, UInt32(command.count), 0, 0])
         image += command
         image += text.flatMap { withUnsafeBytes(of: $0.littleEndian) { Array($0) } }
-        image += diagnostic
+        image += cstringBytes
         image += Array(repeating: 0, count: total - image.count)
         return Data(image)
     }
 
-    private static func word(_ data: Data, _ offset: Int) -> UInt32? {
-        guard offset + 4 <= data.count else { return nil }
-        return UInt32(data[data.startIndex + offset])
-            | UInt32(data[data.startIndex + offset + 1]) << 8
-            | UInt32(data[data.startIndex + offset + 2]) << 16
-            | UInt32(data[data.startIndex + offset + 3]) << 24
-    }
-
     @Test
-    func `the guard rewrites exactly the two gates and is idempotent`() throws {
+    func `the gate calls are redirected to TheInstance, idempotently`() throws {
         var data = try Self.deviceStateImage(cpuSubtype: Self.x1Subtype)
         let pristine = data
 
-        let report = try CustomFirmwareVirtualAudio.patchDeviceStateGuard(
+        let report = try CustomFirmwareVirtualAudio.patchDeviceStateNullGate(
             &data, reattest: false, dryRun: false, log: nil,
         )
         #expect(report.outcome == .patched)
         #expect(report.records.count == 2)
         #expect(report.records.map(\.patchID) == [
-            CustomFirmwareVirtualAudio.deviceStateGuardPatchID,
-            CustomFirmwareVirtualAudio.deviceStateGuardPatchID,
+            CustomFirmwareVirtualAudio.deviceStateNullGatePatchID,
+            CustomFirmwareVirtualAudio.deviceStateNullGatePatchID,
+        ])
+        #expect(report.theInstanceVMA == UInt64(Self.deviceStateText))
+        #expect(report.sites.map(\.gateCallVMA) == [
+            UInt64(Self.deviceStateGateCall1), UInt64(Self.deviceStateGateCall2),
         ])
 
-        // Each gate's `cbz w0` became an unconditional `b` to its own skip;
-        // every byte that moved lies inside a gate's word. (The two words can
-        // share a byte — both hold 0x00 in their high half — so the count is
-        // not the whole test.)
+        // Each gate-check `bl` now calls TheInstance; the branches, the
+        // calls and the dereferences below them are untouched.
         let changed = zip(pristine, data).enumerated().filter { $0.element.0 != $0.element.1 }.map(\.offset)
+        let slots = [Self.deviceStateGateCall1, Self.deviceStateGateCall2]
         #expect(!changed.isEmpty)
-        let gates = [(Self.deviceStateGate1, Self.deviceStateSkip1), (Self.deviceStateGate2, Self.deviceStateSkip2)]
-        #expect(changed.allSatisfy { offset in gates.contains { gate, _ in gate <= offset && offset < gate + 4 } })
-        for (gate, skip) in gates {
-            let branch = try #require(ARM64Encoder.encodeB(from: gate, to: skip))
-            #expect(Data(data[gate ..< gate + 4]) == branch)
-            let patchedWord = try #require(Self.word(data, gate))
-            #expect(ARM64Encoder.decodeBranchTarget(insn: patchedWord, pc: UInt64(gate)) == UInt64(skip))
+        #expect(changed.allSatisfy { offset in slots.contains { gate in gate <= offset && offset < gate + 4 } })
+        for gate in slots {
+            let redirect = try #require(ARM64Encoder.encodeBL(from: gate, to: Self.deviceStateText))
+            #expect(Data(data[gate ..< gate + 4]) == redirect)
         }
 
-        // A second run recognises its own branches and writes nothing.
+        // A second run recognises its own redirects and writes nothing.
         let once = data
-        let again = try CustomFirmwareVirtualAudio.patchDeviceStateGuard(
+        let again = try CustomFirmwareVirtualAudio.patchDeviceStateNullGate(
             &data, reattest: false, dryRun: false, log: nil,
         )
         #expect(again.outcome == .alreadyPatched)
@@ -529,22 +518,22 @@ struct CustomFirmwareVirtualAudioTests {
     func `a dry run locates both sites and writes nothing`() throws {
         var data = try Self.deviceStateImage(cpuSubtype: Self.x1Subtype)
         let pristine = data
-        let report = try CustomFirmwareVirtualAudio.patchDeviceStateGuard(
+        let report = try CustomFirmwareVirtualAudio.patchDeviceStateNullGate(
             &data, reattest: false, dryRun: true, log: nil,
         )
         #expect(report.outcome == .wouldPatch)
         #expect(report.records.isEmpty)
         #expect(data == pristine)
-        #expect(report.sites.map(\.gateVMA) == [UInt64(Self.deviceStateGate1), UInt64(Self.deviceStateGate2)])
-        #expect(report.sites.map(\.skipTargetVMA) == [UInt64(Self.deviceStateSkip1), UInt64(Self.deviceStateSkip2)])
-        #expect(report.theInstanceVMA == UInt64(Self.deviceStateTextStart))
+        #expect(report.sites.map(\.gateCallVMA) == [
+            UInt64(Self.deviceStateGateCall1), UInt64(Self.deviceStateGateCall2),
+        ])
     }
 
     @Test
     func `a plain arm64e plugin is reported and left byte-identical`() throws {
         var data = try Self.deviceStateImage(cpuSubtype: Self.arm64eSubtype)
         let pristine = data
-        let report = try CustomFirmwareVirtualAudio.patchDeviceStateGuard(
+        let report = try CustomFirmwareVirtualAudio.patchDeviceStateNullGate(
             &data, reattest: false, dryRun: false, log: nil,
         )
         #expect(report.outcome == .notArm64EX1)
@@ -558,7 +547,7 @@ struct CustomFirmwareVirtualAudioTests {
         var data = try Self.deviceStateImage(cpuSubtype: Self.x1Subtype, gatedSites: 1)
         let pristine = data
         #expect(throws: PatcherError.self) {
-            try CustomFirmwareVirtualAudio.patchDeviceStateGuard(
+            try CustomFirmwareVirtualAudio.patchDeviceStateNullGate(
                 &data, reattest: false, dryRun: false, log: nil,
             )
         }

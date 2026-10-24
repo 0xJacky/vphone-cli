@@ -197,15 +197,17 @@ With them live, audiomxd crash-looped on this guest (a null read in
 `VirtualAudio.plugin` reached from `SetPropertyData`): the device update
 reads the DeviceStateManager singleton before deferred initialization
 publishes it. Root-caused and fixed by
-`system-virtualaudio-cfw-device_state_guard` (stand each gated
-device-state update down while the singleton is absent; arm64e.x1
-plugins only, earlier builds byte-identical) — see
+`system-virtualaudio-cfw-device_state_null_gate` (make the two gated
+device-state updates wait for the DeviceStateManager singleton — on a
+guest with no haptic hardware it is never constructed — instead of
+dereferencing null; arm64e.x1 plugins only, earlier builds
+byte-identical) — see
 `Research/Guest/virtualaudio_speaker_route_throws.md` § "Layer 5" and
 `Research/0_binary_patch_comparison.md`. Verified on this VM
-(2026-10-23 night, bundle `2.12.0-local.34ce2075`): audiomxd survives at
-a stable pid where it previously died ~0.6 s after every launch (28
-crash reports before, zero new after), and the system-sound stream
-routes on `PuffinOutput` with its DSP chain running.
+(2026-10-24 morning, bundle `2.12.0-local.6a386de6`): both gate calls
+redirected as designed, audiomxd holds one pid past five minutes — the
+window the two earlier variants died in — with zero new crash reports
+and the system-sound stream still routed on `PuffinOutput`.
 
 ## Fold posture (2026-10-23)
 

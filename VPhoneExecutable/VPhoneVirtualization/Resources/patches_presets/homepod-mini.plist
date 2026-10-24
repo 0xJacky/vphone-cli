@@ -135,7 +135,7 @@
 			<string>system-virtualaudio-cfw-speaker_raw_chains</string>
 			<string>system-virtualaudio-cfw-speaker_route_throws</string>
 			<string>system-virtualaudio-cfw-volume_mode_precondition</string>
-			<string>system-virtualaudio-cfw-device_state_guard</string>
+			<string>system-virtualaudio-cfw-device_state_null_gate</string>
 			<string>system-dyld-exp-tv_tpro</string>
 			<string>kernel-exp-tv_tpro_pagers</string>
 		</array>

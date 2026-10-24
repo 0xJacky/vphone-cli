@@ -273,7 +273,7 @@ public enum FirmwarePatchSetCatalog {
         "system-systemhook-cfw-metal_cache_reuse",
         "system-systemversion-cfw-build_version",
         "system-virtiosound-cfw-hal_plugin",
-        "system-virtualaudio-cfw-device_state_guard",
+        "system-virtualaudio-cfw-device_state_null_gate",
         "system-virtualaudio-cfw-microphone_graph_chains",
         "system-virtualaudio-cfw-mute_set_throw",
         "system-virtualaudio-cfw-speaker_graph_chains",

@@ -1771,14 +1771,14 @@ struct VPhoneCustomFirmwareInstaller {
         // The VirtualAudio HAL plugin: five sub-patches ride one staged copy
         // (`patchMachO` stages from the pristine backup, so two calls would not
         // compose). On when any is on; reverted from `.bak` when all are off.
-        // The device-state guard reports "nothing to do" on the non-X1
+        // The device-state early publish reports "nothing to do" on the non-X1
         // plugins, so sharing the stage costs them nothing.
         let virtualAudio: [(id: String, verb: String)] = [
             (FirmwareGuestSystemPatchSet.virtualAudioSpeakerRouteThrows, "patch-virtualaudio"),
             (FirmwareGuestSystemPatchSet.virtualAudioMuteSetThrow, "patch-virtualaudio-mute"),
             (FirmwareGuestSystemPatchSet.virtualAudioSpeakerProtectionGate, "patch-virtualaudio-sp-gate"),
             (FirmwareGuestSystemPatchSet.virtualAudioVolumeModePrecondition, "patch-virtualaudio-volume-gate"),
-            (FirmwareGuestSystemPatchSet.virtualAudioDeviceStateGuard, "patch-virtualaudio-device-state-guard"),
+            (FirmwareGuestSystemPatchSet.virtualAudioDeviceStateNullGate, "patch-virtualaudio-device-state-null-gate"),
         ]
         let virtualAudioBundle = "Library/Audio/Plug-Ins/HAL/VirtualAudio.plugin"
         let virtualAudioBinary = "\(virtualAudioBundle)/VirtualAudio"
