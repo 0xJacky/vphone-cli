@@ -44,7 +44,7 @@ load a disabled job at the next boot. It is the same mechanism
 
 | Group | Default | Labels | Why they can go |
 | --- | --- | --- | --- |
-| `base` | on | 134 | Appendix A of the measurement below, less `siriactionsd`, `passd` and `financed` (list version 2). Nothing in vphone, IcliKit or the guest hooks talks to them |
+| `base` | on | 134 | Appendix A of the measurement below, less `siriactionsd` (list version 2), `passd` and `financed` (list version 3). Nothing in vphone, IcliKit or the guest hooks talks to them |
 | `app_store` | on | `com.apple.appstored`, `com.apple.itunesstored` | Off with the App Store and iTunes Store apps a template removes. `appstorecomponentsd` is already in `base` |
 | `signin_followup` | on | `com.apple.followupd`, `com.apple.appleidsetupd` | The sign-in follow-up and Apple Account setup prompts. They complement `libsigninfix`'s pane suppression. A guest that went through `setup.skip` has no follow-up items, so no orphaned badge is left |
 | `accounts` | off, `groups: ["accounts"]` | `com.apple.akd`, `com.apple.amsaccountsd`, `com.apple.appleaccountd` | Only for guests that never sign in: with these off, the guest cannot sign in to an Apple Account |
@@ -79,7 +79,7 @@ on an iPhone Duo 27.1 guest; allowing the label and restarting restored every
 control. It is now in `neverDisable`, so `trimmed` no longer selects it and a
 guest that applies the profile again turns it back on.
 
-**passd and financed stay (list version 2, 2026-10-24).** Wallet's first
+**passd and financed stay (list version 3, 2026-10-24).** Wallet's first
 screen asks passd synchronously for its pass groups
 (`-[PKPassLibrary _getGroupsControllerSnapshotWithOptions:synchronously:retries:handler:]`),
 and passd waits on financed's Core Data store

@@ -21,7 +21,7 @@ import Foundation
 enum GuestServiceProfile {
     /// Raised whenever a label list changes, and kept in the record, so a
     /// guest shows which list its overrides came from.
-    static let listVersion = 2
+    static let listVersion = 3
     static let recordPath = "/var/db/vphoned/service-profile.plist"
     static let trimmed = "trimmed"
     static let none = "none"
@@ -82,8 +82,8 @@ enum GuestServiceProfile {
     /// Appendix A of the 2026-10-07 measurement on `svctest-a` (iPhone, 27.0
     /// 24A435): the LaunchDaemons that were loaded at boot and stayed unloaded
     /// after the override, with the four traps below already taken out: 137,
-    /// less siriactionsd, passd and financed since list version 2 (see
-    /// `neverDisable`).
+    /// less siriactionsd since list version 2 and passd and financed since
+    /// list version 3 (see `neverDisable`).
     static let base27: [String] = [
         "com.apple.CallHistorySyncHelper",
         "com.apple.Maps.mapspushd",
