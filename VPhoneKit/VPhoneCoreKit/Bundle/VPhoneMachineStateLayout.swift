@@ -66,10 +66,11 @@ public enum VPhoneMachineStateLayout {
     ///   directory (a mount point is one), never a symbolic link: the files in
     ///   it are opened, created and overwritten, and a link would take them
     ///   outside the folder.
-    /// - A machine that has booted (it has a machine identifier) must find its
-    ///   NVRAM and SEP storage. Missing ones would be created empty, and the
-    ///   guest's keys would no longer match its disk; in this layout that is
-    ///   what an unmounted state volume looks like.
+    /// - A machine that has booted (it has a machine identifier), or any
+    ///   machine on an NBD disk, must find its NVRAM and SEP storage. Missing
+    ///   ones would be created empty, and the guest's keys would no longer
+    ///   match its disk; in this layout that is what an unmounted state
+    ///   volume looks like.
     /// - A half-done move between layouts leaves the files where the manifest
     ///   does not look; that is refused too, in both layouts.
     public static func requireLaunchable(_ bundle: VPhoneBundle) throws {
@@ -90,7 +91,10 @@ public enum VPhoneMachineStateLayout {
             }
         case .stateDirectory:
             try requireRealDirectory(stateDirectory, machine: bundle.name)
-            let hasBooted = !bundle.manifest.machineIdentifier.isEmpty
+            // A machine on an NBD disk starts from state files it was given
+            // (`vm create --remote-disk`), never from empty ones: on its first
+            // boot too, a missing file is an unmounted state volume.
+            let hasBooted = !bundle.manifest.machineIdentifier.isEmpty || bundle.manifest.diskLocation.isNetwork
             for name in [bundle.manifest.nvramStorage, bundle.manifest.sepStorage] {
                 let live = bundle.url.appendingPathComponent(name)
                 let kind = VPhoneVirtualMachineManifest.fileKind(at: live)
@@ -385,6 +389,7 @@ public enum VPhoneMachineStateError: Error, Equatable, CustomStringConvertible, 
     case moveFailed(path: String, reason: String)
     case unreadableIdentity(path: String)
     case identityMismatch(machine: String, reason: String)
+    case mountedStateDirectory(machine: String, path: String)
 
     public var description: String {
         switch self {
@@ -410,6 +415,8 @@ public enum VPhoneMachineStateError: Error, Equatable, CustomStringConvertible, 
             "\(path) cannot be read as a vphone identity record. Restore it from a backup, or remove it to have the next boot write a new one from config.plist."
         case let .identityMismatch(machine, reason):
             "\(machine): \(reason)"
+        case let .mountedStateDirectory(machine, path):
+            "\(machine)'s state directory \(path) is a mounted volume. Unmount it first: deleting the machine would delete the files on it."
         }
     }
 

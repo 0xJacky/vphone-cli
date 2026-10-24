@@ -37,6 +37,16 @@ struct VPhoneVirtualMachineCreateCommand: ParsableCommand {
 
         --cpu, --memory, --network and --unlock-at-startup are set on the new VM, whichever way \
         it is made.
+
+        --remote-disk nbd://host:port/export --from-manifest <config.plist> makes a machine whose \
+        disk is that NBD export and whose state lives in a MachineState/ mounted beforehand (a Mac \
+        fleet's storage-backed machine): the folder <library>/<name>/ must already exist and hold \
+        only MachineState, with the template's nvram.bin and SEPStorage in it. The machine is \
+        completed around them from the template's config.plist, with a new identity and this \
+        bundle's ROMs, as a clone from a template is; nothing is copied, downloaded or booted. \
+        --nbd-timeout (default and minimum 60 s) is how long the NBD client waits out a stalled \
+        server: a reconnect stops the VM. On failure only what this create added to the folder \
+        is removed.
         """,
     )
 
@@ -86,6 +96,7 @@ struct VPhoneVirtualMachineCreateCommand: ParsableCommand {
     var keepArtifacts = false
     @Flag(name: .customShort("v"), help: "Increase verbosity: -v tool detail, -vv guest serial, -vvv internal trace")
     var verboseCount: Int
+    @OptionGroup(title: "Remote disk") var remote: VPhoneRemoteDiskCreateOptions
 
     private var isAppleTV: Bool {
         VPhoneGuestDevice.named(device)?.family == .appleTV
@@ -117,6 +128,11 @@ struct VPhoneVirtualMachineCreateCommand: ParsableCommand {
     }
 
     func validate() throws {
+        if remote.remoteDisk != nil {
+            try validateRemoteDisk()
+            return
+        }
+        try remote.requireUnused()
         if template != nil, noTemplate {
             throw ValidationError("--template and --no-template exclude each other.")
         }
@@ -159,6 +175,10 @@ struct VPhoneVirtualMachineCreateCommand: ParsableCommand {
     }
 
     func run() throws {
+        if remote.remoteDisk != nil {
+            try runRemoteDisk()
+            return
+        }
         let resources = VPhoneResources.resolve()
         if let device, VPhoneGuestDevice.named(device) == nil {
             throw ValidationError("vphone runs \(VPhoneGuestDevice.known.map(\.productType).joined(separator: ", ")) guests, not \(device).")
@@ -226,5 +246,126 @@ struct VPhoneVirtualMachineCreateCommand: ParsableCommand {
             skipsFirstBoot: skipFirstBoot,
             slimming: slimming.resolve(),
         ))
+    }
+}
+
+// MARK: - Remote disk
+
+struct VPhoneRemoteDiskCreateOptions: ParsableArguments {
+    @Option(help: ArgumentHelp("Make the VM on this NBD export instead of a disk image (nbd://host:port/export)", valueName: "url"))
+    var remoteDisk: String?
+    @Option(help: ArgumentHelp("With --remote-disk: the template's config.plist the VM is made from", valueName: "path"))
+    var fromManifest: String?
+    @Option(help: "With --remote-disk: NBD connection timeout in seconds (60-600, default 60)")
+    var nbdTimeout: Double?
+    @Flag(name: .customLong("json"), help: "With --remote-disk: print the new VM as JSON")
+    var json = false
+
+    /// Without --remote-disk none of its options may be given.
+    func requireUnused() throws {
+        let given = [
+            ("--from-manifest", fromManifest != nil),
+            ("--nbd-timeout", nbdTimeout != nil),
+            ("--json", json),
+        ].filter(\.1).map(\.0)
+        if !given.isEmpty {
+            throw ValidationError("\(given.joined(separator: ", ")) only go with --remote-disk.")
+        }
+    }
+}
+
+extension VPhoneVirtualMachineCreateCommand {
+    private func validateRemoteDisk() throws {
+        guard let remoteDisk = remote.remoteDisk else { return }
+        guard remote.fromManifest != nil else {
+            throw ValidationError("--remote-disk needs --from-manifest, the template's config.plist.")
+        }
+        guard case .networkBlockDevice = try VPhoneDiskLocation(manifestValue: remoteDisk) else {
+            throw ValidationError("--remote-disk takes an nbd://host:port/export URL, not \(remoteDisk).")
+        }
+        let excluded = try [
+            ("--template", template != nil),
+            ("--no-template", noTemplate),
+            ("--iphone-source", iphoneSource != nil),
+            ("--cloudos-source", cloudosSource != nil),
+            ("--gpu-driver-bundle", gpuDriverBundle != nil),
+            ("--ipsw-cache", ipswCache != nil),
+            ("--device", device != nil),
+            ("--ota-source", otaSource != nil),
+            ("--ota-key", otaKey != nil),
+            ("--disk-size", diskSize != nil),
+            ("--preset", preset != nil),
+            ("--keep-artifacts", keepArtifacts),
+            ("the slimming switches", !slimming.request.isEmpty),
+        ].filter(\.1).map(\.0)
+        if !excluded.isEmpty {
+            throw ValidationError("\(excluded.joined(separator: ", ")) cannot be used with --remote-disk: the VM is made from the template's config.plist and the state already in MachineState/.")
+        }
+        do {
+            try remoteSpec(disk: remoteDisk).validate()
+        } catch let error as VPhoneRemoteDiskMachineError {
+            throw ValidationError(error.description)
+        } catch let error as VPhoneDiskLocationError {
+            throw ValidationError(error.description)
+        }
+        _ = try network.map(VPhoneVirtualMachineConfigCommand.parseMode)
+        _ = try unlockAtStartup.map { try VPhoneVirtualMachineConfigCommand.parseSwitch($0, option: "--unlock-at-startup") }
+    }
+
+    private func remoteSpec(disk: String) throws -> VPhoneRemoteDiskMachine {
+        try VPhoneRemoteDiskMachine(
+            name: name,
+            disk: VPhoneNBDLocation(parsing: disk),
+            timeoutSeconds: remote.nbdTimeout ?? VPhoneRemoteDiskMachine.minimumTimeoutSeconds,
+            manifestSource: URL(fileURLWithPath: ((remote.fromManifest ?? "") as NSString).expandingTildeInPath),
+        )
+    }
+
+    /// Completes the mounted machine folder and applies the settings a create
+    /// from a template applies. Nothing boots: the first start is the caller's.
+    private func runRemoteDisk() throws {
+        guard let remoteDisk = remote.remoteDisk else { return }
+        let networkMode = try network.map(VPhoneVirtualMachineConfigCommand.parseMode)
+        let unlocks = try unlockAtStartup.map { try VPhoneVirtualMachineConfigCommand.parseSwitch($0, option: "--unlock-at-startup") }
+        let library = lib.library
+        try VPhoneBundleOperations.createOnRemoteDisk(remoteSpec(disk: remoteDisk), in: library)
+        let bundle: VPhoneBundle
+        do {
+            bundle = try VPhoneBundleOperations.updateConfig(
+                bundleNamed: name,
+                in: library,
+                cpuCount: cpu,
+                memoryMB: memory,
+                networkMode: networkMode,
+                unlocksAtStartup: unlocks,
+            )
+        } catch {
+            try? VPhoneBundleOperations.removeRemoteDiskMachineFiles(named: name, in: library)
+            throw error
+        }
+        let manifest = bundle.manifest
+        if remote.json {
+            let report: [String: Any] = [
+                "name": bundle.name,
+                "path": bundle.url.path,
+                "disk": manifest.diskLocation.manifestValue,
+                "nbd_timeout_seconds": manifest.nbd?.effectiveTimeout ?? VPhoneRemoteDiskMachine.minimumTimeoutSeconds,
+                "state_layout": VPhoneMachineStateLayout.kind(of: manifest)?.rawValue ?? "mixed",
+                "state_directory": VPhoneMachineStateLayout.directory(of: bundle).path,
+                "cpu": manifest.cpuCount,
+                "memory_mb": manifest.memorySize / (1024 * 1024),
+                "network": manifest.networkConfig.mode.rawValue,
+                "unlock_at_startup": manifest.unlocksScreenAtStartup,
+                "boot_rom": manifest.romImages?.avpBooter ?? "",
+                "sep_rom": manifest.romImages?.avpSEPBooter ?? "",
+                "device": manifest.guestDevice.productType,
+            ]
+            let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+            print(String(decoding: data, as: UTF8.self))
+            return
+        }
+        print("[+] \(bundle.name) made on \(manifest.diskLocation.manifestValue) with its state in "
+            + "\(VPhoneMachineStateLayout.directory(of: bundle).path), a new identity, "
+            + "\(manifest.cpuCount) CPU, \(manifest.memorySize / (1024 * 1024)) MB, network \(manifest.networkConfig.mode.rawValue)")
     }
 }

@@ -264,8 +264,18 @@ public enum VPhoneBundleOperations {
             : nil
     }
 
+    /// Refused while `MachineState` is a mounted volume: removing the folder
+    /// would empty the volume, which belongs to whoever mounted it.
     public static func delete(bundleNamed name: String, in library: VPhoneLibrary) throws {
         let url = try library.bundle(named: name).url
+        let state = url.appendingPathComponent(VPhoneMachineStateLayout.directoryName, isDirectory: true)
+        var folder = stat()
+        var mounted = stat()
+        if lstat(url.path, &folder) == 0, lstat(state.path, &mounted) == 0,
+           mounted.st_mode & S_IFMT == S_IFDIR, mounted.st_dev != folder.st_dev
+        {
+            throw VPhoneMachineStateError.mountedStateDirectory(machine: name, path: state.path)
+        }
         try FileManager.default.removeItem(at: url)
     }
 
