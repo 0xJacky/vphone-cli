@@ -14,6 +14,7 @@ and state files.
 | Give a guest's memory back to the Mac, resume later on the same Mac | `vm save-state`, `vm restore-state` |
 | Keep the disk on shared storage | `vm storage --disk nbd://host:port/export` |
 | Keep everything else that must follow the machine in one directory | `vm storage --state-dir on` |
+| Make a new machine on a network disk and a mounted state directory | `vm create --remote-disk … --from-manifest …` |
 
 Research notes, including which devices stop a vphone from being saved, are
 in `Research/Host/save_restore_and_network_disks.md`. The tests still owed on
@@ -154,6 +155,40 @@ On every boot in this layout `vphone-vm`:
 Snapshots keep each state file under its plain name in both layouts, so a
 snapshot taken before `--state-dir on` still reverts after it. Snapshots and
 clones need `MachineState` on the same APFS volume as the machine folder.
+
+## A new machine on a network disk
+
+```sh
+mkdir ~/.vphone/machines/st-1                      # then mount the state volume on st-1/MachineState
+vphone-cli vm create st-1 --remote-disk nbd://10.41.2.2:17600/vm-st-1-disk.tok \
+    --from-manifest ~/.vphone/machines/st-1/MachineState/config.plist \
+    --cpu 4 --memory 6144 --network tunnel --json
+```
+
+For a machine whose disk and state live on storage nodes (a Mac fleet clones
+both from a template there), so the template itself is not on this Mac. The
+folder must already exist and hold only `MachineState`, a real directory (a
+mount point is one) that this account can write, with the template's
+`nvram.bin` and `SEPStorage` in it. `--from-manifest` is the template's
+`config.plist`, only read. The machine is completed around them as a clone
+from a template is: a new identity (machine identifier, MAC address, fixed
+address, port forwards and a hand-set mDNS name cleared, `identity.plist`
+removed), this bundle's OpenAVB and OpenSEP, then `--cpu`, `--memory`,
+`--network` and `--unlock-at-startup`. Nothing is copied or downloaded and the
+guest does not boot; the first start is `vm launch`, as for any machine.
+
+- `--nbd-timeout` is 60 s by default and cannot be lower: the client rides out
+  a server that stalls for less than its timeout, but a reconnect stops the VM
+  for good, so the timeout must outlast a storage node's stalls.
+- It refuses a folder with anything but `MachineState` in it (an existing
+  `config.plist` reads as "already exists"), a `MachineState` without the two
+  state files, and a template whose `config.plist` names them differently.
+- On failure only what it added to the folder is removed; the folder and
+  `MachineState/` stay as they were, so it can be run again.
+- A machine on an NBD disk never starts without its NVRAM and SEP storage, on
+  its first boot too: an empty `MachineState` is an unmounted state volume.
+- `vm delete` refuses while `MachineState` is a mounted volume; unmount it
+  first, or the files on it would be deleted with the folder.
 
 ## Compatibility
 
