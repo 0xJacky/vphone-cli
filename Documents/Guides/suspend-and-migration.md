@@ -189,6 +189,14 @@ guest does not boot; the first start is `vm launch`, as for any machine.
   its first boot too: an empty `MachineState` is an unmounted state volume.
 - `vm delete` refuses while `MachineState` is a mounted volume; unmount it
   first, or the files on it would be deleted with the folder.
+- An NFS-mounted `MachineState` is a network volume, and macOS asks before an
+  app opens files on one (Privacy & Security > Files & Folders, Network
+  Volumes). The first open blocks until someone answers the dialog on the
+  Mac's own screen; it does not fail. `vphone-vm` probes `MachineState` first
+  and gives up after 30 s with an error naming the dialog (2.12.2; 2.12.1 sat
+  with no VM and no log). The bundle is signed ad hoc, so TCC knows it by its
+  cdhash and asks again after every bundle upgrade, on every Mac. Starting it
+  over SSH does not help: the job runs in the logged-in user's session.
 
 ## Compatibility
 
