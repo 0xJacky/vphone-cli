@@ -81,6 +81,30 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// How long a launch waits for macOS's network-volume consent before it
+    /// gives up with an error naming the dialog.
+    private static let networkVolumeConsentTimeout: TimeInterval = 30
+
+    /// A state directory on a network volume (an NFS-mounted state volume)
+    /// is probed before anything opens files in it: the first open blocks
+    /// until the Mac's user answers a consent dialog (VPhoneNetworkVolumeAccess).
+    private static func requireStateDirectoryAccess(configURL: URL) throws {
+        let directory = configURL.deletingLastPathComponent()
+            .appendingPathComponent(VPhoneMachineStateLayout.directoryName, isDirectory: true)
+        guard VPhoneNetworkVolumeAccess.isNetworkVolume(directory) else { return }
+        print("[vphone] MachineState is on a network volume; checking access")
+        switch VPhoneNetworkVolumeAccess.probe(directory: directory, timeout: networkVolumeConsentTimeout) {
+        case .writable:
+            return
+        case .timedOut:
+            throw VPhoneVirtualMachineError.networkVolumeConsentPending(
+                VPhoneNetworkVolumeAccess.consentMessage(directory: directory, waited: networkVolumeConsentTimeout),
+            )
+        case let .failed(code):
+            throw VPhoneVirtualMachineError.stateDirectoryNotWritable(directory.path, String(cString: strerror(code)))
+        }
+    }
+
     @MainActor
     private func startVirtualMachine() async throws {
         let options = try command.resolveOptions()
@@ -109,6 +133,10 @@ class VPhoneVirtualMachineAppDelegate: NSObject, NSApplicationDelegate {
         print("  storage         : \(options.sepStorageURL.path)")
         print("  rom             : \(options.sepRomURL?.path ?? "None")")
         print("")
+
+        if options.stateLayout == .stateDirectory {
+            try Self.requireStateDirectoryAccess(configURL: options.configURL)
+        }
 
         let vm = try VPhoneVirtualMachine(options: options)
         self.vm = vm

@@ -9,6 +9,8 @@ enum VPhoneVirtualMachineError: Error, CustomStringConvertible {
     case machineIdentityMismatch(String)
     case notRunning(String)
     case saveRestoreUnsupported(String)
+    case networkVolumeConsentPending(String)
+    case stateDirectoryNotWritable(String, String)
 
     var description: String {
         switch self {
@@ -34,6 +36,10 @@ enum VPhoneVirtualMachineError: Error, CustomStringConvertible {
             "The VM is \(state); it must be running or paused."
         case let .saveRestoreUnsupported(reason):
             "Virtualization cannot save this VM's state. Blocked by: \(reason)"
+        case let .networkVolumeConsentPending(message):
+            "Refusing to start: \(message)"
+        case let .stateDirectoryNotWritable(path, reason):
+            "Refusing to start: cannot create a file in \(path): \(reason)"
         }
     }
 }

@@ -16,6 +16,9 @@ public enum VPhoneGuestApp {
     /// isolation was implicit, and moving the code into a function loses it.
     @MainActor
     public static func run(_ boot: VPhoneBootCommand) -> Never {
+        // Under launchd stdout is a file and fully buffered: a launch that
+        // hangs would leave the job log empty.
+        setvbuf(stdout, nil, _IOLBF, 0)
         // The first `shared` call picks the class, so this must come first.
         let app = VPhoneApplication.shared
         let delegate = VPhoneVirtualMachineAppDelegate(command: boot)
