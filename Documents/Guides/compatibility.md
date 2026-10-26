@@ -53,7 +53,7 @@ carries it.
 
 ## macOS 26.6.2 hosts
 
-Checked on 2026-10-23 on Mac mini M4 hosts (Mac16,10, 16 GB, macOS 26.6.2 25G83) with Core Bundle 2.12.1. Every machine was created from nothing, from the CLI: the research-board pairings stage their kernelcache mix as the user and link it with sudo, then `sudo vphone-cli vm create`. A default is the newest pairing `fw catalog` gives that device on this Mac, as Launchpad's New Machine selects. Each machine then booted twice headless: vphoned answered, `device.info` reported the release, and the guest's serial log showed no panic.
+Checked on 2026-10-23 with Core Bundle 2.12.1, and again on 2026-10-24 with Core Bundle 2.12.2, on Mac mini M4 hosts (Mac16,10, 16 GB, macOS 26.6.2 25G83). Every machine was created from nothing, from the CLI: the research-board pairings stage their kernelcache mix as the user and link it with sudo, then `sudo vphone-cli vm create`. A default is the newest pairing `fw catalog` gives that device on this Mac, as Launchpad's New Machine selects. Each machine then booted twice headless: vphoned answered, `device.info` reported the release, and the guest's serial log showed no panic.
 
 | Guest | Firmware | cloudOS | Result |
 | --- | --- | --- | --- |
@@ -76,6 +76,15 @@ Checked on 2026-10-23 on Mac mini M4 hosts (Mac16,10, 16 GB, macOS 26.6.2 25G83)
 | AudioAccessory5,1 | HomePod Software 27.2 | — | refused before any download: needs macOS 27 |
 
 The tvOS 27.0 (24J361) and HomePod Software 27.2 (24K120) OTAs compress their payload with LZRAVEN, which only macOS 27 unpacks. On an older Mac `fw catalog` leaves them out, so Launchpad's default for those devices is tvOS 26.6 and HomePod Software 27.0, and naming one is refused before anything is downloaded.
+
+Apple TV 4K (4th generation), `AppleTV18,1` / `J265AP`, is available for
+bring-up with tvOS 27.2 beta (`24K120`) only, using its full OTA over the
+Apple TV HD 26.6 restore base and cloudOS 26.4 beta (`23E5207q`). It requires
+macOS 27 and the `tvos-4k` preset. On 2026-10-24 one machine was restored,
+had its custom firmware installed, and cold booted twice to vphoned and the 4K
+Language screen of the legacy TVSetup; setup itself was not completed. It is
+not included in the tested table above. See the
+[bring-up notes](../../Research/Firmware/tvos_support.md#apple-tv-4k-4th-generation).
 
 cloudOS 26.7 (23H20) has no iPhone release to pair with. Staged with iOS 26.6.2's userland, its mix links and its 28 kernelcache patches apply; the CFW patch `_vm_fault_enter_prepare` finds no site in that kernel. It has not booted.
 
