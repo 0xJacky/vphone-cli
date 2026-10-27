@@ -194,8 +194,10 @@ guest does not boot; the first start is `vm launch`, as for any machine.
   Volumes). The first open blocks until someone answers the dialog on the
   Mac's own screen; it does not fail. `vphone-vm` probes `MachineState` first
   and gives up after 30 s with an error naming the dialog (2.12.2; 2.12.1 sat
-  with no VM and no log). The bundle is signed ad hoc, so TCC knows it by its
-  cdhash and asks again after every bundle upgrade, on every Mac. Starting it
+  with no VM and no log). A bundle signed ad hoc is known to TCC by its
+  cdhash and is asked again after every bundle upgrade, on every Mac; a bundle
+  built with a signing identity keeps the grant across upgrades signed the same
+  way ([signing identity](bundle-integration.md#signing-identity)). Starting it
   over SSH does not help: the job runs in the logged-in user's session.
 
 ## Compatibility

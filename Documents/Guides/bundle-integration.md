@@ -24,8 +24,9 @@ Launchpad 2.1.0 and later require a bundle version of at least 2.1.0, which
 adds patch presets (`fw patches`, `fw set-patches`, `fw patch --preset`), and
 the `vphone-escalator` executable. It does not load older bundle layouts.
 
-All executable payloads use ad hoc code signatures. Only the required child
-processes carry private entitlements. The bundle has no `CFBundleExecutable`,
+Executable payloads are signed ad hoc unless the build names a signing
+identity (`VPHONE_SIGN_IDENTITY`, below). Only the required child processes
+carry private entitlements. The bundle has no `CFBundleExecutable`,
 app launcher, SMJobBless helper, installer, password prompt, or automatic root
 acquisition. The integrating application owns download, release verification,
 host authorization, installation, and update policy. Developer Tools access
@@ -34,8 +35,9 @@ and AMFI authorization are separate host decisions.
 macOS asks for a privacy permission (microphone, location) on behalf of the
 responsible process and ties the grant to its code signature. When
 `vphone-cli` is started with responsibility disclaimed, it becomes the
-responsible process for `vphone-vm`; it is signed ad hoc, so each new bundle
-build is asked again. An integrating application that starts `vphone-cli` as
+responsible process for `vphone-vm`; signed ad hoc, its designated
+requirement is its cdhash, so each new bundle build is asked again. A build
+signed with a certificate keeps the grant (see Signing identity below). An integrating application that starts `vphone-cli` as
 an ordinary child of a process with a stable signature, without disclaiming
 responsibility, gets the permission asked once. Launchpad does this with
 `vphone-launchpad-launcher`, which it carries in its own `Contents/MacOS`.
@@ -61,3 +63,29 @@ xcodebuild -workspace VPhone.xcworkspace -scheme VPhone \
   -configuration Debug -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath .build/XcodeBundle build
 ```
+
+## Signing identity
+
+The `VPhone` scheme signs the host-side code (`vphone-cli`, `vphone-vm`,
+`vphone-escalator`, the Span compatibility library, `VPhonePatchKit`,
+`VPhoneLocation.app` and the bundle) ad hoc by default. Pass a codesign
+identity as a build setting to sign them with it instead:
+
+```sh
+xcodebuild -workspace VPhone.xcworkspace -scheme VPhone -configuration Release \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath .build/XcodeBundle build \
+  VPHONE_SIGN_IDENTITY=<SHA-1 of a codesigning identity in the keychain>
+```
+
+With an identity the designated requirement names the identifier and the
+certificate's team rather than the build's cdhash, so privacy grants that macOS
+keys to the requirement (Network Volumes for an NFS `MachineState`, the
+microphone) carry over to later builds signed the same way. Entitlements are
+unchanged, the guest binaries stay ad hoc, and the signature takes a secure
+timestamp. `ValidateBundle.sh` then refuses a bundle or `vphone-vm` whose
+requirement is still a cdhash. AMFI authorization does not change: a private
+entitlement still needs `vphone-escalator allow`, which allow-lists the
+`vphone-vm` cdhash whoever signed it. Gatekeeper is not involved for a bundle
+installed without quarantine, and the bundle is not notarized. Never commit
+the identity or a team ID.
+

@@ -15,7 +15,7 @@ xcodebuild -workspace VPhone.xcworkspace -scheme VPhone \
 .build/XcodeBundle/Build/Products/Debug/VPhone.bundle/Contents/MacOS/vphone-cli host preflight
 ```
 
-Build the `VPhone` scheme in Xcode to produce the ad hoc signed bundle with all companion binaries. `host preflight` checks the entitled companion before any VM is started. If AMFI refuses it, the error prints the bundled allowlist helper command.
+Build the `VPhone` scheme in Xcode to produce the signed bundle with all companion binaries (ad hoc unless `VPHONE_SIGN_IDENTITY` names an identity; see [bundle integration](bundle-integration.md#signing-identity)). `host preflight` checks the entitled companion before any VM is started. If AMFI refuses it, the error prints the bundled allowlist helper command.
 
 ## Permit the entitled VM binary
 
