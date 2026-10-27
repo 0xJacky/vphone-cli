@@ -44,6 +44,19 @@ done
 require_signed_macho "$frameworks/VPhonePatchKit.framework/Versions/A/VPhonePatchKit"
 require_signed_macho "$location_helper"
 /usr/bin/codesign --verify --strict "$location_app"
+# A build that names a signing identity is meant to keep the privacy grants
+# (network volumes, microphone) of the builds before it, which only holds
+# while the designated requirement names the team rather than this build's
+# cdhash (see StageBundle.sh).
+if [[ "${VPHONE_SIGN_IDENTITY:--}" != - ]]; then
+    for code in "$bundle" "$macos/vphone-vm"; do
+        requirement="$(/usr/bin/codesign -d -r- "$code" 2>/dev/null)"
+        [[ "$requirement" == *'certificate leaf[subject.OU]'* && "$requirement" != *cdhash* ]] || {
+            print -u2 "Not signed with a team identity: ${code#$bundle/}"
+            exit 1
+        }
+    done
+fi
 # One requirement for every build, so locationd keeps one grant for all of
 # them (see StageBundle.sh).
 [[ "$(/usr/bin/codesign -d -r- "$location_app" 2>/dev/null)" == *'designated => identifier "com.vphone.bundle.location"' ]] || {

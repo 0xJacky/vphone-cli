@@ -166,14 +166,26 @@ compatibility_library="$(/usr/bin/xcrun swift-stdlib-tool --print \
     @loader_path/libswiftCompatibilitySpan.vphone.dylib "$macos/vphone-vm"
 /bin/rm -f "$frameworks/libswiftCompatibilitySpan.dylib"
 
-/usr/bin/codesign --force --sign - "$frameworks/VPhonePatchKit.framework"
-/usr/bin/codesign --force --sign - "$macos/vphone-cli"
+# The host-side code is signed with VPHONE_SIGN_IDENTITY when the build names
+# one (a codesign identity, by SHA-1 or name), ad hoc otherwise. An ad hoc
+# signature's designated requirement is its cdhash, and macOS keeps privacy
+# grants against that requirement: the network-volume consent a MachineState
+# on NFS needs (TCC, subject com.vphone.bundle) would be asked again on every
+# Mac after every build. A certificate's requirement names the identifier and
+# the team instead, so the grant outlives the build. The guest binaries stay
+# ad hoc: they run in the guest, not under macOS's code requirements.
+sign_identity="${VPHONE_SIGN_IDENTITY:--}"
+host_sign=(--force --sign "$sign_identity")
+[[ "$sign_identity" == - ]] || host_sign+=(--timestamp)
+
+/usr/bin/codesign "${host_sign[@]}" "$frameworks/VPhonePatchKit.framework"
+/usr/bin/codesign "${host_sign[@]}" "$macos/vphone-cli"
 /usr/bin/codesign --force --sign - --entitlements "$root/VPhoneDaemon/Configuration/VPhoneDaemon.entitlements" "$guest/vphoned"
 /usr/bin/codesign --force --sign - --entitlements "$root/VPhoneDaemon/Configuration/VPhoneDaemon.entitlements" "$guest/vphoned-tvos"
 /usr/bin/codesign --force --sign - --entitlements "$root/VPhoneDaemon/Configuration/VPhoneDaemon.entitlements" "$guest/vphoned-watchos"
-/usr/bin/codesign --force --sign - "$macos/vphone-escalator"
-/usr/bin/codesign --force --sign - "$macos/libswiftCompatibilitySpan.vphone.dylib"
-/usr/bin/codesign --force --sign - --entitlements "$root/VPhoneExecutable/VPhoneVirtualization/Resources/VPhoneVirtualization.entitlements" "$macos/vphone-vm"
+/usr/bin/codesign "${host_sign[@]}" "$macos/vphone-escalator"
+/usr/bin/codesign "${host_sign[@]}" "$macos/libswiftCompatibilitySpan.vphone.dylib"
+/usr/bin/codesign "${host_sign[@]}" --entitlements "$root/VPhoneExecutable/VPhoneVirtualization/Resources/VPhoneVirtualization.entitlements" "$macos/vphone-vm"
 # locationd keeps the requirement a client first registered with and turns
 # away a client with another one while that one still runs. An ad hoc
 # signature's implicit requirement is its cdhash, so each build would be a
@@ -181,8 +193,8 @@ compatibility_library="$(/usr/bin/xcrun swift-stdlib-tool --print \
 # bundles cannot both read the Mac's location. Every build names the helper by
 # identifier instead. That lends nothing new: the helper already hands the
 # location to whatever starts it.
-/usr/bin/codesign --force --sign - \
+/usr/bin/codesign "${host_sign[@]}" \
     --requirements '=designated => identifier "com.vphone.bundle.location"' "$location_app"
-/usr/bin/codesign --force --sign - "$bundle"
+/usr/bin/codesign "${host_sign[@]}" "$bundle"
 
 "${0:a:h}/ValidateBundle.sh" "$bundle"
