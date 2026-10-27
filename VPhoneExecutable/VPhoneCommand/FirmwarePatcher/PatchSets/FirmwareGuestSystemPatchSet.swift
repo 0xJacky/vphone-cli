@@ -416,7 +416,16 @@ public enum FirmwareGuestSystemPatchSet {
                 title: "HomePod setup completion",
                 summary: "Completes the donor's local AudioAccessory setup state as mobile, prepares SetupAssistant's native launch sentinel and lets SoundBoard initialize its post-setup services. Turning it off restores the prior completion flags at the next boot. Does not provision accounts, activation or a HomeKit home.",
                 target: .guestFile(path: homePodSetupPath),
-                applicability: VPhonePatchApplicability(iOSBase: .major(27)),
+                // 26.5 has the same AudioAccessory gate and SetupAssistant
+                // exports; the helper refuses if one is missing.
+                applicability: VPhonePatchApplicability(iOSBase: .atLeast(major: 26, minor: 5)),
+            ),
+            VPhonePatchDeclaration(
+                identifier: homePodAirPlayVM,
+                title: "HomePod AirPlay on a VM",
+                summary: "Sets AirPlay's own virtual-machine override (useWiFiAndAWDLOnVirtualMachine in mobile's com.apple.airplay) through the HomePod helper, so AirPlay keeps discovery and its own endpoint and a Mac or iPhone can play to the guest. Turning it off restores the prior value at the next boot.",
+                target: .guestFile(path: homePodAirPlayVMPath),
+                applicability: VPhonePatchApplicability(iOSBase: .release(major: 26, minor: 5)),
             ),
             VPhonePatchDeclaration(
                 identifier: homePodSiriSpeech,
@@ -712,6 +721,8 @@ public enum FirmwareGuestSystemPatchSet {
     public static let homePodDisplayPath = "/usr/share/vphone/HomePodDisplay.plist"
     public static let homePodSetupBypass = "system-homepod-exp-setup_bypass"
     public static let homePodSetupPath = "/usr/share/vphone/HomePodSetup.plist"
+    public static let homePodAirPlayVM = "system-homepod-exp-airplay_vm"
+    public static let homePodAirPlayVMPath = "/usr/share/vphone/HomePodAirPlay.plist"
     public static let homePodWelcome = "system-homepod-exp-welcome"
     public static let homePodWelcomePath = "/usr/share/vphone/HomePodWelcome.plist"
     public static let homePodSiriSpeech = "system-homepod-exp-siri_speech"

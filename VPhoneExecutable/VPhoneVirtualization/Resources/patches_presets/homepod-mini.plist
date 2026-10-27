@@ -143,7 +143,7 @@
 		</array>
 	</dict>
 	<key>Summary</key>
-	<string>Research: HomePod mini's own arm64e TVOS IPSW with vphoned, its donor-driven top cap, local setup completion and virtio audio using an audio-only B520 route, without changing the VM product token or adding Apple TV OTA replacement or iPhone display, camera and routing hooks.</string>
+	<string>Research: HomePod mini's own arm64e TVOS IPSW with vphoned, its donor-driven top cap, local setup completion, AirPlay's own VM override and virtio audio using an audio-only B520 route, without changing the VM product token or adding Apple TV OTA replacement or iPhone display, camera and routing hooks.</string>
 	<key>Title</key>
 	<string>HomePod mini</string>
 </dict>

@@ -68,7 +68,7 @@ public enum FirmwarePatchSetCatalog {
         Set(FirmwareKernelFridaPatchSet.manifest.patches.map(\.identifier))
             .union(hypervisorConcealmentPatches)
             .union(experimentalIdentityPatches)
-            .union([FirmwareGuestSystemPatchSet.otaUserland, FirmwareGuestSystemPatchSet.homePodTopCap, FirmwareGuestSystemPatchSet.homePodSetupBypass, FirmwareGuestSystemPatchSet.homePodAudioProduct, FirmwareGuestSystemPatchSet.homePodWelcome, FirmwareGuestSystemPatchSet.homePodSiriSpeech, FirmwareGuestSystemPatchSet.homePodOTAUserland, FirmwareGuestSystemPatchSet.homePodSoundGlow, FirmwareGuestSystemPatchSet.homePodCryptexStaging, FirmwareGuestSystemPatchSet.homePodCryptexClass, FirmwareGuestSystemPatchSet.homePodAdHocInstall])
+            .union([FirmwareGuestSystemPatchSet.otaUserland, FirmwareGuestSystemPatchSet.homePodTopCap, FirmwareGuestSystemPatchSet.homePodSetupBypass, FirmwareGuestSystemPatchSet.homePodAirPlayVM, FirmwareGuestSystemPatchSet.homePodAudioProduct, FirmwareGuestSystemPatchSet.homePodWelcome, FirmwareGuestSystemPatchSet.homePodSiriSpeech, FirmwareGuestSystemPatchSet.homePodOTAUserland, FirmwareGuestSystemPatchSet.homePodSoundGlow, FirmwareGuestSystemPatchSet.homePodCryptexStaging, FirmwareGuestSystemPatchSet.homePodCryptexClass, FirmwareGuestSystemPatchSet.homePodAdHocInstall])
             .union([FirmwareKernelCustomFirmwarePatchSet.tvTPROPagers, misTrustAuthPatch, FirmwareGuestSystemPatchSet.settingsRootRows, FirmwareGuestSystemPatchSet.settingsSoftwareUpdate, FirmwareGuestSystemPatchSet.tvTPRO, FirmwareGuestSystemPatchSet.tvOTAUserland, FirmwareGuestSystemPatchSet.tvSetupDisplayLookup, FirmwareGuestSystemPatchSet.tvSetupFocus, FirmwareGuestSystemPatchSet.tvLocalActivation, FirmwareGuestSystemPatchSet.tvLegacySetup])
 
     /// ProMotion: the 120 Hz timing for the paravirtual display.
@@ -226,7 +226,7 @@ public enum FirmwarePatchSetCatalog {
         freshly restored 26.4 guest does not survive. The HomePod-only top cap is off.
         """,
         patchSets: bundledReferences,
-        selection: .block([FirmwareGuestSystemPatchSet.tvLegacySetup, FirmwareGuestSystemPatchSet.tvSetupDisplayLookup, FirmwareGuestSystemPatchSet.tvSetupFocus, FirmwareGuestSystemPatchSet.tvLocalActivation, FirmwareGuestSystemPatchSet.homePodTopCap, FirmwareGuestSystemPatchSet.homePodSetupBypass, FirmwareGuestSystemPatchSet.homePodAudioProduct, FirmwareGuestSystemPatchSet.homePodWelcome, FirmwareGuestSystemPatchSet.homePodSiriSpeech, FirmwareGuestSystemPatchSet.homePodOTAUserland, FirmwareGuestSystemPatchSet.homePodSoundGlow, FirmwareGuestSystemPatchSet.homePodCryptexStaging, FirmwareGuestSystemPatchSet.homePodCryptexClass, FirmwareGuestSystemPatchSet.homePodAdHocInstall]),
+        selection: .block([FirmwareGuestSystemPatchSet.tvLegacySetup, FirmwareGuestSystemPatchSet.tvSetupDisplayLookup, FirmwareGuestSystemPatchSet.tvSetupFocus, FirmwareGuestSystemPatchSet.tvLocalActivation, FirmwareGuestSystemPatchSet.homePodTopCap, FirmwareGuestSystemPatchSet.homePodSetupBypass, FirmwareGuestSystemPatchSet.homePodAirPlayVM, FirmwareGuestSystemPatchSet.homePodAudioProduct, FirmwareGuestSystemPatchSet.homePodWelcome, FirmwareGuestSystemPatchSet.homePodSiriSpeech, FirmwareGuestSystemPatchSet.homePodOTAUserland, FirmwareGuestSystemPatchSet.homePodSoundGlow, FirmwareGuestSystemPatchSet.homePodCryptexStaging, FirmwareGuestSystemPatchSet.homePodCryptexClass, FirmwareGuestSystemPatchSet.homePodAdHocInstall]),
     )
 
     /// The iOS payloads, hooks and shared-cache patches an Apple TV guest has no
@@ -333,10 +333,10 @@ public enum FirmwarePatchSetCatalog {
     public static let homePodMiniPreset = VPhonePatchPreset(
         identifier: VPhonePatchPreset.homePodMiniIdentifier,
         title: "HomePod mini",
-        summary: "Research: HomePod mini's own arm64e TVOS IPSW with vphoned, its donor-driven top cap, local setup completion and virtio audio using an audio-only B520 route, without changing the VM product token or adding Apple TV OTA replacement or iPhone display, camera and routing hooks.",
+        summary: "Research: HomePod mini's own arm64e TVOS IPSW with vphoned, its donor-driven top cap, local setup completion, AirPlay's own VM override and virtio audio using an audio-only B520 route, without changing the VM product token or adding Apple TV OTA replacement or iPhone display, camera and routing hooks.",
         patchSets: bundledReferences,
         selection: .block(
-            manualOnlyPatches.subtracting([FirmwareGuestSystemPatchSet.homePodTopCap, FirmwareGuestSystemPatchSet.homePodSetupBypass, FirmwareGuestSystemPatchSet.homePodWelcome, FirmwareGuestSystemPatchSet.homePodSiriSpeech, FirmwareGuestSystemPatchSet.homePodOTAUserland, FirmwareGuestSystemPatchSet.homePodSoundGlow, FirmwareGuestSystemPatchSet.homePodCryptexStaging, FirmwareGuestSystemPatchSet.homePodCryptexClass, FirmwareGuestSystemPatchSet.homePodAdHocInstall])
+            manualOnlyPatches.subtracting([FirmwareGuestSystemPatchSet.homePodTopCap, FirmwareGuestSystemPatchSet.homePodSetupBypass, FirmwareGuestSystemPatchSet.homePodAirPlayVM, FirmwareGuestSystemPatchSet.homePodWelcome, FirmwareGuestSystemPatchSet.homePodSiriSpeech, FirmwareGuestSystemPatchSet.homePodOTAUserland, FirmwareGuestSystemPatchSet.homePodSoundGlow, FirmwareGuestSystemPatchSet.homePodCryptexStaging, FirmwareGuestSystemPatchSet.homePodCryptexClass, FirmwareGuestSystemPatchSet.homePodAdHocInstall])
                 .union(tvOSBlockedPatches.subtracting(tvOS27UserlandPatches).subtracting([FirmwareGuestSystemPatchSet.virtioSoundDriver, FirmwareGuestSystemPatchSet.installCoordinationPersona])),
         ),
     )

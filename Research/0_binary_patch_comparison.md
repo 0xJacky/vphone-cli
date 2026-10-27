@@ -367,6 +367,36 @@
 > presentation/reconnection. Opt-out restored absent keys and setup behavior.
 > See [implementation, live evidence, and service boundaries](Firmware/homepod_soundboard_controls.md).
 
+> **HomePod setup completion on 26.5 (2026-10-26).** The gate of
+> `system-homepod-exp-setup_bypass` is now 26.5 or later (`.atLeast(26, 5)`
+> instead of `.major(27)`); the helper is unchanged. Under `homepod-mini` on the
+> 26.5 kernelcache mix (`homepod-std`, HomePod Software 26.5, 23L471), an
+> environment update reported the patch "on in the current selection, newer
+> than this VM's patch plan" and staged the marker. On the next boot the helper
+> journalled both keys as absent, found all four SetupAssistant exports, and
+> reported `NeedsSetup=false`, `CompletedInitialRun=true`, `Succeeded=true`
+> with a fresh `lastPrepareLaunchSentinel`; HPSetup ended. Setting the two keys
+> with vphoned's `setup.skip` alone, as before, skips that sentinel, so
+> SoundBoard never runs its setup-gated initialization. No new instruction patch.
+
+> **HomePod AirPlay on a VM (2026-10-27).** New `system-homepod-exp-airplay_vm`
+> is HomePod-only, restricted to 26.5, and selected only by `homepod-mini`. It
+> installs the System marker `/usr/share/vphone/HomePodAirPlay.plist`; the
+> existing setup helper then sets AirPlay's own VM override,
+> `useWiFiAndAWDLOnVirtualMachine = 1` in mobile's `com.apple.airplay`,
+> through CFPreferences. Without it `APSIsVirtualMachine()` is true and
+> airplayd forces discovery mode none ("customer VM build"), so the HomePod has
+> no local endpoint and a Mac's Music fails with -15016. The helper journals the
+> original value the same way as the setup keys (absent included) and, only when
+> the value changed, sends SIGTERM to mobile's exact `airplayd`, `tvairplayd`
+> and `mediaremoted` so they reread it. Opt-out restores the journal at the next
+> boot. Live on `homepod-std` with bundle `2.13.5-local.47579029` after removing
+> the manually written pref: the status reported `Changed=true`, `Restarted=3`,
+> the journal recorded the key as absent, and the Mac's Music played to the
+> HomePod (selected, active, playing). Playback also needs the gPTP recipe
+> change in the HomePod kernelcache section. No new instruction patch. See
+> [Guest/homepod_airplay.md](Guest/homepod_airplay.md).
+
 > **HomePod top cap (2026-10-22).** `system-homepod-exp-top_cap` installs
 > `/usr/share/vphone/HomePodDisplay.plist`, extracted from the selected board's
 > `/arm-io/dockchannel-rtp/rtp-transport/display` node. It preserves the donor's
