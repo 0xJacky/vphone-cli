@@ -163,6 +163,14 @@ static int vpExecve(const char *path, char *const argv[], char *const envp[]) {
 #define VP_CAMERA_APP_HOOK "/usr/lib/libcamfix.dylib"
 #define VP_GYROSCOPE_HOOK "/usr/lib/libvphonegyro.dylib"
 #define VP_ACCELEROMETER_HOOK "/usr/lib/libvphoneaccelerometer.dylib"
+#define VP_HINGE_HOOK "/usr/lib/libvphonehinge.dylib"
+#define VP_FOLD_GUARD "/usr/lib/libvphonefoldguard.dylib"
+// Pads SpringBoard's answer to +[FBDisplayManager alwaysConnectedIdentities]
+// with a copy of the one real identity, so the fold layouts' two-display
+// count gates pass on the single-panel guest. See
+// FoldDisplay/libvphonefolddisplay.m.
+#define VP_FOLD_DISPLAY "/usr/lib/libvphonefolddisplay.dylib"
+#define VP_POSTER_PROBE "/usr/lib/libvphoneposterprobe.dylib"
 #define VP_ATTITUDE_HOOK "/usr/lib/libvphoneattitude.dylib"
 #define VP_AVFOUNDATION "/System/Library/Frameworks/AVFoundation.framework/AVFoundation"
 // The haptics fix rides the same route and needs no loader of its own. See
@@ -185,6 +193,10 @@ static int vpExecve(const char *path, char *const argv[], char *const envp[]) {
 // MIS targets, so it holds however launchd names the binary.
 static int vpIsSpringBoard(const char *path) {
     return vpPathHasSuffix(path, "/SpringBoard.app/SpringBoard");
+}
+
+static int vpIsPosterExtension(const char *path) {
+    return path && (strcasestr(path, "PosterBoard") != NULL || strcasestr(path, "poster") != NULL);
 }
 
 // Settings. Suffix-matched like the other targets.
@@ -257,6 +269,9 @@ __attribute__((constructor)) static void vpLogProcess(void) {
     if (vpIsMotionDaemon(path)) {
         vpLoadLibrary("gyroscope-hook", VP_GYROSCOPE_HOOK);
         vpLoadLibrary("accelerometer-hook", VP_ACCELEROMETER_HOOK);
+        vpLoadLibrary("hinge-hook", VP_HINGE_HOOK);
+        // Experimental: see the patch declaration before turning it on.
+        vpLoadLibrary("fold-display", VP_FOLD_DISPLAY);
         return;
     }
     // SpringBoard needs the haptics swizzle before UIKit first asks for an
@@ -264,7 +279,14 @@ __attribute__((constructor)) static void vpLogProcess(void) {
     if (vpIsSpringBoard(path)) {
         vpLoadLibrary("haptics-fix", VP_HAPTICS_FIX);
         vpLoadLibrary("accelerometer-hook", VP_ACCELEROMETER_HOOK);
+        // Inert without the foldable product identity; with it, the guard
+        // keeps the secure-indicator raise from crash-looping SpringBoard.
+        vpLoadLibrary("fold-guard", VP_FOLD_GUARD);
+        // Experimental: see the patch declaration before turning it on.
+        vpLoadLibrary("fold-display", VP_FOLD_DISPLAY);
     }
+    if (vpIsPosterExtension(path))
+        vpLoadLibrary("poster-probe", VP_POSTER_PROBE);
     // Loaded before the app gate too: the swizzle must be in place before
     // Settings builds its follow-up section.
     if (vpIsPreferences(path))
