@@ -3787,3 +3787,71 @@ width (§3.5/H), wallpaper gate default (§3.4), full acceptance matrix with
 touch (A–F), cleanup (I), module commits (J). The cover presentation's
 content is a clock-style cover screen; rich cover UI (dock/notifications
 on cover) has not yet been acceptance-checked.
+
+## 2026-10-28 morning: fold-closed orientation regression (user-reported)
+
+User report after the overnight session: the fold toggle "only switches
+landscape/portrait, no inner/outer switch", with a screenshot of the home
+grid rotated 90°, vertical dock, right-edge clipping. Reproduced on
+`2.12.1-local.5ffed6ae` with one RPC: `display.posture {"position":"closed"}`
+lands bounds 466×678 (cover mode applied) but interface orientation 3 with a
+2853×2007 landscape framebuffer.
+
+False leads worth recording: the folddisplay log appears to "stop" at a
+timestamp because `files.read` returns the FIRST ~512 KB of a multi-MB file —
+always check `files.list` mtimes before concluding a dylib died; the map
+JSON's fields can also be stale across a VM restart (the file persists), so
+`display.orientation` (asks SpringBoard live, IcliKit) is the truth for
+interface degrees, not the map's `interfaceOrientation`.
+
+Root cause chain (each link verified on the live guest):
+
+1. **Stale-table resolve.** `setDevicePose` resolved portrait against the map
+   JSON immediately after the viewport landed. The JSON's `configurationBounds`
+   updates at the apply, but the scene's mounting table follows on the next
+   export, so the first read still carried the previous panel's table: closing
+   resolved portrait to device 3 (inner's rotated portrait) which the
+   identity-mounted cover renders as landscape.
+2. **Cover arbiter latch.** The cover scene's traits arbiter derives its
+   direction once, at the mode swap, from the pipeline's cached device
+   orientation, and after that no input channel reopens it — pose override
+   (device 1), `pose.refresh` (pipeline re-read), forced arbitration, the
+   accelerometer sink (delivering device 1), and the public `display.rotation`
+   path all verified portrait-side while the pipeline stayed landscape.
+   `vpMainInnerWindowScene()` returning nil in cover viewport also made the
+   dylib's refresh/arbitration/actuation handlers refuse outright
+   ("refused outside Main inner"), so the inner panel's self-healing
+   (`native callback direction=1`) had no cover equivalent.
+3. **Boot restore hardcoded device 1** as the pose value (the pose enum's
+   portrait, not the mounted device value), so a folded boot could restore a
+   landscape interface depending on which table the export carried at ladder
+   time.
+
+Fixes (vphoned + dylib, all in this session's builds):
+
+- `GuestAPI+Device.swift` `setDevicePose`: self-verifying resolve loop —
+  request a fresh map export, resolve portrait, set pose + accelerometer,
+  poke `pose.refresh`/`arbitration.refresh`/`actuation.refresh`, confirm via
+  `interfaceRotationDegrees() == 0`, re-resolve once with the settled table;
+  accelerometer seeded to 0° and `pose.refresh` posted BEFORE the viewport
+  apply when closing; closing while unlocked+lit now sleeps the display
+  (real hardware blanks the inner panel; the cover lock screen is the native
+  cover presentation — verified portrait at every folded boot).
+- `GuestFoldPose.swift`: boot ladder resolves the portrait device value from
+  the live map instead of hardcoding 1, stops only when SpringBoard answers
+  portrait, and pokes `pose.refresh` before the respring-replay viewport
+  apply.
+- `libvphonefolddisplay.m`: new `vpOrientationArbitrationScene()` (inner
+  scene, else the active Main-identity scene while the persistent viewport is
+  live) used by the refresh/arbitration/actuation handlers; the actuation
+  handler, when the arbitration scene is the cover, completes the native
+  callback chain with the cover's native portrait direction instead of the
+  latched pipeline value — this is the link that actually breaks the latch.
+
+Verification on `2.12.1-local.f16a7b5f` (duotest-m5): boot-closed portrait;
+3× open↔closed roundtrips all landing 669×951/0° and 466×678/0° with a
+portrait framebuffer in both states; cover wake lock screen portrait; inner
+rotation matrix 90/0/270/0 exact; open home screen visually clean (portrait
+grid, horizontal dock, no clipping). Known remaining behavior: closing while
+unlocked sleeps the screen by design — the next wake presents the cover lock
+screen (clock) and `screen.unlock` (or a swipe) returns to the home layout.

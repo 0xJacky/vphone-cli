@@ -380,6 +380,20 @@ extension GuestAPI {
             ? vp_hinge_sweep(angle!, durationMs, Int32(profile))
             : vp_hinge_set(angle!)
         if ((try? deviceSnapshot())?["model"] as? String) == "iPhone19,4" {
+            // The cover arbiter derives its direction once, at the mode
+            // swap, from the scene pipeline's cached device orientation.
+            // The pose override above wrote portrait (device 1 on the
+            // identity-mounted cover), but the pipeline only re-reads it
+            // through the pose-refresh channel; without the poke the swap
+            // still sees the inner panel's rotated portrait (device 3) and
+            // latches the cover landscape with no later channel able to
+            // reopen arbitration. The same channel feeds the accelerometer
+            // seed below; both land on SpringBoard's queue ahead of the
+            // viewport apply posted right after.
+            if angle! < 5 {
+                _ = vp_accelerometer_set_orientation("0")
+                _ = try? postDarwinNotification("com.vphone.display.orientation.pose.refresh", state: nil)
+            }
             GuestFoldPose.requestViewport(for: angle!)
             let expected = angle! < 5 ? [0.0, 0.0, 466.0, 678.0] : [0.0, 0.0, 669.0, 951.0]
             let deadline = ProcessInfo.processInfo.systemUptime + 3
@@ -398,46 +412,79 @@ extension GuestAPI {
             guard applied else { throw GuestAPIError.operationFailed("Duo logical viewport did not reach the requested size") }
 
             // A fold transition changes the active panel's native mounting
-            // map.  Preserve the requested portrait pose across a landscape
-            // -> cover -> inner sequence by resolving interface portrait
-            // against the newly active map, rather than reusing the old
-            // physical device orientation.
-            // Both panels present portrait at rest: the cover starts
-            // portrait, and the unfolded inner panel presents portrait
-            // through its rotated mounting (device 3 in the measured
-            // [3,4,2,1] table).  Resolve interface portrait after the
-            // viewport transition; landscape stays an explicit rotation.
+            // map (inner [3,4,2,1], cover identity).  The map JSON refreshes
+            // on the next export tick, so the first read after the viewport
+            // lands can still carry the previous panel's table: resolving
+            // portrait against the stale inner table picks device 3, which
+            // the identity-mounted cover panel renders as landscape.  Ask
+            // for a fresh export, resolve against it, and confirm through
+            // SpringBoard's own interface answer, re-resolving once with
+            // the settled table when the first pick mounts sideways.
             let desiredInterface = "0"
-            if orientation == Self.poseOrientations["portrait"],
-               let values = vp_display_orientation_mapping()["deviceOrientations"] as? [Int],
-               let portrait = GuestDisplayRotation.resolve(desiredInterface, deviceOrientations: values) {
-                let current = vp_device_pose_get()
-                _ = vp_device_pose_set(
-                    Int32(portrait.deviceOrientation),
-                    (current["hinge"] as? NSNumber)?.int32Value ?? Int32(hinge),
-                    (current["tabletop"] as? NSNumber)?.int32Value ?? Int32(tabletop)
-                )
-                _ = vp_accelerometer_set_orientation(String(portrait.accelerometerDegrees))
-                _ = try? postDarwinNotification("com.vphone.display.orientation.mapping.request", state: nil)
-                _ = try? postDarwinNotification("com.vphone.display.orientation.inputs.refresh", state: nil)
+            if orientation == Self.poseOrientations["portrait"] {
+                var settled = false
+                for _ in 0..<2 where !settled {
+                    let staleUptime = (vp_display_orientation_mapping()["generatedUptime"] as? NSNumber)?.doubleValue ?? 0
+                    _ = try? postDarwinNotification("com.vphone.display.orientation.mapping.request", state: nil)
+                    let exportDeadline = ProcessInfo.processInfo.systemUptime + 0.8
+                    while ProcessInfo.processInfo.systemUptime < exportDeadline {
+                        let live = vp_display_orientation_mapping()
+                        if ((live["generatedUptime"] as? NSNumber)?.doubleValue ?? 0) > staleUptime,
+                           (live["configurationBounds"] as? [NSNumber])?.map(\.doubleValue) == expected { break }
+                        Thread.sleep(forTimeInterval: 0.05)
+                    }
+                    if let values = vp_display_orientation_mapping()["deviceOrientations"] as? [Int],
+                       let portrait = GuestDisplayRotation.resolve(desiredInterface, deviceOrientations: values) {
+                        let current = vp_device_pose_get()
+                        _ = vp_device_pose_set(
+                            Int32(portrait.deviceOrientation),
+                            (current["hinge"] as? NSNumber)?.int32Value ?? Int32(hinge),
+                            (current["tabletop"] as? NSNumber)?.int32Value ?? Int32(tabletop)
+                        )
+                        _ = vp_accelerometer_set_orientation(String(portrait.accelerometerDegrees))
+                        // The pipeline re-reads the device pose only through
+                        // the pose-refresh channel; inputs.refresh leaves the
+                        // previous panel's value latched, which is exactly how
+                        // a cover swap kept the interface landscape.
+                        _ = try? postDarwinNotification("com.vphone.display.orientation.pose.refresh", state: nil)
+                        _ = try? postDarwinNotification("com.vphone.display.orientation.arbitration.refresh", state: nil)
+                        _ = try? postDarwinNotification("com.vphone.display.orientation.actuation.refresh", state: nil)
+                        let confirmDeadline = ProcessInfo.processInfo.systemUptime + 1.5
+                        while ProcessInfo.processInfo.systemUptime < confirmDeadline {
+                            if interfaceRotationDegrees() == portrait.interfaceDegrees {
+                                settled = true
+                                break
+                            }
+                            Thread.sleep(forTimeInterval: 0.05)
+                        }
+                    }
+                }
+                _ = try? postDarwinNotification("com.vphone.display.orientation.pose.refresh", state: nil)
                 _ = try? postDarwinNotification("com.vphone.display.orientation.arbitration.refresh", state: nil)
                 _ = try? postDarwinNotification("com.vphone.display.orientation.actuation.refresh", state: nil)
                 _ = try? postDarwinNotification("com.vphone.display.presentation.wallpaper.pulse", state: nil)
                 _ = try? postDarwinNotification("com.vphone.display.presentation.clock.refresh", state: nil)
-                // The scene may finish the fold transition after the first
-                // notification batch.  Give native arbitration a bounded
-                // settle window and re-read the map once before returning.
-                let orientationDeadline = ProcessInfo.processInfo.systemUptime + 2
-                while interfaceRotationDegrees() != portrait.interfaceDegrees,
-                      ProcessInfo.processInfo.systemUptime < orientationDeadline {
-                    Thread.sleep(forTimeInterval: 0.05)
-                }
-                if interfaceRotationDegrees() != portrait.interfaceDegrees {
+                if !settled {
                     // Reuse the same public rotation path once the new panel
                     // is fully selected; it resolves the post-fold map again
                     // instead of relying on a stale pre-transition snapshot.
                     _ = try? setRotation("0")
                 }
+            }
+            // Real hardware blanks the inner panel when the fold closes and
+            // the cover presents the lock experience. The single-scene
+            // emulation cannot blank one panel, and an unlocked home layout
+            // in cover mode keeps whatever direction the mode swap computed
+            // from the inner pose — portrait arbitration does not settle
+            // there — while the cover lock screen arbitrates portrait
+            // natively (every folded boot presents its clock upright). Close
+            // through the lock: sleep a lit, unlocked display so the next
+            // wake presents the cover lock screen.
+            if angle! < 5,
+               let lock = ((try? collectDeviceSnapshot())?["lock"] as? [String: Any]),
+               (lock["locked"] as? Bool ?? true) == false,
+               (lock["screen_off"] as? Bool ?? true) == false {
+                _ = try? pressButton("power")
             }
         }
         var hingeState = vp_hinge_get()

@@ -2754,6 +2754,27 @@ static id vpMainInnerWindowScene(void) {
     return scene;
 }
 
+// The orientation machinery must also run while the persistent viewport
+// holds the cover mode: the active scene is the same SB-main scene under
+// the cover identity, and a fold transition must not strand the interface
+// at the direction the mode swap computed with the previous panel's pose
+// (observed: closed computed landscape from the inner portrait pose and
+// nothing re-arbitrated it).  Accept the active scene only while the
+// persistent viewport is live and it carries the current Main identity.
+static id vpOrientationArbitrationScene(void) {
+    id inner = vpMainInnerWindowScene();
+    if (inner) return inner;
+    if (!vpPersistentViewport) return nil;
+    id app = vpReadObject(objc_getClass("UIApplication"), "sharedApplication");
+    id scene = vpReadObject(app, "activeDisplayWindowScene");
+    if (!scene) return nil;
+    id configuration = vpReadObject(objc_getClass("FBDisplayManager"), "mainConfiguration");
+    id identity = vpReadObject(configuration, "identity");
+    id uiIdentity = vpReadObject(scene, "_fbsDisplayIdentity") ?: vpReadObject(scene, "displayIdentity");
+    if (!identity || ![uiIdentity isEqual:identity]) return nil;
+    return scene;
+}
+
 static BOOL vpIsSingleMainStatusScene(id scene, BOOL constructing) {
     if (![vpReadObject(vpReadObject(scene, "_FBSScene"), "identifier") isEqual:@"SB-main"]) return NO;
     NSInteger surface = [[scene valueForKey:@"surfaceType"] integerValue];
@@ -2882,7 +2903,7 @@ static void vpProbeSceneGeometryRequest(void) {
 
 static void vpRefreshNativeOrientationInputs(BOOL rereadPose) {
     @try {
-        id scene = vpMainInnerWindowScene();
+        id scene = vpOrientationArbitrationScene();
         if (!scene) { vpFoldDisplayLog(@"orientation refresh: refused outside Main inner"); return; }
         id pipeline = vpReadObject(scene, "traitsPipelineManager");
         SEL selector = sel_registerName(rereadPose ? "_updateDeviceOrientationAnimated:forReason:" : "_noteInputsNeedUpdateAnimated:reason:");
@@ -2900,7 +2921,7 @@ static void vpRefreshNativeOrientationInputs(BOOL rereadPose) {
 
 static void vpForceNativeOrientationResolution(void) {
     @try {
-        id scene = vpMainInnerWindowScene();
+        id scene = vpOrientationArbitrationScene();
         if (!scene) { vpFoldDisplayLog(@"orientation arbitration: refused outside Main inner"); return; }
         id arbiter = vpReadObject(scene, "traitsArbiter");
         SEL factory = sel_registerName("_defaultUpdateContextWithReason:animatable:");
@@ -2966,9 +2987,21 @@ static void vpSetCanonicalOrientationProbe(BOOL enabled) {
 
 static void vpRefreshNativeOrientationActuation(void) {
     @try {
-        id scene = vpMainInnerWindowScene();
+        id scene = vpOrientationArbitrationScene();
         if (!scene) { vpFoldDisplayLog(@"orientation actuation: refused outside Main inner"); return; }
         NSInteger direction = [[vpReadObject(scene, "traitsPipelineManager") valueForKey:@"systemArbitratedInterfaceOrientation"] integerValue];
+        // The cover presentation is portrait-native, but the single-scene
+        // emulation's arbiter carries the direction the mode swap computed
+        // from the inner panel's rotated pose and no input channel reopens
+        // it (pose, pose-refresh, arbitration, accelerometer all verified
+        // portrait while the pipeline stays landscape). Complete the same
+        // native callback chain with the cover's native direction instead
+        // of the latched one.
+        if (scene != vpMainInnerWindowScene()) {
+            if (direction != 1) vpFoldDisplayLog([NSString stringWithFormat:
+                @"orientation actuation: cover direction %ld overridden to portrait", (long)direction]);
+            direction = 1;
+        }
         if (direction < 1 || direction > 4) return;
         id app = vpReadObject(objc_getClass("UIApplication"), "sharedApplication");
         SEL selector = sel_registerName("_notePipelineManagerChangedInterfaceOrientation:onWindowScene:duration:force:logMessage:");

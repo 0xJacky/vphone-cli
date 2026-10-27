@@ -1,4 +1,5 @@
 import Foundation
+import IcliKit
 import notify
 import VphonedNative
 
@@ -84,10 +85,17 @@ private static let restoration = RestoreState()
                         guard restoration.generation == generation, !restoration.explicitRequest,
                               let pose = restoration.latestPose,
                               vp_hinge_get()["enabled"] as? Bool == true else { return }
-                        if let angle = vp_hinge_get()["angle"] as? Double { requestViewport(for: angle) }
-                        if poseValues(vp_device_pose_get()) == pose { return }
-                        _ = vp_device_pose_set(pose[0], pose[1], pose[2])
-                        NSLog("vphoned: replay latest fold pose after SpringBoard startup")
+                        if let angle = vp_hinge_get()["angle"] as? Double {
+                            if poseValues(vp_device_pose_get()) != pose {
+                                _ = vp_device_pose_set(pose[0], pose[1], pose[2])
+                                // The pipeline re-reads the pose only through
+                                // this channel; feed it before the viewport
+                                // apply so the swap arbitrates from the pose.
+                                notify_post("com.vphone.display.orientation.pose.refresh")
+                                NSLog("vphoned: replay latest fold pose after SpringBoard startup")
+                            }
+                            requestViewport(for: angle)
+                        }
                     }
                 }
             }
@@ -114,21 +122,32 @@ private static let restoration = RestoreState()
                 Thread.sleep(forTimeInterval: delay - waited)
                 waited = delay
                 let expectedHinge = hingeState(for: angle)
+                // Device 1 is the pose enum's portrait, not the mounted
+                // device value: the Duo inner panel presents portrait as
+                // device 3 under its rotated mounting.  Resolve against the
+                // live map; a later rung corrects an early read that still
+                // carries the identity fallback table.
+                let portraitDevice = (vp_display_orientation_mapping()["deviceOrientations"] as? [Int])
+                    .flatMap { GuestDisplayRotation.resolve("0", deviceOrientations: $0)?.deviceOrientation } ?? 1
                 let published = restoration.lock.withLock {
                     guard !restoration.cancelled else { return false }
-                    _ = vp_device_pose_set(1, Int32(expectedHinge), 0)
+                    _ = vp_device_pose_set(Int32(portraitDevice), Int32(expectedHinge), 0)
                     _ = vp_hinge_set(angle)
                     requestViewport(for: angle)
                     restoration.latestPose = poseValues(vp_device_pose_get())
                     return true
                 }
                 guard published else { return }
+                // The running scene re-reads the device pose only through
+                // the pose-refresh channel; without the poke the pipeline
+                // keeps whatever direction it held before the restore.
+                notify_post("com.vphone.display.orientation.pose.refresh")
+                notify_post("com.vphone.display.orientation.arbitration.refresh")
+                notify_post("com.vphone.display.orientation.actuation.refresh")
                 let actual = vp_device_pose_get()
                 if actual["available"] as? Bool == true,
-                   actual["device_orientation"] as? Int == 1,
-                   actual["hinge"] as? Int == expectedHinge {
-                    return
-                }
+                   actual["hinge"] as? Int == expectedHinge,
+                   interfaceRotationDegrees() == 0 { return }
             }
         }
     }
