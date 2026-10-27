@@ -17,6 +17,15 @@ extension VPhoneBootCommand {
 
         let vmDir = config.deletingLastPathComponent()
 
+        // One immutable physical Main backs both logical Duo panels. Keep
+        // enough native pixels for inner mode even when booting closed.
+        var screenWidth = manifest.screenConfig.width
+        var screenHeight = manifest.screenConfig.height
+        if manifest.guestDevice == .iPhone19_4 {
+            screenWidth = VPhoneGuestDevice.iPhone19_4InnerScreen.width
+            screenHeight = VPhoneGuestDevice.iPhone19_4InnerScreen.height
+        }
+
         return try VPhoneVirtualMachine.Options(
             configURL: config,
             romURL: manifest.romImages.map { try manifest.resolve(path: $0.avpBooter, in: vmDir) },
@@ -26,8 +35,8 @@ extension VPhoneBootCommand {
             memorySize: manifest.memorySize,
             sepStorageURL: manifest.resolve(path: manifest.sepStorage, in: vmDir),
             sepRomURL: manifest.romImages.map { try manifest.resolve(path: $0.avpSEPBooter, in: vmDir) },
-            screenWidth: manifest.screenConfig.width,
-            screenHeight: manifest.screenConfig.height,
+            screenWidth: screenWidth,
+            screenHeight: screenHeight,
             screenPPI: manifest.screenConfig.pixelsPerInch,
             screenScale: manifest.screenConfig.scale,
             kernelDebugPort: kernelDebugPort,
@@ -35,6 +44,7 @@ extension VPhoneBootCommand {
             isTVGuest: manifest.guestDevice.family == .appleTV,
             isHomePodGuest: manifest.guestDevice.family == .homePod,
             isWatchGuest: manifest.guestDevice.family == .watch,
+            isFoldableGuest: manifest.guestDevice == .iPhone19_4
         )
     }
 }
