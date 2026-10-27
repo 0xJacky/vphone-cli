@@ -140,6 +140,16 @@ public struct VPhoneGuestDevice: Sendable, Equatable {
     /// The inner display and hinge are not represented by the VM's single panel.
     public static let iPhone19_4 = iPhone("iPhone19,4", "v68ap", "iPhone Duo", width: 1398, height: 2034)
 
+    /// The Duo's inner display, the panel the fold opens onto. A machine is
+    /// created on the outer panel above; the open and book postures
+    /// relaunch on this one — the host refuses runtime display resizing
+    /// (measured 2026-10-25, see Research/Guest/iphone_duo_bringup.md), so
+    /// the panel is chosen at boot. Apple's iPhone Duo device profile declares
+    /// 2007×2853 at 3x (669×951 points); 2034 was a custom bring-up width.
+    public static let iPhone19_4InnerScreen = VPhoneVirtualMachineManifest.ScreenConfig(
+        width: 2007, height: 2853, pixelsPerInch: 460, scale: 3.0
+    )
+
     /// iPhone XS Max: 1242x2688 at 458 ppi, 414x896 points. Its IPSW carries the
     /// iOS 18 releases after 18.6, which the iPhone 16 never got; the research
     /// board's own iOS 18 kernel boots it (the 18.x kernelcache recipes, `minimal`
