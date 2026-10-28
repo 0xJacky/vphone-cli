@@ -105,9 +105,6 @@ FOLDGUARD_INPUTS := $(call find_headers,FoldGuard) $(call find_folders,FoldGuard
 FOLDDISPLAY := $(STAGE)/folddisplay/libvphonefolddisplay.dylib
 FOLDDISPLAY_SOURCES := $(call find_sources,FoldDisplay)
 FOLDDISPLAY_INPUTS := $(call find_headers,FoldDisplay) $(call find_folders,FoldDisplay) MISFix/MISFixDetour.h
-POSTERPROBE := $(STAGE)/posterprobe/libvphoneposterprobe.dylib
-POSTERPROBE_SOURCES := $(call find_sources,PosterProbe)
-POSTERPROBE_INPUTS := $(call find_headers,PosterProbe) $(call find_folders,PosterProbe)
 ATTITUDE := $(STAGE)/attitude/libvphoneattitude.dylib
 ATTITUDE_SOURCES := $(call find_sources,Attitude)
 ATTITUDE_INPUTS := $(call find_headers,Attitude) $(call find_folders,Attitude) Shared/AttitudeProcess.h
@@ -160,7 +157,7 @@ GPU_DYNAMIC_LOOKUP_SYMS := \
 VIRTIOSOUND := $(STAGE)/virtiosound/VPhoneVirtIOSound.driver
 VIRTIOSOUND_SOURCES := $(wildcard VirtIOSound/*.m VirtIOSound/*.c)
 VIRTIOSOUND_INCLUDES := $(wildcard VirtIOSound/*.h) VirtIOSound/Info.plist VirtIOSound/AudioServerDriver.tbd
-ARTIFACTS := $(CAMFIX) $(VCAMCAPTURED) $(LAUNCHHOOK) $(SYSTEMHOOK) $(MISFIX) $(HAPTICSFIX) $(BATTERYHEALTHFIX) $(DEVICEHUBFIX) $(DEVICENAME) $(PREFSFIX) $(SIGNINFIX) $(GYROSCOPE) $(ACCELEROMETER) $(HINGE) $(FOLDGUARD) $(FOLDDISPLAY) $(POSTERPROBE) $(ATTITUDE) $(HOMEPODDISPLAY) $(CRYPTEXSTAGING) $(HOMEPODPERSONA) $(HOMEPODMISFIX) $(HOMEPODSETUP) $(TVSETUPFOCUS) $(GPU_PLUGIN) $(VIRTIOSOUND)
+ARTIFACTS := $(CAMFIX) $(VCAMCAPTURED) $(LAUNCHHOOK) $(SYSTEMHOOK) $(MISFIX) $(HAPTICSFIX) $(BATTERYHEALTHFIX) $(DEVICEHUBFIX) $(DEVICENAME) $(PREFSFIX) $(SIGNINFIX) $(GYROSCOPE) $(ACCELEROMETER) $(HINGE) $(FOLDGUARD) $(FOLDDISPLAY) $(ATTITUDE) $(HOMEPODDISPLAY) $(CRYPTEXSTAGING) $(HOMEPODPERSONA) $(HOMEPODMISFIX) $(HOMEPODSETUP) $(TVSETUPFOCUS) $(GPU_PLUGIN) $(VIRTIOSOUND)
 PLISTS := $(STAGE)/camfix/libcamfix.plist $(STAGE)/vcamcaptured/libvcamcaptured.plist \
 	$(STAGE)/misfix/libmisfix.plist
 GPU_PROVENANCE := $(STAGE)/gpu/README.md
@@ -272,7 +269,7 @@ test-vcam-dataplane:
 		-framework CoreGraphics
 	@$(OUT)/VCamDataPlaneTests
 
-$(STAGE)/camfix $(STAGE)/vcamcaptured $(STAGE)/launchhook $(STAGE)/systemhook $(STAGE)/misfix $(STAGE)/hapticsfix $(STAGE)/batteryhealthfix $(STAGE)/devicehubfix $(STAGE)/devicename $(STAGE)/prefsfix $(STAGE)/signinfix $(STAGE)/gyroscope $(STAGE)/accelerometer $(STAGE)/hinge $(STAGE)/foldguard $(STAGE)/folddisplay $(STAGE)/posterprobe $(STAGE)/attitude $(STAGE)/gpu $(STAGE)/virtiosound:
+$(STAGE)/camfix $(STAGE)/vcamcaptured $(STAGE)/launchhook $(STAGE)/systemhook $(STAGE)/misfix $(STAGE)/hapticsfix $(STAGE)/batteryhealthfix $(STAGE)/devicehubfix $(STAGE)/devicename $(STAGE)/prefsfix $(STAGE)/signinfix $(STAGE)/gyroscope $(STAGE)/accelerometer $(STAGE)/hinge $(STAGE)/foldguard $(STAGE)/folddisplay $(STAGE)/attitude $(STAGE)/gpu $(STAGE)/virtiosound:
 	@mkdir -p $@
 
 $(CAMFIX): $(CAMFIX_SOURCES) $(CAMFIX_INPUTS) | $(STAGE)/camfix
@@ -402,12 +399,6 @@ $(FOLDDISPLAY): $(FOLDDISPLAY_SOURCES) $(FOLDDISPLAY_INPUTS) | $(STAGE)/folddisp
 	$(CLANG) $(COMMON_FLAGS) -Wall -Wextra -Werror -Wno-unused-parameter -dynamiclib \
 		-install_name /usr/lib/libvphonefolddisplay.dylib -o $@ $(FOLDDISPLAY_SOURCES) \
 		-framework Foundation -framework CoreGraphics -Wl,-not_for_dyld_shared_cache
-	@codesign --force --sign - $@
-
-$(POSTERPROBE): $(POSTERPROBE_SOURCES) $(POSTERPROBE_INPUTS) | $(STAGE)/posterprobe
-	$(CLANG) $(COMMON_FLAGS) -fobjc-arc -dynamiclib \
-		-install_name /usr/lib/libvphoneposterprobe.dylib -o $@ $(POSTERPROBE_SOURCES) \
-		-framework Foundation -framework UIKit -Wl,-not_for_dyld_shared_cache
 	@codesign --force --sign - $@
 
 .PHONY: test-gyroscope test-accelerometer test-hinge

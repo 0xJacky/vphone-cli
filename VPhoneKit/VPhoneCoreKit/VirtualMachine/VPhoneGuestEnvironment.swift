@@ -21,7 +21,6 @@ public enum VPhoneGuestEnvironment {
         "libvphonefolddisplay.dylib",
         "libvphonefoldguard.dylib",
         "libvphonehinge.dylib",
-        "libvphoneposterprobe.dylib",
         "libvphonegyro.dylib",
         "libvphoneaccelerometer.dylib",
         "libvphoneattitude.dylib",

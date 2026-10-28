@@ -136,7 +136,6 @@ guest_compatibility_library="$(/usr/bin/xcrun swift-stdlib-tool --print \
 /bin/cp "$guest_products/hinge/libvphonehinge.dylib" "$guest/libvphonehinge.dylib"
 /bin/cp "$guest_products/foldguard/libvphonefoldguard.dylib" "$guest/libvphonefoldguard.dylib"
 /bin/cp "$guest_products/folddisplay/libvphonefolddisplay.dylib" "$guest/libvphonefolddisplay.dylib"
-/bin/cp "$guest_products/posterprobe/libvphoneposterprobe.dylib" "$guest/libvphoneposterprobe.dylib"
 /bin/cp "$guest_products/attitude/libvphoneattitude.dylib" "$guest/libvphoneattitude.dylib"
 /bin/cp "$guest_products/cryptexstaging/libvphonecryptexstaging.dylib" "$guest/libvphonecryptexstaging.dylib"
 /bin/cp "$guest_products/homepodpersona/libvphoneinstallpersona.dylib" "$guest/libvphoneinstallpersona.dylib"
