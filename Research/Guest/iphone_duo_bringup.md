@@ -4296,3 +4296,41 @@ aperture scenes, so it has no home screen or apps of its own yet; showing
 it is manual (no fold/posture wiring); it is only seen after a
 SpringBoard-only restart. The guest screen also sleeps within seconds after
 these restarts, so captures need a wake first.
+
+### Which panel is Main on a real Duo (2026-10-28 night)
+
+The iPhone19,4 device tree (`DeviceTree.v68ap.im4p` in the 27.1 restore)
+answers it directly. Under `product`:
+
+| Node | display-index | surface-type | display-rotation | Other |
+|---|---|---|---|---|
+| `display0` | 0 | 1 (`.cover`) | 0 | `Jindo` special region (the island), `has-prox` 1 |
+| `display1` | 1 | 2 (`.inner`) | 270 | `BlankableRR` region and a `Fold` region |
+
+The SoC has two internal display pipes, `dcp`/`disp0` and
+`dcpsec`/`dispsec`; `display-crossbar0` routes only the external ports
+(`dispext0`, `dispext1`). So the primary display (index 0, Main) is the
+cover, and the inner panel is a second, simultaneously driven display
+mounted at 270°: the topology this spike publishes.
+
+PosterKit agrees. `PFCurrentDeviceClass` maps MG `DeviceClassNumber` through
+a PosterFoundation table: 1 (iPhone) and 2 (iPod) → 0, 3 (iPad) → 1,
+4 → 3, 9 → 2, 11 → 4, others → -1. The guest answers 0, the iPhone value,
+and `PFContextSupportsDynamicRotation`'s `deviceClass == 1` is iPad. On an
+iPhone only an auxiliary (non-main) display rotates its poster, so the
+real Duo's landscape inner lock screen needs the inner panel to be the
+non-main display.
+
+`SBFStringForSurfaceType` gives 0 `.default`, 1 `.cover`, 2 `.inner`;
+`SBFSurfaceTypeFromSSKSurfaceType` is the identity for 1–3. backboardd's
+`BKSDisplayTraits.surfaceType` comes from `DeviceSurfaceType` in the
+display's `extendedProperties`, which on this guest is supplied by
+`FoldDisplaySurfaceProbe.m` (2 for the primary panel, 1 for the others), so
+traits read back from the guest are not evidence of native roles. Nor is
+`legacyMain (.inner)` in the resolver log, which is FoldDisplay's own
+`vpSyncLogicalRoleResolver`.
+
+For later: the inner panel's `Fold` region is `{0, 1335, 1878, 0}` in its
+own pixels, which suggests a 1878-pixel-wide panel folding at row 1335;
+this guest's 2007×2853 Main and the spike's 2853×2007 inner display were
+not taken from the device tree.

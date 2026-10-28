@@ -361,6 +361,14 @@ void vpInspectInnerDisplay(void) {
                 [line appendFormat:@" %@=%@", key, value];
             }
             [line appendFormat:@" modes=%lu", (unsigned long)[vpReadObject(display, "availableModes") count]];
+            // backboardd's traits for the panel. Its surfaceType comes from
+            // DeviceSurfaceType in the display's extendedProperties, which
+            // FoldDisplaySurfaceProbe.m supplies on this guest.
+            id service = vpReadObject(objc_getClass("BKSDisplayService"), "sharedInstance");
+            SEL traitsSelector = sel_registerName("traitsForDisplayUUID:");
+            id uuid = vpReadObject(display, "uniqueId");
+            if (uuid && [service respondsToSelector:traitsSelector])
+                [line appendFormat:@" traits=%@", ((id (*)(id, SEL, id))objc_msgSend)(service, traitsSelector, uuid)];
             vpFoldDisplayLog(line);
         }
         Class manager = objc_getClass("FBDisplayManager");
@@ -376,6 +384,11 @@ void vpInspectInnerDisplay(void) {
         id (*displayType)(id) = dlsym(RTLD_DEFAULT, "PRDisplayTypeFromFBSDisplayConfiguration");
         NSInteger (*deviceClass)(void) = dlsym(RTLD_DEFAULT, "PFCurrentDeviceClass");
         id __unsafe_unretained *lockRole = (id __unsafe_unretained *)dlsym(RTLD_DEFAULT, "PFPosterRoleLockScreen");
+        // PosterKit's class 1 is iPad; an iPhone (MG DeviceClassNumber 1)
+        // is class 0, where only an auxiliary display rotates its poster.
+        if (deviceClass && supports && lockRole && *lockRole)
+            vpFoldDisplayLog([NSString stringWithFormat:@"inner display: PFCurrentDeviceClass=%ld embedded-as-class-1=%d",
+                (long)deviceClass(), supports(*lockRole, @"DISPLAY_TYPE_EMBEDDED", 1)]);
         for (id scene in [vpReadObject(app, "connectedScenes") allObjects] ?: @[]) {
             id configuration = nil;
             @try { configuration = vpReadObject(vpReadObject(scene, "_FBSScene"), "settings"); configuration = vpReadObject(configuration, "displayConfiguration"); }
