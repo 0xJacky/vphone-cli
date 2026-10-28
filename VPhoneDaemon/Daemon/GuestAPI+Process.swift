@@ -77,14 +77,14 @@ extension GuestAPI {
         for (index, argument) in arguments.enumerated() { argv[index + 1] = strdup(argument) }
         defer { for value in argv where value != nil { free(value) } }
         var actions: posix_spawn_file_actions_t?
-        posix_spawn_file_actions_init(&actions)
-        defer { posix_spawn_file_actions_destroy(&actions) }
-        posix_spawn_file_actions_adddup2(&actions, stdoutPipe[1], STDOUT_FILENO)
-        posix_spawn_file_actions_adddup2(&actions, stderrPipe[1], STDERR_FILENO)
-        posix_spawn_file_actions_addclose(&actions, stdoutPipe[0])
-        posix_spawn_file_actions_addclose(&actions, stderrPipe[0])
+        vp_spawn_file_actions_init(&actions)
+        defer { vp_spawn_file_actions_destroy(&actions) }
+        vp_spawn_file_actions_adddup2(&actions, stdoutPipe[1], STDOUT_FILENO)
+        vp_spawn_file_actions_adddup2(&actions, stderrPipe[1], STDERR_FILENO)
+        vp_spawn_file_actions_addclose(&actions, stdoutPipe[0])
+        vp_spawn_file_actions_addclose(&actions, stderrPipe[0])
         var pid: pid_t = 0
-        let spawnError = posix_spawn(&pid, executable, &actions, nil, &argv, environ)
+        let spawnError = vp_spawn(&pid, executable, &actions, nil, &argv, environ)
         guard spawnError == 0 else { throw GuestAPIError.operationFailed("posix_spawn: " + String(cString: strerror(spawnError))) }
         close(stdoutPipe[1]); close(stderrPipe[1])
 

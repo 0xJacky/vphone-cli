@@ -33,6 +33,7 @@ public enum VPhoneOTAArchive {
         case missingMember(String, URL)
         case wrongDevice(URL, productTypes: [String], expected: String)
         case wrongBuild(URL, build: String, expected: String)
+        case unsupportedVersion(URL, productType: String, version: String)
         case inconsistentChunks(URL, String)
         case unexpectedSize(URL, expected: Int64, actual: Int64)
         case existingUserland(URL)
@@ -60,6 +61,8 @@ public enum VPhoneOTAArchive {
                 "\(file.lastPathComponent) is for \(productTypes.isEmpty ? "no listed device" : productTypes.joined(separator: ", ")), not \(expected). Choose the \(expected) OTA."
             case let .wrongBuild(file, build, expected):
                 "\(file.lastPathComponent) is build \(build), but the IPSW is \(expected). The OTA and the IPSW must be the same build."
+            case let .unsupportedVersion(file, productType, version):
+                "\(file.lastPathComponent) contains tvOS \(version) for \(productType). Apple TV 4K (4th generation) requires tvOS 27.2."
             case let .inconsistentChunks(file, reason):
                 "\(file.lastPathComponent) has an inconsistent payload: \(reason). Download the OTA again."
             case let .unexpectedSize(file, expected, actual):
@@ -71,7 +74,7 @@ public enum VPhoneOTAArchive {
             case let .deltaUpdate(file):
                 "\(file.lastPathComponent) requires a pristine prerequisite build. A modified vphone system needs a full OTA, without PrerequisiteBuild."
             case let .needsNewerMacOS(file, minimum):
-                "\(file.lastPathComponent) is compressed with LZRAVEN, which macOS \(minimum) and later unpack; this Mac runs macOS \(hostVersion). Create this machine on macOS \(minimum) or later, or choose an earlier release."
+                "\(file.lastPathComponent) is compressed with LZRAVEN, which macOS \(minimum) and later unpack; this Mac runs macOS \(VPhoneOTARelease.hostMacOSVersion). Create this machine on macOS \(minimum) or later, or choose an earlier release."
             }
         }
     }
@@ -305,18 +308,11 @@ public enum VPhoneOTAArchive {
     /// LZRAVEN (`pbzm`) came with macOS 27's libcompression: an older Mac
     /// cannot unpack a payload compressed with it.
     static let lzravenMagic = Data("pbzm".utf8)
-    static let lzravenMinimumMacOS = 27
 
     static func checkCompression(_ magic: Data, of file: URL) throws {
-        guard magic.prefix(4) == lzravenMagic,
-              ProcessInfo.processInfo.operatingSystemVersion.majorVersion < lzravenMinimumMacOS
-        else { return }
-        throw Error.needsNewerMacOS(file, minimum: lzravenMinimumMacOS)
-    }
-
-    static var hostVersion: String {
-        let version = ProcessInfo.processInfo.operatingSystemVersion
-        return "\(version.majorVersion).\(version.minorVersion)"
+        let minimum = VPhoneOTARelease.lzravenMinimumMacOS
+        guard magic.prefix(4) == lzravenMagic, VPhoneOTARelease.hostMacOS < minimum else { return }
+        throw Error.needsNewerMacOS(file, minimum: minimum)
     }
 
     private static func readMagic(_ file: URL) throws -> Data {
@@ -528,10 +524,9 @@ public enum VPhoneOTAArchive {
                 linkList = data
             } else {
                 let name = String(path.dropFirst(payloadPrefix.count))
-                // Before the rest of the payload is written.
-                if chunks.isEmpty {
-                    try checkCompression(readMagic(pending.appendingPathComponent(name)), of: ota)
-                }
+                // Each chunk as it lands, so an LZRAVEN payload is refused at
+                // its first chunk, before the rest is written.
+                try checkCompression(readMagic(pending.appendingPathComponent(name)), of: ota)
                 chunks.append(name)
                 progress?(name)
             }
@@ -760,6 +755,11 @@ public enum VPhoneOTAArchive {
         let types = manifest["SupportedProductTypes"] as? [String] ?? []
         guard types.contains(device.productType) else {
             throw Error.wrongDevice(ota, productTypes: types, expected: device.productType)
+        }
+        // Check the archive's manifest, including renamed local sources.
+        // The new board is admitted only for the 27.2 userland.
+        if device == .appleTV18_1, version != "27.2", version != "27.2.0" {
+            throw Error.unsupportedVersion(ota, productType: device.productType, version: version)
         }
         if let expected, build != expected { throw Error.wrongBuild(ota, build: build, expected: expected) }
         return (version, build)

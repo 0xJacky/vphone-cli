@@ -60,7 +60,7 @@ public struct VPhoneOTARelease: Sendable, Equatable {
     public let url: String
     /// The `.aea` file's length, which a cached copy must have.
     public let size: Int64
-    /// The AEA archive's symmetric key, base64, as AppleDB records it; nil
+    /// The AEA archive's symmetric key, base64, from AppleDB or Pallas; nil
     /// for an unencrypted ZIP OTA.
     public let key: String?
     /// The version of the base device's IPSW the OTA is restored over. The
@@ -97,6 +97,16 @@ public struct VPhoneOTARelease: Sendable, Equatable {
         ProcessInfo.processInfo.operatingSystemVersion.majorVersion
     }
 
+    /// The macOS this process runs on, as `major.minor`.
+    public static var hostMacOSVersion: String {
+        let host = ProcessInfo.processInfo.operatingSystemVersion
+        return "\(host.majorVersion).\(host.minorVersion)"
+    }
+
+    /// The first macOS whose libcompression decodes LZRAVEN (`pbzm`), the
+    /// compression of the 27-series OTAs' payload.
+    public static let lzravenMinimumMacOS = 27
+
     /// Whether a Mac running `hostMacOS` unpacks the payload.
     public func unpacks(onMacOS hostMacOS: Int = Self.hostMacOS) -> Bool {
         minimumHostMacOS.map { hostMacOS >= $0 } ?? true
@@ -107,10 +117,9 @@ public struct VPhoneOTARelease: Sendable, Equatable {
     public func checkHost() throws {
         guard let minimumHostMacOS, !unpacks() else { return }
         let name = VPhoneGuestDevice.named(productType)?.family.osName ?? productType
-        let host = ProcessInfo.processInfo.operatingSystemVersion
         throw VPhoneOTAHostError(
             message: "\(name) \(version) (\(build)) compresses its userland with LZRAVEN, which macOS \(minimumHostMacOS) and later unpack; "
-                + "this Mac runs macOS \(host.majorVersion).\(host.minorVersion). Choose an earlier release, or create this machine on macOS \(minimumHostMacOS) or later.",
+                + "this Mac runs macOS \(Self.hostMacOSVersion). Choose an earlier release, or create this machine on macOS \(minimumHostMacOS) or later.",
         )
     }
 
@@ -547,7 +556,7 @@ public enum VPhoneFirmwareCatalog {
 
     /// Full OTAs of devices without an IPSW, oldest first. Each has a
     /// `tvReleases` entry of its `baseVersion` for its `restoreBase`. The keys
-    /// are AppleDB's.
+    /// are from AppleDB or the device's Pallas response.
     public static let otaReleases: [VPhoneOTARelease] = [
         .init(
             productType: "AppleTV14,1",
@@ -567,6 +576,19 @@ public enum VPhoneFirmwareCatalog {
             size: 4_831_838_208,
             key: "L3wZrfSYx2pFDbJSYtEteNDspB26qBv0lxLlkWrKTYk=",
             baseVersion: "26.6",
+            minimumHostMacOS: VPhoneOTARelease.lzravenMinimumMacOS,
+        ),
+        // Pallas SoftwareUpdate response, 2026-10-23: J265AP's only release
+        // is the 27.2 beta. The 24K6120 asset alias points to this same archive;
+        // use its restore build, 24K120, as with HomePod 27.2.
+        .init(
+            productType: "AppleTV18,1",
+            version: "27.2",
+            build: "24K120",
+            url: "https://updates.cdn-apple.com/2026FallFCS/a0d11961-e437-45c7-8252-2d62f7e057b6/com_apple_MobileAsset_SoftwareUpdate/c6553d1b2d6e080adcd92fd8281e36a47dc870e22fb9d0ac057b4489916bcd9c.aea",
+            size: 5_234_491_392,
+            key: "B/S/c74WZgPJLoJc7BDr+IxDjtQZ2H8gUwWp7kq9RpI=",
+            baseVersion: "26.6",
             minimumHostMacOS: 27,
         ),
         // HomePod's newer software ships as a full ZIP OTA. Keep its own
@@ -580,7 +602,7 @@ public enum VPhoneFirmwareCatalog {
             url: "https://updates.cdn-apple.com/2026FallFCS/b191c01c-8e6e-4b74-8b84-015131f696b8/com_apple_MobileAsset_SoftwareUpdate/861a9e7426795ddb3eac86cd0b089e5bf7939258.zip",
             size: 3_051_441_612,
             baseVersion: "27.0",
-            minimumHostMacOS: 27,
+            minimumHostMacOS: VPhoneOTARelease.lzravenMinimumMacOS,
         ),
     ]
 
@@ -628,7 +650,7 @@ public enum VPhoneFirmwareCatalog {
                 )
             }
         }
-        guard guest.presentsBoard else { return pairings }
+        guard guest.productType != VPhoneGuestDevice.iPhone17_3.productType else { return pairings }
         let restored = guest.restoreBase ?? guest
         let otas = otaReleases.filter { $0.productType == guest.productType && $0.unpacks(onMacOS: hostMacOS) }
         var releases = (iPhoneReleases + iPadReleases + tvReleases + homePodReleases + watchReleases).first { $0.devices.contains(restored.productType) }?.releases ?? []

@@ -2,9 +2,36 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <spawn.h>
+#include <sys/types.h>
 #ifdef __OBJC__
 #import <Foundation/Foundation.h>
 #endif
+
+// MARK: - Spawning
+
+// tvOS has posix_spawn and execv, and libSystem exports them there as on iOS,
+// but the AppleTVOS SDK declares them unavailable. vphoned is built for both
+// from one source, so it calls the same libSystem symbols under these names.
+int vp_spawn(pid_t * _Nullable pid, const char * _Nonnull path,
+    const posix_spawn_file_actions_t _Nullable * _Nullable actions,
+    const posix_spawnattr_t _Nullable * _Nullable attributes,
+    char * _Nullable const argv[_Nonnull], char * _Nullable const envp[_Nullable]) __asm__("_posix_spawn");
+int vp_spawn_file_actions_init(posix_spawn_file_actions_t _Nullable * _Nonnull actions)
+    __asm__("_posix_spawn_file_actions_init");
+int vp_spawn_file_actions_destroy(posix_spawn_file_actions_t _Nullable * _Nonnull actions)
+    __asm__("_posix_spawn_file_actions_destroy");
+int vp_spawn_file_actions_addclose(posix_spawn_file_actions_t _Nullable * _Nonnull actions, int descriptor)
+    __asm__("_posix_spawn_file_actions_addclose");
+int vp_spawn_file_actions_adddup2(posix_spawn_file_actions_t _Nullable * _Nonnull actions, int descriptor, int target)
+    __asm__("_posix_spawn_file_actions_adddup2");
+int vp_spawn_file_actions_addopen(posix_spawn_file_actions_t _Nullable * _Nonnull actions, int descriptor,
+    const char * _Nonnull path, int flags, mode_t mode) __asm__("_posix_spawn_file_actions_addopen");
+int vp_spawnattr_init(posix_spawnattr_t _Nullable * _Nonnull attributes) __asm__("_posix_spawnattr_init");
+int vp_spawnattr_destroy(posix_spawnattr_t _Nullable * _Nonnull attributes) __asm__("_posix_spawnattr_destroy");
+int vp_spawnattr_setflags(posix_spawnattr_t _Nullable * _Nonnull attributes, short flags)
+    __asm__("_posix_spawnattr_setflags");
+int vp_execv(const char * _Nonnull path, char * _Nullable const argv[_Nonnull]) __asm__("_execv");
 
 // Keep legacy bridge pointers explicitly unspecified: their Swift import stays
 // unchanged while sharing this header with APIs that declare nonnull pointers.
@@ -14,10 +41,46 @@
 char * _Null_unspecified vp_sign_app_for_install(const char * _Null_unspecified appPath, const char * _Null_unspecified certificatePath);
 void vp_native_bootstrap_cached_binary(void);
 void vp_native_confirm_cached_binary(void);
-/// 0 = launchd proxy, 1 = --io worker, -1 = invalid arguments.
+/// 0 = launchd proxy, 1 = --io worker, 2 = --session, -1 = invalid arguments.
 int vp_native_process_mode(void);
 int vp_native_run_proxy(void);
 int vp_native_watch_proxy(void);
+
+// MARK: - Scripting Sessions
+
+/// Lead a process group of the session's own, and take its terminal, when it
+/// has one, as the controlling terminal. A `--session` process calls this
+/// before anything else runs: the worker ends a session by its group.
+void vp_session_detach(void);
+
+/// Replace this `--session exec <program>` process with the program, on the
+/// session's terminal. Returns only when that fails, with the exit status.
+int vp_session_exec(void);
+
+/// Run one program and collect what it writes, for a script's `proc.run`.
+/// `input` may be NULL. Both outputs are malloc-owned and always set on
+/// success. Returns 0, or an errno value; `*status` is the wait status.
+int vp_spawn_collect(const char * _Nonnull path, const char * _Nullable const * _Nonnull argv,
+                     const char * _Nullable input, int * _Nonnull status,
+                     char * _Nullable * _Nonnull output, char * _Nullable * _Nonnull errors);
+
+/// Start a session process on a pseudo-terminal, as a session leader with the
+/// terminal as its controlling one, so job control and ^C work. `program` is
+/// NULL for the built-in REPL or an absolute path to run instead. Returns the
+/// master descriptor and sets `*pid`, or -1 with errno set.
+int vp_session_open(const char * _Nullable program, int columns, int rows, pid_t * _Nonnull pid);
+
+/// Tell a session's terminal its new size and signal the foreground group.
+void vp_session_resize(int master, int columns, int rows);
+
+/// Close a session: hang the terminal up, SIGKILL what is left after `grace`
+/// seconds, and reap it. Returns the wait status, or -1.
+int vp_session_close(int master, pid_t pid, double grace);
+
+/// Evaluate `source` in a one-shot session process, which ends with it.
+/// Returns the malloc-owned JSON object the session printed, or NULL with
+/// `*status` holding the wait status; `timeout` seconds kills it first.
+char * _Nullable vp_session_evaluate(const char * _Nonnull source, double timeout, int * _Nonnull status);
 void vp_vcam_start(void);
 /// Publish the HomePod MiniDisplay HID device when firmware has its geometry.
 /// The device and its callback queue live for the worker process lifetime.
