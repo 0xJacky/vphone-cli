@@ -3062,7 +3062,7 @@ static NSInteger vpWallpaperInterfaceForDevice(id self, SEL cmd, NSInteger devic
 }
 
 static BOOL vpInstallWallpaperOrientationBridge(void) {
-    id scene = vpMainInnerWindowScene();
+    id scene = vpOrientationArbitrationScene();
     id wallpaper = vpReadObject(scene, "wallpaperController");
     SEL converter = sel_registerName("_interfaceOrientationForDeviceOrientation:");
     Method method = wallpaper ? class_getInstanceMethod(object_getClass(wallpaper), converter) : NULL;
@@ -3993,7 +3993,7 @@ static int persistentCoverToken, persistentInnerToken;
         ^(int token) { vpInspectQuickActions(); });
     // Installed before SpringBoard builds its cover sheet, so the first
     // SBSDeviceDeterminedConfiguration construction is captured.
-    vpFoldDisplayLog(@"folddisplay build marker: bridge-diag-2");
+    vpFoldDisplayLog(@"folddisplay build marker: bridge-diag-3");
     vpInstallConfigInitSwizzle();
     vpInstallLayoutClassSwizzle();
     static int windowsInspectToken;

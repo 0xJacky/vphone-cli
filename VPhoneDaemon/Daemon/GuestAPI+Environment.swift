@@ -21,6 +21,10 @@ extension GuestAPI {
         "libdevicename.dylib",
         "libprefsfix.dylib",
         "libsigninfix.dylib",
+        "libvphonefolddisplay.dylib",
+        "libvphonefoldguard.dylib",
+        "libvphonehinge.dylib",
+        "libvphoneposterprobe.dylib",
         "libvphonegyro.dylib",
         "libvphoneaccelerometer.dylib",
         "libvphoneattitude.dylib",
@@ -60,8 +64,11 @@ extension GuestAPI {
             guard environmentLibraries.contains(name) else {
                 throw GuestAPIError.invalidRequest("\(name) is not part of the vphone environment")
             }
-            if ["libvphonegyro.dylib", "libvphoneaccelerometer.dylib", "libvphoneattitude.dylib"].contains(name), !FileManager.default.fileExists(atPath: "/usr/lib/" + name) {
-                throw GuestAPIError.invalidRequest("Enable the motion sensor patch with cfw install or cfw update-environment first")
+            if [
+                "libvphonegyro.dylib", "libvphoneaccelerometer.dylib", "libvphoneattitude.dylib",
+                "libvphonehinge.dylib", "libvphonefoldguard.dylib", "libvphonefolddisplay.dylib",
+            ].contains(name), !FileManager.default.fileExists(atPath: "/usr/lib/" + name) {
+                throw GuestAPIError.invalidRequest("Enable the corresponding guest patch with cfw install or cfw update-environment first")
             }
             let staged = URL(fileURLWithPath: environmentStaging + "/" + name)
             guard let data = try? Data(contentsOf: staged, options: .mappedIfSafe) else {

@@ -3970,3 +3970,23 @@ created only while a Focus is active) — normalizes without a per-action
 table. Verified on the cover lock screen (both glyphs now matching
 extent, flashlight slim); the Control Center focus module icon measures
 consistent with its neighbours and is a different (CCUI) family.
+
+Follow-up (deployment staleness + fresh rebuild): two infrastructure
+findings from the wallpaper chase. First, the offline guest-environment
+update (set-bundle --update-environment / cfw update-environment) served
+the PREVIOUS build's dylib — proven by a build marker absent from the
+guest while the bundle contained it; two page-rounded builds sharing a
+byte size hid the skip from casual checks. A size-changing padding
+buffer now keeps the folddisplay dylib's size per-build distinct, and
+the fold-family dylibs (folddisplay, foldguard, hinge, posterprobe) were
+added to vphoned's `environmentLibraries` allowlist so the running
+machine's hash-based environment sync can update them too. Second, the
+first environment rewrite that actually changed sizes was followed by a
+boot kernel panic (AppleSEPManager backtrace, pid 0, three consecutive
+boots) — unreproduced elsewhere and not yet root-caused; the machine
+was deleted and recreated (vm create --device iPhone19,4 --no-template,
+standard preset, every step passed). The fresh restore delivers the
+current dylib directly (marker verified in-guest), the wallpaper
+orientation bridge installs, and 3× fold cycles land closed 466×678/0°
+and open 669×951/90°. Wallpaper orientation judgment needs the user's
+directional wallpaper set again on the fresh machine.
