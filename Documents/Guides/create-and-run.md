@@ -20,6 +20,8 @@ Creation runs prepare → firmware patch → online DFU restore → host-mounted
 
 By default that pipeline builds a [template](#templates) rather than the VM itself, and the VM is cloned from it. The next `vm create` for the same device, iOS and cloudOS builds, preset and disk size clones from the same template instead of restoring again. Pass `--no-template` to build the VM on its own, as before.
 
+`--iphone-version` or `--iphone-build` instead of `--iphone-source` resolves the IPSW as `fw prepare` does, for `--device` (iPhone17,3 by default). Without `--cloudos-source` the cloudOS is the one the catalog recommends for that release, as `fw catalog` lists it.
+
 `--cpu`, `--memory`, `--network` and `--unlock-at-startup` set those `vm config` settings on the new VM (defaults: 8 cores, 8192 MB, nat, off). `--skip-first-boot` leaves out the final boot, for a caller that boots the VM itself.
 
 `fw prepare` creates a temporary vphone VM with no network device, starts it in DFU, and restores the selected cloudOS IPSW using this project's restore backend. It mounts the restored System volume read-only, extracts the GPU bundle, then removes the temporary VM. This first restore supplies the GPU driver for the second, hybrid iPhone restore. The extracted bundle is cached per cloudOS build in `~/.vphone/gpu-drivers/`, so later machines on the same cloudOS skip the temporary restore. `vm create` and `fw prepare` also accept `--gpu-driver-bundle /path/to/AppleParavirtGPUMetalIOGPUFamily.bundle` to reuse a previously extracted bundle without the temporary restore. The CLI checks its iPhoneOS platform version against the selected cloudOS version. Each restore obtains its own ticket online.

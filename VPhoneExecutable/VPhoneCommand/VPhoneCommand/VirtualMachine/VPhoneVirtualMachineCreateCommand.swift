@@ -45,6 +45,10 @@ struct VPhoneVirtualMachineCreateCommand: ParsableCommand {
     @Argument(help: "new VM name") var name: String
     @Option(name: .shortAndLong, help: "iPhone IPSW URL or local path") var iphoneSource: String?
     @Option(name: .shortAndLong, help: "cloudOS IPSW URL or local path") var cloudosSource: String?
+    @Option(help: "iPhone version to resolve to an IPSW; the cloudOS defaults to its recommended one")
+    var iphoneVersion: String?
+    @Option(help: "iPhone build to resolve to an IPSW; the cloudOS defaults to its recommended one")
+    var iphoneBuild: String?
     @Option(help: "GPU driver bundle from the same cloudOS build, for offline AEA recovery")
     var gpuDriverBundle: String?
     @Option(help: "Directory for downloaded IPSWs, shared by every VM (default: ~/.vphone/ipsws or $VPHONE_ROOT/ipsws)")
@@ -151,6 +155,9 @@ struct VPhoneVirtualMachineCreateCommand: ParsableCommand {
             inferredProductType = VPhoneIPSWCache.guestDevice(for: archive)?.productType
         }
 
+        if iphoneSource != nil, iphoneVersion != nil || iphoneBuild != nil {
+            throw ValidationError("Use either --iphone-source or --iphone-version/--iphone-build.")
+        }
         if template != nil, noTemplate {
             throw ValidationError("--template and --no-template exclude each other.")
         }
@@ -184,6 +191,8 @@ struct VPhoneVirtualMachineCreateCommand: ParsableCommand {
             let firmware = [
                 ("--iphone-source", iphoneSource != nil),
                 ("--cloudos-source", cloudosSource != nil),
+                ("--iphone-version", iphoneVersion != nil),
+                ("--iphone-build", iphoneBuild != nil),
                 ("--gpu-driver-bundle", gpuDriverBundle != nil),
                 ("--ipsw-cache", ipswCache != nil),
                 ("--keep-artifacts", keepArtifacts),
@@ -222,9 +231,32 @@ struct VPhoneVirtualMachineCreateCommand: ParsableCommand {
 
         var sources = VPhoneFirmwareSources(iphoneSource: nil, cloudosSource: nil)
         if templateUse == .none || templateUse == .automatic {
+            var iphone = iphoneSource
+            var cloudos = cloudosSource
+            if iphoneVersion != nil || iphoneBuild != nil {
+                let lookup = VPhoneFirmwareSourceSelection.lookupDevice(selectedDevice)
+                let release = try VPhoneFirmwareSourceSelection.release(
+                    device: lookup,
+                    version: iphoneVersion,
+                    build: iphoneBuild,
+                    readme: VPhoneFirmwareSourceSelection.compatibilityGuide(resources),
+                    downloadURLs: VPhoneFirmwareSourceSelection.restoreURLs(forDevice: lookup),
+                )
+                iphone = release.url
+                print("[+] IPSW: \(release.version) (\(release.build)) \(release.url)")
+                if cloudos == nil {
+                    let recommended = VPhoneFirmwareCatalog.recommendedCloudOS(
+                        forDevice: selectedDevice ?? VPhoneFirmwareCatalog.device,
+                        version: release.version,
+                        url: release.url,
+                    )
+                    cloudos = recommended.url
+                    print("[+] cloudOS: \(recommended.name), recommended for \(release.version)")
+                }
+            }
             // Prompt for any firmware component not supplied on the command line,
             // from the guest device's builds.
-            sources = try VPhoneFirmwareSourceSelection.resolve(iphone: iphoneSource, cloudos: cloudosSource, device: selectedDevice)
+            sources = try VPhoneFirmwareSourceSelection.resolve(iphone: iphone, cloudos: cloudos, device: selectedDevice)
             guard sources.iphoneSource != nil, sources.cloudosSource != nil else {
                 throw ValidationError("Specify both --iphone-source and --cloudos-source when running without a terminal.")
             }
