@@ -127,9 +127,12 @@ extension GuestAPI {
                         // does not itself enqueue UIKit's orientation
                         // arbitration.  Publish the same bounded refresh
                         // sequence used by the native pose pipeline before
-                        // waiting for SpringBoard's scene receipt.
+                        // waiting for SpringBoard's scene receipt.  The
+                        // pose-refresh channel re-reads the just-set device
+                        // orientation; inputs.refresh leaves the pipeline on
+                        // its previous value and the settle times out.
                         _ = try? postDarwinNotification("com.vphone.display.orientation.mapping.request", state: nil)
-                        _ = try? postDarwinNotification("com.vphone.display.orientation.inputs.refresh", state: nil)
+                        _ = try? postDarwinNotification("com.vphone.display.orientation.pose.refresh", state: nil)
                         _ = try? postDarwinNotification("com.vphone.display.orientation.arbitration.refresh", state: nil)
                         _ = try? postDarwinNotification("com.vphone.display.orientation.actuation.refresh", state: nil)
                         _ = try? postDarwinNotification("com.vphone.display.presentation.wallpaper.pulse", state: nil)

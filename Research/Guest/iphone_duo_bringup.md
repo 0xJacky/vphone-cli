@@ -4007,3 +4007,52 @@ already routes PosterBoard* processes for the probe). A quick layer
 bisect anyone can run: set a built-in STILL wallpaper (Settings ›
 Wallpaper) and rotate — if stills stay upright in every direction, the
 bug is confined to the extension-rendered photo path.
+
+Follow-up (QuickAction repeat application, 2026-10-28): the long-side walk
+was using each glyph's `frame`, which can include the transform already
+applied by an earlier rotation or fold pulse. Repeated passes therefore were
+not idempotent and could shrink the camera. The walk now reads the
+untransformed `bounds`, keeps the flashlight's 16pt long-side target, and
+restores the camera to a 0.82 factor; repeated pulses converge to the same
+transform. Each glyph now also retains its first native bounds in an
+associated value, so a later private layout rewrite cannot feed a transformed
+size back into the next pass.
+Orientation actuation also schedules three coalesced main-queue passes after
+the native CoverSheet layout returns, so a glyph rebuilt late in the rotation
+cannot remain at the unscaled native transform.
+
+Follow-up (wallpaper editor loading and floating scene position, 2026-10-28):
+the poster probe was issuing a new geometry request every 1.5 seconds while
+the PosterBoard editor kept its portrait scene contract. That reset the Add
+New Wallpaper loading transition indefinitely. The probe now coalesces
+requests, leaves PosterBoard itself alone, and only follows hosted poster
+renderer processes. The settled orientation is read from the daemon's Darwin
+notification state before falling back to the map file. SpringBoard also keeps
+the portrait floating editor scene at its native size and centers it inside
+the landscape poster host; renderer containers still fill the native presenter
+bounds.
+
+Follow-up (rotation wedge on the recreated machine, 2026-10-28 PM): after
+the first 270° request on the recreated duotest-m5, every rotation away
+from the inner rest (90°) is refused — the RPC times out with "The Duo
+scene did not settle", the pose override verifiably holds the requested
+device value during the window (portrait request: pose 3), the
+accelerometer sink is healthy, and the forced arbitration still concludes
+interface 4 (the mount's mapping of the REST pose device 1, not the
+requested device 3). The scene geometry request now fails with
+UISceneErrorDomain 101 ("windowing mode does not allow programmatic
+changes to interface orientation") — the same public call that delivered
+the landscape re-flow on the original machine. Bisection so far: not the
+experiment flags (none on disk), not the rotation lock (all keys false,
+full lock-cycle does not clear it), not the merged dylib (reverting
+libvphonefolddisplay to the pre-merge commit changes nothing), not the
+hinge preferences (clean 180°), and not a stale vphoned (pose.refresh now
+rides setRotation's sequence too, commit e409fa2b build). The wedge
+survives reboots and code reverts, and 0↔90 DID work in the machine's
+first minutes before the first 270 request wedged it — pointing at a
+persistent guest state or a machine-creation difference (the recreate ran
+the current template flow: setUpTemplate/trimTemplate steps the original
+never had). Next round: (a) recreate a second machine with trimming
+disabled and diff the arbitration behavior, (b) instrument the traits
+arbiter's supported-orientation query, (c) compare the scene's
+effectiveGeometry on the two machines.

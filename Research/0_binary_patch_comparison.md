@@ -5281,8 +5281,11 @@ The host VM view now derives its input geometry from the active Duo viewport (`a
 > older guests. This changes admission only for the known Duo model and keeps
 > the lock-screen wallpaper path unchanged.
 
-> **Poster compositor probe (2026-10-27):** Added a separate read-only
-> `libvphoneposterprobe.dylib`. SystemHook loads it only for paths containing
-> `PosterBoard`/`poster`; it records bounded JSON for connected scenes, screen
-> bounds/scale, private display-mode description, activation state, PID and
-> uptime. It performs no swizzling, pixel capture, or scene mutation.
+> **Poster compositor follower (2026-10-28):** `libvphoneposterprobe.dylib`
+> now coalesces orientation requests for hosted poster renderer processes and
+> leaves the PosterBoard wallpaper editor untouched. It reads the settled
+> daemon orientation notification before falling back to the map file and
+> asks SpringBoard to reconcile newly-created floating poster hosts. The
+> SpringBoard-side adapter preserves the editor's portrait bounds and centers
+> it inside the landscape presenter, avoiding the repeated-request loading
+> loop and the off-center sheet.

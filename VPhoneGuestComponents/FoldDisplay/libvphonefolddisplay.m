@@ -136,12 +136,14 @@ static void vpRestoreInputTrace(void);
 static void vpExportNativeOrientationMapping(void);
 static void vpLogicalProjectionControl(NSInteger action);
 static id vpRootServerScenes(id app);
-static NSArray *vpSnapshotRect(id object, const char *name);
+static id vpSnapshotRect(id object, const char *name);
 static void vpProcessViewportWorkspaceRequest(BOOL submit);
 static void vpApplyRootGeometry(void);
 static void vpScheduleViewportAdoption(void);
 static void vpRefreshNativeOrientationActuation(void);
 static void vpApplyQuickActionGlyphScale(void);
+static void vpScheduleQuickActionGlyphScale(void);
+static void vpSyncWallpaperSceneHosts(void);
 
 // These helpers are kept at the boundary so the extracted status/wallpaper
 // sections can call them without depending on declaration order. They only
@@ -1768,6 +1770,10 @@ static void vpPulseNativeWallpaperOrientation(void) {
     } @catch (NSException *exception) {
         vpFoldDisplayLog([NSString stringWithFormat:@"native wallpaper orientation exception: %@", exception.reason]);
     }
+    // PosterBoard may create its floating editor after the wallpaper
+    // presenter was rotated. Reconcile the hosted scene after the native
+    // wallpaper pass so a portrait editor remains centered in landscape.
+    vpSyncWallpaperSceneHosts();
     // This is now part of the normal Duo orientation pipeline.  Do not roll
     // the wallpaper back after a timer: the scene's current arbitration is
     // the source of truth and a delayed restore recreates the landscape black
@@ -2146,12 +2152,16 @@ static void vpInspectQuickActions(void) {
 // the only safe lever.
 // The glyph frames are the symbol metrics times one shared multiplier, so
 // a tall symbol (flashlight.off.fill, 20x37pt) towers over a wide one
-// (camera.fill, 24x18pt) under any uniform factor.  The accepted camera
-// size is a ~16pt long side (23.57 x 0.68), so each glyph is normalized
-// by its own long side: the flashlight lands at ~0.44, the camera keeps
-// ~0.68, and any future glyph (focus, camera-on) comes out consistent
-// without a per-action table.
-static double const vpQuickActionGlyphLongSide = 16.0;
+// (camera.fill, 24x18pt) under any uniform factor.  Keep the flashlight at
+// the accepted 16pt long side, while restoring the camera to the 0.82 target
+// factor selected by the real-device comparison.  Bounds are deliberately used
+// below: unlike frame, they are in the glyph's own coordinate space and do
+// not include the transform we set.  This makes every retry idempotent during
+// rotation/fold pulses and prevents the camera from being scaled down again.
+static double const vpQuickActionTallGlyphLongSide = 16.0;
+static double const vpQuickActionCameraScale = 0.82;
+static char vpQuickActionNativeBoundsKey;
+static atomic_uint vpQuickActionScaleGeneration;
 
 static void vpApplyQuickActionGlyphScale(void) {
     @try {
@@ -2165,14 +2175,35 @@ static void vpApplyQuickActionGlyphScale(void) {
                 [pending removeLastObject];
                 if ([view isKindOfClass:objc_getClass("CSQuickActionImageGlyphView")]) {
                     SEL transformSelector = sel_registerName("transform");
-                    SEL frameSelector = sel_registerName("frame");
-                    if (![view respondsToSelector:transformSelector] || ![view respondsToSelector:frameSelector]) continue;
+                    SEL boundsSelector = sel_registerName("bounds");
+                    if (![view respondsToSelector:transformSelector] || ![view respondsToSelector:boundsSelector]) continue;
                     CGAffineTransform current = ((CGAffineTransform (*)(id, SEL))objc_msgSend)(view, transformSelector);
-                    CGRect frame = ((CGRect (*)(id, SEL))objc_msgSend)(view, frameSelector);
+                    CGRect bounds = ((CGRect (*)(id, SEL))objc_msgSend)(view, boundsSelector);
                     touched++;
-                    double longSide = fmax(frame.size.width, frame.size.height);
+                    // UIKit's bounds should be transform-independent, but
+                    // this private glyph view can be relaid out with a new
+                    // bounds after a fold. Capture the first native value so
+                    // later passes cannot turn a prior result into their new
+                    // input, even if the view's layout code rewrites it.
+                    NSValue *nativeBoundsValue = objc_getAssociatedObject(view, &vpQuickActionNativeBoundsKey);
+                    CGRect nativeBounds = bounds;
+                    if ([nativeBoundsValue isKindOfClass:[NSValue class]]) {
+                        [nativeBoundsValue getValue:&nativeBounds size:sizeof(nativeBounds)];
+                    } else {
+                        // Do not freeze the pre-layout zero rect. The next
+                        // scheduled pass must be allowed to capture the
+                        // first real glyph bounds.
+                        if (fmax(bounds.size.width, bounds.size.height) < 1) continue;
+                        nativeBoundsValue = [NSValue value:&nativeBounds withObjCType:@encode(CGRect)];
+                        objc_setAssociatedObject(view, &vpQuickActionNativeBoundsKey,
+                            nativeBoundsValue, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+                    }
+                    double longSide = fmax(nativeBounds.size.width, nativeBounds.size.height);
                     if (longSide < 1) continue;
-                    double scale = vpQuickActionGlyphLongSide / longSide;
+                    BOOL isWideGlyph = nativeBounds.size.width > nativeBounds.size.height * 1.15;
+                    double scale = isWideGlyph
+                        ? vpQuickActionCameraScale
+                        : vpQuickActionTallGlyphLongSide / longSide;
                     if (scale > 1) scale = 1;
                     if (scale < 0.2) scale = 0.2;
                     if (fabs(current.a - scale) < 0.001 &&
@@ -2186,10 +2217,28 @@ static void vpApplyQuickActionGlyphScale(void) {
             }
         }
         if (rescaled)
-            vpFoldDisplayLog([NSString stringWithFormat:@"quick action glyph scale: %lu of %lu views normalized to %.0fpt long side",
-                (unsigned long)rescaled, (unsigned long)touched, vpQuickActionGlyphLongSide]);
+            vpFoldDisplayLog([NSString stringWithFormat:@"quick action glyph scale: %lu of %lu views (camera %.2f, tall long side %.0fpt)",
+                (unsigned long)rescaled, (unsigned long)touched, vpQuickActionCameraScale,
+                vpQuickActionTallGlyphLongSide]);
     } @catch (NSException *exception) {
         vpFoldDisplayLog([NSString stringWithFormat:@"quick action glyph scale exception: %@", exception.reason]);
+    }
+}
+
+// The native orientation callback starts a new CoverSheet layout; its glyph
+// views can be rebuilt after the callback returns. Apply on the next main-queue
+// turn and at two short settling points, while coalescing stale rotation
+// schedules. Each pass is safe because it uses the cached native bounds above.
+static void vpScheduleQuickActionGlyphScale(void) {
+    if (!vpAutomaticMainStatus) return;
+    unsigned int generation = atomic_fetch_add_explicit(&vpQuickActionScaleGeneration, 1, memory_order_acq_rel) + 1;
+    const double delays[] = {0.0, 0.12, 0.4};
+    for (NSUInteger index = 0; index < sizeof(delays) / sizeof(delays[0]); ++index) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delays[index] * NSEC_PER_SEC)),
+            dispatch_get_main_queue(), ^{
+                if (generation != atomic_load_explicit(&vpQuickActionScaleGeneration, memory_order_acquire)) return;
+                vpApplyQuickActionGlyphScale();
+            });
     }
 }
 
@@ -2225,12 +2274,12 @@ static void vpInspectAllWindows(void) {
     }
 }
 
-// Experiment: the poster extension's hosted scene presentation views keep
-// their portrait 669x951 bounds inside the landscape wallpaper tree.  This
-// opt-in pulse resizes those scene-host nodes to the wallpaper presenter's
-// current bounds and requests layout, mirroring the outer frame
-// synchronization already part of the Duo wallpaper pulse.  Nothing runs
-// without this notification; a later rotation can redo it.
+// The poster extension's hosted scene presentation views keep their portrait
+// 669x951 bounds inside the landscape wallpaper tree. Renderer host nodes are
+// resized to the wallpaper presenter's current bounds; the PosterBoard
+// floating editor keeps its native portrait bounds and is centered instead.
+// The notification is cheap and idempotent, so a newly-created editor can be
+// reconciled without touching its loading state.
 static NSString *vpSizeText(CGSize size) {
     return [NSString stringWithFormat:@"{%.0f, %.0f}", size.width, size.height];
 }
@@ -2255,9 +2304,34 @@ static void vpSyncWallpaperSceneHosts(void) {
             [pending removeLastObject];
             NSString *className = NSStringFromClass([view class]);
             CGRect bounds = ((CGRect (*)(id, SEL))objc_msgSend)(view, sel_registerName("bounds"));
-            if ([className isEqualToString:@"_UIScenePresentationView"] ||
-                [className isEqualToString:@"_UISceneLayerHostContainerView"] ||
-                [className isEqualToString:@"_UITouchPassthroughView"]) {
+            if ([className isEqualToString:@"_UIScenePresentationView"]) {
+                id parent = vpReadObject(view, "superview");
+                NSString *parentClass = parent ? NSStringFromClass([parent class]) : @"";
+                // The floating poster editor remains portrait-native. Keep
+                // its scene bounds intact, but center that scene inside the
+                // landscape poster host instead of stretching it (stretching
+                // restarts its loading transition and leaves the sheet off
+                // the visual center). Wallpaper render hosts still fill the
+                // presenter below.
+                if ([parentClass containsString:@"PosterFloating"] &&
+                    bounds.size.width < presenterBounds.size.width &&
+                    bounds.size.height > presenterBounds.size.height) {
+                    @try {
+                        CGRect centered = CGRectMake(
+                            floor((presenterBounds.size.width - bounds.size.width) / 2.0),
+                            floor((presenterBounds.size.height - bounds.size.height) / 2.0),
+                            bounds.size.width, bounds.size.height);
+                        [view setValue:[NSValue value:&centered withObjCType:@encode(CGRect)] forKey:@"frame"];
+                        ((void (*)(id, SEL))objc_msgSend)(view, sel_registerName("setNeedsLayout"));
+                        synced++;
+                        vpFoldDisplayLog([NSString stringWithFormat:@"wallpaper scene host center: %@ size=%@ origin={%.0f, %.0f}",
+                            parentClass, vpSizeText(bounds.size), centered.origin.x, centered.origin.y]);
+                    } @catch (NSException *exception) {
+                        vpFoldDisplayLog([NSString stringWithFormat:@"wallpaper scene host center exception: %@", exception.reason]);
+                    }
+                }
+            } else if ([className isEqualToString:@"_UISceneLayerHostContainerView"] ||
+                       [className isEqualToString:@"_UITouchPassthroughView"]) {
                 if (!CGSizeEqualToSize(bounds.size, presenterBounds.size)) {
                     @try {
                         CGRect rect = CGRectMake(0, 0, presenterBounds.size.width, presenterBounds.size.height);
@@ -3123,6 +3197,7 @@ static void vpRefreshNativeOrientationActuation(void) {
         // direction makes the space swap (951x669) and the icon family and
         // windows re-flow.
         vpRequestSceneGeometry(scene, direction);
+        vpScheduleQuickActionGlyphScale();
     } @catch (NSException *exception) {
         vpFoldDisplayLog([NSString stringWithFormat:@"orientation actuation exception: %@", exception.reason]);
     }
@@ -4094,9 +4169,6 @@ static int persistentCoverToken, persistentInnerToken;
     notify_register_dispatch("com.vphone.display.orientation.actuation.refresh", &actuationRefreshToken, dispatch_get_main_queue(),
         ^(int token) {
             vpRefreshNativeOrientationActuation();
-            // Rotation pulses rebuild lock-screen presentation; fresh glyph
-            // instances render at the native factor until re-scaled.
-            if (vpAutomaticMainStatus) vpApplyQuickActionGlyphScale();
         });
     static int embeddedOrientationToken, embeddedOrientationRestoreToken;
     notify_register_dispatch("com.vphone.display.orientation.embedded.sync", &embeddedOrientationToken, dispatch_get_main_queue(),

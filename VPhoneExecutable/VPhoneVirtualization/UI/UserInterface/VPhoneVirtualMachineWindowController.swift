@@ -66,10 +66,11 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         view.clipboardSync = VPhoneClipboardSync(control: control)
         virtualMachineView = view
         let scale = CGFloat(screenScale)
+        let duoWindowScale = 1 / CGFloat(sqrt(Double(screenScale)))
         minimumDuoPanelSize = foldableGuest
             ? CGSize(
-                width: CGFloat(VPhoneGuestDevice.iPhone19_4InnerScreen.width) / scale,
-                height: CGFloat(VPhoneGuestDevice.iPhone19_4InnerScreen.height) / scale,
+                width: CGFloat(VPhoneGuestDevice.iPhone19_4.screen.width) / scale * duoWindowScale,
+                height: CGFloat(VPhoneGuestDevice.iPhone19_4.screen.height) / scale * duoWindowScale,
             )
             : nil
         let windowSize = homePodGuest ? VPhoneHomePodDisplayView.defaultContentSize : NSSize(
@@ -276,9 +277,9 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
 
     private weak var displayContainer: VPhoneDisplayContainerView?
     private var panelSize: NSSize = .zero
-    /// The Duo's real inner panel, in window points. The VM keeps enough
-    /// native pixels for that panel even while the cover is active, so the
-    /// window must never shrink below it.
+    /// The Duo's cover baseline after the host-window reduction. The inner
+    /// panel can grow the window when it is active, but must not make the
+    /// minimum larger than this compact physical-size baseline.
     private var minimumDuoPanelSize: CGSize?
     private var orientationPollInFlight = false
 
@@ -359,7 +360,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         container.turn(to: orientation, windowFrame: frame, animated: !force)
     }
 
-    /// Keep a Duo window at least as large as the real inner display. The
+    /// Keep a Duo window at least as large as the compact cover baseline. The
     /// minimum follows the displayed orientation because AppKit's content
     /// minimum is expressed in the window's current axes.
     private func setMinimumContentSize(for orientation: VPhoneDisplayOrientation, on window: NSWindow) {
