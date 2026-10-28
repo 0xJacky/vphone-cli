@@ -3990,3 +3990,20 @@ current dylib directly (marker verified in-guest), the wallpaper
 orientation bridge installs, and 3× fold cycles land closed 466×678/0°
 and open 669×951/90°. Wallpaper orientation judgment needs the user's
 directional wallpaper set again on the fresh machine.
+
+Follow-up (wallpaper flakiness, honest status): on the fresh machine the
+landscape wallpaper is path-dependent — sometimes a correct full-bleed
+frame, sometimes a portrait-width strip with a gray-black remainder,
+with the display stream even observed frozen across three rapid
+rotations (byte-identical captures). The pulse (frame sizing) +
+orientation bridge (device→interface through the mounting table) +
+device-code mirror are all armed together now; each individually helps
+one path but no combination is stable across sequences. Remaining
+suspicion: photo wallpapers render through the poster-extension
+processes (PhotosPosterProv and siblings), whose hosted-scene rotation
+our SpringBoard-side hooks never touch — the next engineering round is
+injecting an orientation follower into those extensions (SystemHook
+already routes PosterBoard* processes for the probe). A quick layer
+bisect anyone can run: set a built-in STILL wallpaper (Settings ›
+Wallpaper) and rotate — if stills stay upright in every direction, the
+bug is confined to the extension-rendered photo path.

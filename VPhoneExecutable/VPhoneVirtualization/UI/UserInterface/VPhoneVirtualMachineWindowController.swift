@@ -66,6 +66,12 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         view.clipboardSync = VPhoneClipboardSync(control: control)
         virtualMachineView = view
         let scale = CGFloat(screenScale)
+        minimumDuoPanelSize = foldableGuest
+            ? CGSize(
+                width: CGFloat(VPhoneGuestDevice.iPhone19_4InnerScreen.width) / scale,
+                height: CGFloat(VPhoneGuestDevice.iPhone19_4InnerScreen.height) / scale,
+            )
+            : nil
         let windowSize = homePodGuest ? VPhoneHomePodDisplayView.defaultContentSize : NSSize(
             width: CGFloat(screenWidth) / scale,
             height: CGFloat(screenHeight) / scale,
@@ -112,6 +118,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         window.level = .normal
         VPhoneAlert.hostWindow = window
         window.contentAspectRatio = windowSize
+        setMinimumContentSize(for: .portrait, on: window)
         window.title = name
         window.contentView = container
 
@@ -124,6 +131,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
             window.center()
         }
         window.setFrameAutosaveName(sceneName)
+        setMinimumContentSize(for: .portrait, on: window)
         observeKeyState(of: window)
         // A frame saved while the guest was sideways is turned back: the guest
         // boots in portrait, and the orientation poll turns it again if not.
@@ -268,6 +276,10 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
 
     private weak var displayContainer: VPhoneDisplayContainerView?
     private var panelSize: NSSize = .zero
+    /// The Duo's real inner panel, in window points. The VM keeps enough
+    /// native pixels for that panel even while the cover is active, so the
+    /// window must never shrink below it.
+    private var minimumDuoPanelSize: CGSize?
     private var orientationPollInFlight = false
 
     /// Asks vphoned for the interface orientation once a second. Guests
@@ -333,6 +345,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
     /// full-screen one keeps the screen and letterboxes the turned panel.
     private func applyOrientation(_ orientation: VPhoneDisplayOrientation, to window: NSWindow, force: Bool = false) {
         guard let container = displayContainer, force || container.orientation != orientation else { return }
+        setMinimumContentSize(for: orientation, on: window)
         window.contentAspectRatio = orientation.displayedSize(panel: panelSize)
         var frame: NSRect?
         if !window.styleMask.contains(.fullScreen) {
@@ -344,6 +357,25 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
             }
         }
         container.turn(to: orientation, windowFrame: frame, animated: !force)
+    }
+
+    /// Keep a Duo window at least as large as the real inner display. The
+    /// minimum follows the displayed orientation because AppKit's content
+    /// minimum is expressed in the window's current axes.
+    private func setMinimumContentSize(for orientation: VPhoneDisplayOrientation, on window: NSWindow) {
+        guard let minimumDuoPanelSize else { return }
+        let minimum = orientation.displayedSize(panel: minimumDuoPanelSize)
+        window.contentMinSize = minimum
+
+        let current = window.contentRect(forFrameRect: window.frame)
+        let target = CGSize(width: max(current.width, minimum.width), height: max(current.height, minimum.height))
+        guard target != current.size else { return }
+        let center = NSPoint(x: window.frame.midX, y: window.frame.midY)
+        window.setContentSize(target)
+        window.setFrameOrigin(NSPoint(
+            x: center.x - window.frame.width / 2,
+            y: center.y - window.frame.height / 2,
+        ))
     }
 
     // MARK: - Mac Shortcuts
