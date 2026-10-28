@@ -86,89 +86,13 @@ extension GuestAPI {
                 let previousPose = (accelerometer["degrees"] as? NSNumber).map { String($0.intValue) }
                 let publishesPose = accelerometer["provider_running"] as? Bool == true
                 let previousInterface = interfaceRotationDegrees()
-                var mappedRotation: GuestDisplayRotation?
-                var originalDevicePose: [String: Any]?
-                if ((try? deviceSnapshot())?["model"] as? String) == "iPhone19,4" {
-                    let mapping = vp_display_orientation_mapping()
-                    let pose = vp_device_pose_get()
-                    guard mapping["available"] as? Bool == true,
-                          let values = mapping["deviceOrientations"] as? [Int],
-                          let resolved = GuestDisplayRotation.resolve(orientation, deviceOrientations: values),
-                          pose["available"] as? Bool == true,
-                          pose["device_orientation"] is NSNumber, pose["hinge"] is NSNumber, pose["tabletop"] is NSNumber
-                    else {
-                        throw GuestAPIError.operationFailed("The active Duo scene orientation map or pose is unavailable")
+                if publishesPose {
+                    guard vp_accelerometer_set_orientation(orientation) else {
+                        throw GuestAPIError.operationFailed("Could not publish the accelerometer orientation")
                     }
-                    mappedRotation = resolved
-                    originalDevicePose = pose
                 }
-                defer {
-                    if mappedRotation != nil { GuestFoldPose.finishExplicitRequest() }
-                }
-                var devicePosePublished = false
                 do {
-                    if let mappedRotation, let originalDevicePose {
-                        GuestFoldPose.cancelStartupRestore()
-                        guard vp_device_pose_set(
-                            Int32(mappedRotation.deviceOrientation),
-                            (originalDevicePose["hinge"] as! NSNumber).int32Value,
-                            (originalDevicePose["tabletop"] as! NSNumber).int32Value
-                        ) else { throw GuestAPIError.operationFailed("Could not publish the mapped Duo device pose") }
-                        devicePosePublished = true
-                    }
-                    if publishesPose {
-                        let physicalSpec = mappedRotation.map { String($0.accelerometerDegrees) } ?? orientation
-                        guard vp_accelerometer_set_orientation(physicalSpec) else {
-                            throw GuestAPIError.operationFailed("Could not publish the accelerometer orientation")
-                        }
-                    }
-                    if mappedRotation != nil {
-                        // The Duo scene's inverse mounting map is native and
-                        // does not itself enqueue UIKit's orientation
-                        // arbitration.  Publish the same bounded refresh
-                        // sequence used by the native pose pipeline before
-                        // waiting for SpringBoard's scene receipt.  The
-                        // pose-refresh channel re-reads the just-set device
-                        // orientation; inputs.refresh leaves the pipeline on
-                        // its previous value and the settle times out.
-                        _ = try? postDarwinNotification("com.vphone.display.orientation.mapping.request", state: nil)
-                        _ = try? postDarwinNotification("com.vphone.display.orientation.pose.refresh", state: nil)
-                        _ = try? postDarwinNotification("com.vphone.display.orientation.arbitration.refresh", state: nil)
-                        _ = try? postDarwinNotification("com.vphone.display.orientation.actuation.refresh", state: nil)
-                        _ = try? postDarwinNotification("com.vphone.display.presentation.wallpaper.pulse", state: nil)
-                        _ = try? postDarwinNotification("com.vphone.display.presentation.clock.refresh", state: nil)
-                    }
-                    var result: [String: Any]
-                    if let mappedRotation {
-                        // The foldable pose transition is asynchronous. An AX
-                        // forced rotation during that transition can race it;
-                        // accept the native scene's receipt instead.
-                        let deadline = ProcessInfo.processInfo.systemUptime + 2
-                        while interfaceRotationDegrees() != mappedRotation.interfaceDegrees,
-                              ProcessInfo.processInfo.systemUptime < deadline {
-                            Thread.sleep(forTimeInterval: 0.05)
-                        }
-                        guard interfaceRotationDegrees() == mappedRotation.interfaceDegrees else {
-                            throw GuestAPIError.operationFailed("The Duo scene did not settle at the requested orientation")
-                        }
-                        // Reassert only the already-settled angle: this also
-                        // refreshes Icli's upright screenshot geometry and
-                        // synchronizes the pointer without driving the fold.
-                        result = try setRotation(orientation)
-                    } else {
-                        result = try setRotation(orientation)
-                    }
-                    if let mappedRotation, let originalDevicePose {
-                        let actual = vp_device_pose_get()
-                        guard actual["device_orientation"] as? Int == mappedRotation.deviceOrientation,
-                              actual["hinge"] as? Int == originalDevicePose["hinge"] as? Int,
-                              actual["tabletop"] as? Int == originalDevicePose["tabletop"] as? Int
-                        else { throw GuestAPIError.operationFailed("The mapped Duo pose did not apply") }
-                        result["physical_pose"] = actual
-                        result["accelerometer_degrees"] = mappedRotation.accelerometerDegrees
-                    }
-                    broadcastInterfaceOrientation()
-                    return result
+                    return try setRotation(orientation)
                 } catch {
                     // A refused rotation leaves the guest as it was. The pose
                     // is persisted, and a refused request still turns iPadOS's
@@ -176,35 +100,11 @@ extension GuestAPI {
                     // left the interface portrait and the pointer upside down,
                     // so the mouse ran backwards. Asking again for the
                     // interface's own orientation turns the pointer back.
-                    let ownsGravity = mappedRotation.map { vp_accelerometer_get()["degrees"] as? Int == $0.accelerometerDegrees } ?? true
-                    if publishesPose, ownsGravity, let previousPose {
+                    if publishesPose, let previousPose {
                         _ = vp_accelerometer_set_orientation(previousPose)
                     }
-                    if devicePosePublished, let mappedRotation, let originalDevicePose {
-                        let current = vp_device_pose_get()
-                        if current["device_orientation"] as? Int == mappedRotation.deviceOrientation,
-                           current["hinge"] as? Int == originalDevicePose["hinge"] as? Int,
-                           current["tabletop"] as? Int == originalDevicePose["tabletop"] as? Int {
-                            _ = vp_device_pose_set(
-                                (originalDevicePose["device_orientation"] as! NSNumber).int32Value,
-                                (originalDevicePose["hinge"] as! NSNumber).int32Value,
-                                (originalDevicePose["tabletop"] as! NSNumber).int32Value
-                            )
-                        }
-                    }
                     if let previousInterface {
-                        if mappedRotation == nil {
-                            _ = try? setRotation(String(previousInterface))
-                        } else {
-                            let deadline = ProcessInfo.processInfo.systemUptime + 2
-                            while interfaceRotationDegrees() != previousInterface,
-                                  ProcessInfo.processInfo.systemUptime < deadline {
-                                Thread.sleep(forTimeInterval: 0.05)
-                            }
-                            if interfaceRotationDegrees() == previousInterface {
-                                _ = try? setRotation(String(previousInterface))
-                            }
-                        }
+                        _ = try? setRotation(String(previousInterface))
                     }
                     throw error
                 }
@@ -214,8 +114,6 @@ extension GuestAPI {
             return rotation
         case "display.orientation":
             return interfaceOrientation()
-        case "display.orientation_mapping", "display.geometry":
-            return vp_display_orientation_mapping()
         case "display.posture":
             return try setDevicePose(params)
         case "display.pose":
@@ -360,7 +258,7 @@ extension GuestAPI {
             }
         }
 
-        let hinge = try value("hinge", names: poseHingeStates, range: 0 ... 4, default: angle.map(angleToHingeState))
+        let hinge = try value("hinge", names: poseHingeStates, range: 0 ... 4, default: angle.map(hingeState(for:)))
         let orientation = try value("orientation", names: poseOrientations, range: 0 ... 6, default: 1)
         let tabletop = try value("tabletop", names: [:], range: 0 ... 10, default: 0)
         if angle == nil {
@@ -383,158 +281,11 @@ extension GuestAPI {
         let published = sweep
             ? vp_hinge_sweep(angle!, durationMs, Int32(profile))
             : vp_hinge_set(angle!)
-        if ((try? deviceSnapshot())?["model"] as? String) == "iPhone19,4" {
-            // The Duo state machine: the cover has no rotation state and
-            // always presents portrait; the inner panel rests landscape —
-            // its rotated mounting maps the natural device pose (accel 0°)
-            // to interface landscape-left (90°), so an unfold presents the
-            // inner default and portrait there stays an explicit rotation
-            // away.
-            let desiredInterface = angle! < 5 ? "0" : "90"
-            // The cover arbiter derives its direction once, at the mode
-            // swap, from the scene pipeline's cached device orientation.
-            // The pose override above wrote portrait (device 1 on the
-            // identity-mounted cover), but the pipeline only re-reads it
-            // through the pose-refresh channel; without the poke the swap
-            // still sees the inner panel's rotated portrait (device 3) and
-            // latches the cover landscape with no later channel able to
-            // reopen arbitration. The same channel feeds the accelerometer
-            // seed below; both land on SpringBoard's queue ahead of the
-            // viewport apply posted right after.
-            if angle! < 5 {
-                _ = vp_accelerometer_set_orientation("0")
-                _ = try? postDarwinNotification("com.vphone.display.orientation.pose.refresh", state: nil)
-            } else if let seed = GuestDisplayRotation.resolve(desiredInterface, deviceOrientations: [3, 4, 2, 1])
-                ?? GuestDisplayRotation.resolve("0", deviceOrientations: [3, 4, 2, 1]) {
-                // Opening carries the same problem in reverse: the swap
-                // derives the inner interface from the cover's portrait pose
-                // (device 1), which the rotated inner mounting renders as
-                // landscape-left. The live export cannot carry the inner
-                // table while the cover viewport holds the scene, so seed
-                // the measured inner table's device value for the desired
-                // interface (portrait is device 3 / 270°); the post-swap
-                // loop re-resolves from the live table either way.
-                let current = vp_device_pose_get()
-                _ = vp_device_pose_set(
-                    Int32(seed.deviceOrientation),
-                    (current["hinge"] as? NSNumber)?.int32Value ?? Int32(hinge),
-                    (current["tabletop"] as? NSNumber)?.int32Value ?? Int32(tabletop)
-                )
-                _ = vp_accelerometer_set_orientation(String(seed.accelerometerDegrees))
-                _ = try? postDarwinNotification("com.vphone.display.orientation.pose.refresh", state: nil)
-            }
-            GuestFoldPose.requestViewport(for: angle!)
-            let expected = angle! < 5 ? [0.0, 0.0, 466.0, 678.0] : [0.0, 0.0, 669.0, 951.0]
-            let deadline = ProcessInfo.processInfo.systemUptime + 3
-            var applied = false
-            repeat {
-                let geometry = vp_display_orientation_mapping()
-                if geometry["available"] as? Bool == true,
-                   geometry["persistentViewport"] as? Bool == true,
-                   let bounds = geometry["configurationBounds"] as? [NSNumber],
-                   bounds.map(\.doubleValue) == expected {
-                    applied = true
-                    break
-                }
-                Thread.sleep(forTimeInterval: 0.05)
-            } while ProcessInfo.processInfo.systemUptime < deadline
-            guard applied else { throw GuestAPIError.operationFailed("Duo logical viewport did not reach the requested size") }
-
-            // A fold transition changes the active panel's native mounting
-            // map (inner [3,4,2,1], cover identity).  The map JSON refreshes
-            // on the next export tick, so the first read after the viewport
-            // lands can still carry the previous panel's table: resolving
-            // portrait against the stale inner table picks device 3, which
-            // the identity-mounted cover panel renders as landscape.  Ask
-            // for a fresh export, resolve against it, and confirm through
-            // SpringBoard's own interface answer, re-resolving once with
-            // the settled table when the first pick mounts sideways.
-            if orientation == Self.poseOrientations["portrait"] {
-                var settled = false
-                for pass in 0..<2 where !settled {
-                    if pass > 0 {
-                        // The first pass pokes immediately with the best
-                        // table it has; only a failed confirmation waits
-                        // for a post-apply export to settle the table.
-                        let staleUptime = (vp_display_orientation_mapping()["generatedUptime"] as? NSNumber)?.doubleValue ?? 0
-                        _ = try? postDarwinNotification("com.vphone.display.orientation.mapping.request", state: nil)
-                        let exportDeadline = ProcessInfo.processInfo.systemUptime + 0.8
-                        while ProcessInfo.processInfo.systemUptime < exportDeadline {
-                            let live = vp_display_orientation_mapping()
-                            if ((live["generatedUptime"] as? NSNumber)?.doubleValue ?? 0) > staleUptime,
-                               (live["configurationBounds"] as? [NSNumber])?.map(\.doubleValue) == expected { break }
-                            Thread.sleep(forTimeInterval: 0.05)
-                        }
-                    }
-                    if let values = vp_display_orientation_mapping()["deviceOrientations"] as? [Int],
-                       let portrait = GuestDisplayRotation.resolve(desiredInterface, deviceOrientations: values) {
-                        let current = vp_device_pose_get()
-                        _ = vp_device_pose_set(
-                            Int32(portrait.deviceOrientation),
-                            (current["hinge"] as? NSNumber)?.int32Value ?? Int32(hinge),
-                            (current["tabletop"] as? NSNumber)?.int32Value ?? Int32(tabletop)
-                        )
-                        _ = vp_accelerometer_set_orientation(String(portrait.accelerometerDegrees))
-                        // The pipeline re-reads the device pose only through
-                        // the pose-refresh channel; inputs.refresh leaves the
-                        // previous panel's value latched, which is exactly how
-                        // a cover swap kept the interface landscape.
-                        _ = try? postDarwinNotification("com.vphone.display.orientation.pose.refresh", state: nil)
-                        _ = try? postDarwinNotification("com.vphone.display.orientation.arbitration.refresh", state: nil)
-                        _ = try? postDarwinNotification("com.vphone.display.orientation.actuation.refresh", state: nil)
-                        let confirmDeadline = ProcessInfo.processInfo.systemUptime + 1.2
-                        while ProcessInfo.processInfo.systemUptime < confirmDeadline {
-                            if interfaceRotationDegrees() == portrait.interfaceDegrees {
-                                settled = true
-                                break
-                            }
-                            Thread.sleep(forTimeInterval: 0.05)
-                        }
-                    }
-                }
-                // A hinge sweep re-derives the cover direction once more when
-                // it crosses the fully-closed band near its end; hold the
-                // portrait actuation until the sweep has finished.
-                if sweep {
-                    let sweepDeadline = ProcessInfo.processInfo.systemUptime + 2.5
-                    while ProcessInfo.processInfo.systemUptime < sweepDeadline {
-                        let hingeNow = vp_hinge_get()
-                        if (hingeNow["sweeping"] as? Bool) != true { break }
-                        Thread.sleep(forTimeInterval: 0.05)
-                    }
-                    _ = try? postDarwinNotification("com.vphone.display.orientation.pose.refresh", state: nil)
-                    _ = try? postDarwinNotification("com.vphone.display.orientation.arbitration.refresh", state: nil)
-                    _ = try? postDarwinNotification("com.vphone.display.orientation.actuation.refresh", state: nil)
-                    let targetDegrees = Int(desiredInterface) ?? 0
-                    if interfaceRotationDegrees() != targetDegrees {
-                        Thread.sleep(forTimeInterval: 0.3)
-                        _ = try? postDarwinNotification("com.vphone.display.orientation.actuation.refresh", state: nil)
-                    }
-                }
-                _ = try? postDarwinNotification("com.vphone.display.orientation.pose.refresh", state: nil)
-                _ = try? postDarwinNotification("com.vphone.display.orientation.arbitration.refresh", state: nil)
-                _ = try? postDarwinNotification("com.vphone.display.orientation.actuation.refresh", state: nil)
-                _ = try? postDarwinNotification("com.vphone.display.presentation.wallpaper.pulse", state: nil)
-                _ = try? postDarwinNotification("com.vphone.display.presentation.clock.refresh", state: nil)
-                if !settled {
-                    // Reuse the same public rotation path once the new panel
-                    // is fully selected; it resolves the post-fold map again
-                    // instead of relying on a stale pre-transition snapshot.
-                    _ = try? setRotation(desiredInterface)
-                }
-            }
-            // Real hardware closes onto a lit cover screen; the lock
-            // presentation belongs to the sleep button, not to the fold.
-            // The cover arbiter override holds portrait there for both the
-            // unlocked home layout and the lock screen, so no sleep is
-            // needed to keep the folded presentation upright.
-        }
-        var hingeState = vp_hinge_get()
-        hingeState["applied"] = published
-        broadcastInterfaceOrientation()
+        var hingeHID = vp_hinge_get()
+        hingeHID["applied"] = published
         var reply: [String: Any] = [
             "hinge": hinge, "orientation": orientation, "tabletop": tabletop,
-            "angle": angle!, "hinge_hid": hingeState,
+            "angle": angle!, "hinge_hid": hingeHID,
         ]
         if sweep {
             reply["sweep"] = [
@@ -548,7 +299,7 @@ extension GuestAPI {
     /// The hinge state a settled angle reports: closed under 5°, open flat
     /// from 170°, partially open between — the bands Apple's recorded Duo
     /// samples hold.
-    private static func angleToHingeState(_ angle: Double) -> Int {
+    static func hingeState(for angle: Double) -> Int {
         if angle < 5 { return 1 }
         if angle >= 170 { return 3 }
         return 2
@@ -568,20 +319,6 @@ extension GuestAPI {
             throw GuestAPIError.invalidRequest("state must be an unsigned 64-bit integer")
         }
         return state
-    }
-
-    /// Publishes SpringBoard's live interface degrees for the wallpaper and
-    /// poster extension processes: their hosted scenes never see the host's
-    /// rotation (measured stuck at portrait across a landscape pass), and the
-    /// per-second orientation map can lag, so the settled value rides the
-    /// notify state where the extension followers read it.
-    static func broadcastInterfaceOrientation() {
-        // The extension followers read the interface code (1 portrait,
-        // 2 upside-down, 3 landscape-right, 4 landscape-left) off the
-        // notification state; degrees 0/180/270/90 map onto it directly.
-        guard let degrees = interfaceRotationDegrees() else { return }
-        let code = [0: 1, 180: 2, 270: 3, 90: 4][degrees] ?? 1
-        _ = try? postDarwinNotification("com.vphone.display.orientation.broadcast", state: UInt64(code))
     }
 }
 

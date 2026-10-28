@@ -37,7 +37,6 @@ enum LogicTests {
         dataMigrationRecord()
         deviceNameRule()
         pointerScroll()
-        displayRotationMapping()
         processSpawnPolicy()
         bootstrapPlatform()
         setupAssistantState()
@@ -455,31 +454,5 @@ enum LogicTests {
         expect(!GuestBootstrapPlatform.packageRequiresApp(architecture: "appletvos-arm64e"), "the Apple TV package has none")
         expectEqual(GuestBootstrapPlatform.mainExecutablePlatform(), UInt32(PLATFORM_MACOS), "this test runs as macOS")
         expect(!GuestBootstrapPlatform.isTVOS, "the Mac is not tvOS")
-    }
-}
-
-extension LogicTests {
-    static func displayRotationMapping() {
-        let specs = ["0", "90", "180", "270"]
-        let coverDevices = [1, 4, 2, 3]
-        let innerDevices = [3, 1, 4, 2]
-        let innerDegrees = [270, 0, 90, 180]
-        for index in specs.indices {
-            let cover = GuestDisplayRotation.resolve(specs[index], deviceOrientations: [1, 2, 3, 4])
-            expectEqual(cover?.deviceOrientation, coverDevices[index], "cover uses native toll-free map")
-            expectEqual(cover?.accelerometerDegrees, Int(specs[index]), "ordinary gravity direction is preserved")
-            let inner = GuestDisplayRotation.resolve(specs[index], deviceOrientations: [3, 4, 2, 1])
-            expectEqual(inner?.deviceOrientation, innerDevices[index], "inner uses measured native inverse map")
-            expectEqual(inner?.accelerometerDegrees, innerDegrees[index], "inner gravity and device pose agree")
-            expectEqual(inner?.interfaceDegrees, Int(specs[index]), "receipt stays in logical interface degrees")
-        }
-        for (alias, canonical) in [("portrait", "0"), ("LEFT", "90"), ("portrait-upside-down", "180"), ("right", "270")] {
-            expectEqual(GuestDisplayRotation.resolve(alias, deviceOrientations: [3, 4, 2, 1]),
-                        GuestDisplayRotation.resolve(canonical, deviceOrientations: [3, 4, 2, 1]), "existing rotation aliases")
-        }
-        expect(GuestDisplayRotation.resolve("45", deviceOrientations: [1, 2, 3, 4]) == nil, "unknown rotation is refused")
-        expect(GuestDisplayRotation.resolve("0", deviceOrientations: [1, 1, 3, 4]) == nil, "non-invertible native map is refused")
-        expect(GuestDisplayRotation.resolve("0", deviceOrientations: [1, 2, 3, 5]) == nil, "invalid device orientation is refused")
-        expect(GuestDisplayRotation.resolve("0", deviceOrientations: [1, 2]) == nil, "partial native map is refused")
     }
 }

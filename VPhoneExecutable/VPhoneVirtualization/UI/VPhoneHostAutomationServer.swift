@@ -436,21 +436,6 @@ class VPhoneHostAutomationServer {
         let panel = view?.recordingGraphicsDisplay?.sizeInPixels ?? CGSize(width: screenWidth, height: screenHeight)
         guard panel.width > 0, panel.height > 0 else { throw HostControlError.inputGeometryUnavailable }
         if let control, control.isConnected,
-           let snapshot = try? await control.rpcAfterQueuedInput("display.geometry"),
-           snapshot["available"] as? Bool == true {
-            guard let bounds = snapshot["configurationBounds"] as? [NSNumber], bounds.count == 4,
-                  bounds[0].doubleValue == 0, bounds[1].doubleValue == 0,
-                  let scale = snapshot["scale"] as? NSNumber, scale.doubleValue == 3,
-                  let code = (snapshot["interfaceOrientation"] as? NSNumber)?.intValue,
-                  let degrees = [1: 0, 2: 180, 3: 270, 4: 90][code],
-                  let orientation = VPhoneDisplayOrientation(degrees: degrees),
-                  let viewport = VPhoneDisplayViewport(panel: panel,
-                    active: CGSize(width: bounds[2].doubleValue * scale.doubleValue,
-                                   height: bounds[3].doubleValue * scale.doubleValue), orientation: orientation)
-            else { throw HostControlError.inputGeometryUnavailable }
-            return viewport
-        }
-        if let control, control.isConnected,
            let result = try? await control.rpcAfterQueuedInput("display.orientation"),
            let degrees = (result["degrees"] as? NSNumber)?.intValue,
            let orientation = VPhoneDisplayOrientation(degrees: degrees) {

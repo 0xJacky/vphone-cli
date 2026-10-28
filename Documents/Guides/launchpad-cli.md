@@ -195,9 +195,5 @@ and headless launches. `display.geometry.capture_pixels` is the raw host
 frame; `screenshot_pixels` and `input_orientation` describe input coordinates.
 A swipe keeps the geometry sampled at its start.
 
-For Duo logical viewports, host socket full screenshots and tap/swipe pixel
-coordinates use the active upright viewport when fresh guest `display.geometry`
-is available. HID normalization still uses the physical framebuffer. Geometry
-changes across a screenshot cause an error rather than returning an image with
-ambiguous input coordinates. The native GUI viewport integration is separate
-from this automation contract and is still under validation.
+Geometry changes across a screenshot cause an error rather than returning an
+image with ambiguous input coordinates.

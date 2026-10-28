@@ -67,22 +67,6 @@ NSDictionary<NSString *, id> *vp_device_pose_get(void) {
         @"tabletop": @(pose.tabletopPose)};
 }
 
-NSDictionary<NSString *, id> *vp_display_orientation_mapping(void) {
-    NSTimeInterval requested = NSProcessInfo.processInfo.systemUptime;
-    notify_post("com.vphone.display.orientation.mapping.request");
-    NSString *path = @"/var/mobile/Library/Caches/vphone-display-orientation-map.json";
-    for (unsigned int attempt = 0; attempt < 15; attempt++) {
-        NSData *data = [NSData dataWithContentsOfFile:path];
-        id record = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
-        if ([record isKindOfClass:NSDictionary.class] && [record[@"version"] isEqual:@1] &&
-            [record[@"generatedUptime"] isKindOfClass:NSNumber.class] &&
-            [record[@"generatedUptime"] doubleValue] >= requested && [record[@"scene"] isEqual:@"SB-main"])
-            return record;
-        usleep(10000);
-    }
-    return @{@"available": @NO, @"reason": @"active native scene orientation map unavailable"};
-}
-
 /* The virtual hinge publishes one coherent preference dictionary per update. */
 NSDictionary *vp_hinge_get(void) {
     CFPreferencesSynchronize(CFSTR(VP_HINGE_DOMAIN), CFSTR("mobile"), kCFPreferencesAnyHost);

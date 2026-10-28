@@ -16,7 +16,6 @@ trap '/bin/rm -rf "$temporary"' EXIT
     "$daemon/Daemon/GuestFirstBootSettle.swift" \
     "$daemon/Daemon/GuestDeviceNameRule.swift" \
     "$daemon/Daemon/GuestPointerScroll.swift" \
-    "$daemon/Daemon/GuestDisplayRotation.swift" \
     "$daemon/Daemon/GuestProcessSpawnPolicy.swift" \
     "$daemon/Daemon/Bootstrap/GuestBootstrapPlatform.swift" \
     "$daemon/Daemon/GuestSetupAssistantState.swift" \

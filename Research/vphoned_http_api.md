@@ -1226,6 +1226,13 @@ which needs the foldable's own `product-id` in the device tree
 it; that is the half CoreDevice's `hingeAngle` stream reads, because
 CoreDevice does not go through SpringBoard.
 
+On the iPhone Duo (iPhone19,4) the fold display patch
+(`system-springboard-cfw-fold_display`) publishes the inner panel as a second
+display, and SpringBoard picks the posture policy from the pose itself:
+`FoldingDual` open, `FullyClosed` closed. vphoned publishes the pose and the
+hinge and does nothing further; `display.rotation` takes the same path as on
+any other iPhone.
+
 | Param | Values |
 | --- | --- |
 | `hinge` (required) | `ambiguous` 0, `closed` 1, `partially-open` 2, `open-flat` 3, `open` 4 |
@@ -1272,29 +1279,3 @@ properties, plus up to4096 bytes per available report descriptor as base64.
 No HID event is dispatched. `available=false` reports missing native APIs or
 failure to create the read client. Absent properties are omitted; their absence
 does not establish a zero range. Service metadata is not a touch-hit receipt.
-
-### `display.orientation_mapping` (read-only)
-
-Requests the active SpringBoard scene's native inverse orientation permutation.
-Returns the newly generated scene/surface/bounds and `deviceOrientations`
-(indexed by UIKit interface orientation1...4), or `available=false`; stale
-records are not accepted. The fold-display adapter must be selected/loaded.
-On iPhone19,4, `display.rotation` uses this native map to keep the SBS physical
-pose and gravity coherent with the requested logical interface direction,
-retaining hinge/tabletop and reading back the applied pose. Other models use
-their existing rotation path.
-
-### `display.geometry` (read-only)
-
-Reads one fresh SpringBoard main-queue snapshot through the existing orientation
-mapping handshake. Returns `available`, `pid`, `generatedUptime`, `scene`,
-`bounds` (UIScreen points), `configurationBounds` (canonical logical display
-points), `coordinateBounds` (scene points), `scale`, `interfaceOrientation`
-(UIKit1...4), `viewportGeneration`, `surfaceType`, and `deviceOrientations`.
-`available:false` means no fresh matching SB-main snapshot; do not use a cached
-file as current geometry. The physical framebuffer is a separate host value.
-Older guest components may omit the added geometry fields; consumers must
-validate presence before using them. This differs from the host socket's
-`t:display.geometry` diagnostics. `device.screen` may retain the boot extent
-while a logical viewport changes and is not authoritative for Duo viewport
-cropping or input normalization.

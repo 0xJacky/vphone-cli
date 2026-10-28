@@ -202,8 +202,6 @@ NSArray * _Nonnull vp_display_probe(void);
 /// Read-only CoreAnimation display modes and capability surface.
 NSDictionary<NSString *, id> * _Nonnull vp_display_modes(void);
 NSDictionary<NSString *, id> * _Nonnull vp_device_pose_get(void);
-/// Fresh read-only inverse orientation map exported by the active SB scene.
-NSDictionary<NSString *, id> * _Nonnull vp_display_orientation_mapping(void);
 BOOL vp_hinge_set(double angleDegrees);
 /// Sweep the hinge to `targetDegrees` the way Apple's Duo tooling does: over
 /// a profiled transition (0 continuous fold, 1 fade-in-out), `durationMs` < 0

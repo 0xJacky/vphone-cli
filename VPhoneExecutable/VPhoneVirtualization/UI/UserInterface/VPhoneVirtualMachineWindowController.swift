@@ -195,8 +195,8 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
             timers.append(Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
                 Task { @MainActor in self?.pollOrientation() }
             })
-            // Duo uses live logical viewports. Do not hide its cover screen
-            // behind the old single-panel fold chrome.
+            // A Duo guest shows its lit panel itself, so it takes no fold
+            // chrome.
             control.observeFoldAngle { [weak self] angle, duration in
                 guard let self, !self.foldableGuest else { return }
                 self.displayContainer?.setFold(angle: angle ?? 180, duration: duration)
@@ -296,44 +296,6 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         orientationPollInFlight = true
         Task {
             defer { orientationPollInFlight = false }
-            if foldableGuest,
-               let geometry = try? await control.call("display.geometry"),
-               geometry["available"] as? Bool == true,
-               !control.isChangingOrientation,
-               let bounds = geometry["configurationBounds"] as? [NSNumber], bounds.count == 4,
-               let container = displayContainer, let window = displayWindow {
-                // On Duo the native scene geometry can retain its portrait
-                // UIKit code while SpringBoard's logical orientation has
-                // already settled (the inverse mounting map owns that
-                // direction). Read the authoritative orientation endpoint
-                // first; use geometry's code only for older guests.
-                let orientationResult = try? await control.call("display.orientation")
-                let orientation = orientationResult?.int("degrees")
-                    .flatMap(VPhoneDisplayOrientation.init(degrees:))
-                    ?? (geometry["interfaceOrientation"] as? NSNumber)
-                        .flatMap { [1: 0, 2: 180, 3: 270, 4: 90][$0.intValue] }
-                        .flatMap(VPhoneDisplayOrientation.init(degrees:))
-                guard let orientation else { return }
-                let active = CGSize(width: bounds[2].doubleValue, height: bounds[3].doubleValue)
-                let backing = container.backingPanelSize
-                if bounds[0].doubleValue == 0, bounds[1].doubleValue == 0,
-                   (active == CGSize(width: 466, height: 678) || active == CGSize(width: 669, height: 951)),
-                   active.width <= backing.width, active.height <= backing.height {
-                    let changedPanel = panelSize != active
-                    panelSize = active
-                    container.panelSize = active
-                    control.interfaceOrientation = orientation
-                    // A rotation keeps the panel and only turns the guest;
-                    // the window must follow the orientation change itself,
-                    // not just a fold's panel-size change.
-                    if changedPanel {
-                        applyOrientation(orientation, to: window, force: true)
-                    } else if container.orientation != orientation {
-                        applyOrientation(orientation, to: window, force: false)
-                    }
-                    return
-                }
-            }
             guard let result = try? await control.call("display.orientation"),
                   !control.isChangingOrientation,
                   let degrees = (result["degrees"] as? NSNumber)?.intValue,
@@ -705,10 +667,8 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
             } catch {
                 VPhoneAlert.present(title: VPhoneLocalization.text("Duo Fold Posture"), message: error.localizedDescription, style: .warning)
             }
-            // The window must take the new panel immediately: waiting for
-            // the orientation poll leaves the inner-aspect window showing
-            // the whole framebuffer for up to a second, with the folded
-            // state reading as a black band under the cover content.
+            // The posture can turn the interface; read it now rather than on
+            // the next poll.
             self.pollOrientation()
             self.updateFoldButton(position: control.foldPosition, connected: control.isConnected)
         }
