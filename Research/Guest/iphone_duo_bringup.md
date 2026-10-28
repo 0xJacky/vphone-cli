@@ -4104,3 +4104,27 @@ preference — the next boot sleeps the inner screen; `display.posture
 open` revives it; the rotation path should clamp the persisted hinge on
 refusal. duotest-m6 and duotest-m7 exist for testing (m7 with
 fold_display blocked at creation).
+
+Follow-up (rotation refusal: definitive isolation): display.rotation works
+perfectly on the iPad guest (duotest ipad-mini-01: 90° and 0° both settle
+exactly) — the vphoned rotation mechanism, the accelerometer, the pose
+override, and the actuation pipeline are all correct. The refusal is
+specific to the iPhone19,4 platform identity in the VM: on every fresh
+iPhone19,4 machine, SpringBoard constructs its scene with a windowing
+mode that returns UISceneErrorDomain 101 for programmatic orientation
+changes, regardless of (a) fold_display/fold_guard/hinge patches blocked
+or present at creation, (b) the foldable_vm_subtype identity blocked,
+(c) the folddisplay dylib physically deleted from /usr/lib with SB
+resprung — the refusal persists in all cases. The original machine's
+rotation ability came from state accumulated over days of bring-up
+(specific source unidentified; candidates include launchd environment
+variables, MobileGestalt caches, or preference-domain keys that our
+early sessions set and that a fresh machine lacks). This is consistent
+with product behavior: stock iPhones do not rotate SpringBoard; the
+capability is iPad-native and fold-hardware-gated on the Duo. Next
+session should either identify the specific state that unlocked it on
+the original machine (diff com.apple.springboard and backboardd
+preference domains between a working and a refusing machine — needs a
+working reference), or implement the rotation path through a channel
+that does not consult the windowing-mode gate (the layout-class override
+swizzle, or a SpringBoard-private rotation API).
