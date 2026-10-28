@@ -1,4 +1,4 @@
-# iPhone Duo single-display bring-up
+# iPhone Duo bring-up
 
 ## Kernel CSSC fallback (2026-10-25)
 
@@ -4238,7 +4238,8 @@ real iPhone Duo has a second, always-connected, non-main, landscape-native
 inner panel that PosterKit classifies as `DISPLAY_TYPE_AUX`. The spike
 publishes such a display inside the guest instead
 (`FoldDisplay/FoldDisplayInnerDisplay.m`, opt-in through
-`/var/mobile/Library/Caches/vphone-duo-inner-display`).
+`/var/mobile/Library/Caches/vphone-duo-inner-display` until 2026-10-29, when
+the marker was dropped and the path became the only one).
 
 Stage 0 asked for: two always-connected displays, a stable SpringBoard
 without suppressing any assertion, an inner window scene, and
@@ -4460,3 +4461,68 @@ the cause is not yet known.
 
 With the device open, the panel shows SpringBoard's own landscape lock
 screen and home screen for the inner display, with the landscape poster.
+
+## 2026-10-29: the single-display path removed
+
+The two-display path above is now the only Duo display path. The
+single-display approach, one portrait Main made to stand in for whichever
+panel was active, is gone from FoldDisplay, vphoned and the guest
+components. Once the inner display was published, SpringBoard resolved
+`FoldingDual`/`FullyClosed`, the surface types and each screen's status bar
+for both displays itself, and every single-display shim either stepped aside
+when the inner display was requested or patched a consequence of the
+one-display model (PosterKit `DISPLAY_TYPE_EMBEDDED`, Main carrying the inner
+panel's metrics, one scene arbitrating both panels' orientations).
+
+On iPhone19,4 the inner display is always published: there is no marker file,
+and the constructor checks `hw.machine` in backboardd and SpringBoard alike.
+The other `.once` markers and every `com.vphone.display.*` notification are
+gone too, so the instructions in the sections above that post them or create
+those files no longer apply.
+
+Removed:
+
+| What | Was for |
+|---|---|
+| `FoldDisplayViewport.m`, `FoldDisplayPipeline.m` | the cover/inner logical viewport on Main (the 466×678 mode override in `SBMainDisplayConfigurationTransformer`, root scene frame adoption, workspace refresh) and the display pipeline observation |
+| `FoldDisplayOrientation.m`, `FoldDisplayOrientationMap.m` | root scene orientation arbitration and actuation, backboardd orientation-event probes, `vphone-display-orientation-map.json` |
+| `FoldDisplayScreenFamily.m`, `FoldDisplayUIConfiguration.m` | home-screen family and UIKit configuration overrides for one Main |
+| `FoldDisplayWallpaper.m` | the `TraitsArbiterWallpaperTokyoDrift` feature answer, the caller-scoped `PF_IS_PAD_DEVICE` landscape gate, wallpaper scene host sync |
+| `FoldDisplayQuickActions.m` | the 0.70 lock-screen glyph scale, which compensated for Main carrying the inner panel's metrics |
+| single-display parts of `FoldDisplayStatusBar.m` | the Main status lookup and its pulse, the scene status policy, the profile factory lease, the clock reference adapter, status re-registration |
+| `FoldDisplayDiagnostics.m`, `FoldDisplayVirtualDisplay.m`, `FoldDisplayInnerTouch.m` | inspection dumps, virtual display experiments (the unknown-tag helper moved next to its caller), a fallback hit test that never fired |
+| the Stage 1 test pattern and inspection report | `com.vphone.display.inner.pattern`/`.inspect`; `.show`/`.hide`/`.resolve`/`.server-state` went with them, the panel power and resolution watch drive the same code |
+| `PosterProbe` (`libvphoneposterprobe.dylib`) | poster extensions following the orientation map and vphoned's interface broadcast |
+| vphoned's Duo branches | `display.posture`'s viewport requests, pose/arbitration/actuation pokes, map polling and portrait confirmation; `display.rotation`'s mapped path; `display.orientation_mapping` and `display.geometry`; `GuestDisplayRotation` |
+| host `display.geometry` reads | the VM window's viewport crop and the automation socket's active viewport; both now use the full panel |
+
+What remains in `VPhoneGuestComponents/FoldDisplay`:
+
+| File | Owns |
+|---|---|
+| `libvphonefolddisplay.m` | the constructor: iPhone19,4 only, backboardd or SpringBoard |
+| `FoldDisplayBackboard.m` | the render display (from `_detectDisplays`, with the server-ready fallback), its `unknown` tag, the device tree's surface types, digitizer routing and the 270° touch turn |
+| `FoldDisplayAdapter.m` | CADisplay type, point scale and external answers, the FrontBoard classification scope, the main-like identity for applications, the screen idiom, content mode resolution |
+| `FoldDisplayPanel.m` | shared scanout power (the cover wins the panel) and the compositor with its per-frame damage layer |
+| `FoldDisplayStatusBar.m` | each screen's status bar provider |
+| `FoldDisplaySupport.m` | the log, the inner display's name, the object readers |
+
+`display.posture` now sets SpringBoard's test-automation pose override,
+publishes the hinge angle (a sweep for `position`, at once otherwise) and
+replies with the request's values and the hinge service state, as before.
+`GuestFoldPose` replays a configured hinge after boot (portrait, the saved
+angle's hinge state) until SpringBoard reports it, and the latest pose after
+each SpringBoard startup. `display.rotation` is the generic iPhone path.
+
+To check on the device after this change:
+
+- Closed on a machine booted on the inner-size panel: the cover is Main at
+  the panel's full 669×951 (the 466×678 viewport is gone) and the window
+  shows the whole panel.
+- The cover lock screen's quick-action glyphs at their native size.
+- The inner lock screen's landscape poster without the `PF_IS_PAD_DEVICE`
+  gate and the wallpaper traits answer.
+- The lock-screen and status-bar clock still advancing each minute without
+  the clock reference adapter (it worked around a detached reference view
+  with a nil screen; see f7d145ca above).
+- `display.rotation` while open.

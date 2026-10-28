@@ -1,5 +1,9 @@
 # Duo bring-up goal handoff (2026-10-28, agent-to-agent)
 
+> 2026-10-29:单屏用户态方案已整体移除。本文提到的 `display.geometry`、`display.orientation_mapping`、
+> `com.vphone.display.*` 通知、`vphone-display-orientation-map.json` 与 `.once`/`.override` 文件都已不存在;
+> 现状见 `iphone_duo_bringup.md` 的 2026-10-29 一节。本文只作历史记录。
+
 自包含交接文档。接手者从这里开始,不需要读会话历史。工程日志在
 `Research/Guest/iphone_duo_bringup.md`(本文只摘要,细节以日志为准)。
 
