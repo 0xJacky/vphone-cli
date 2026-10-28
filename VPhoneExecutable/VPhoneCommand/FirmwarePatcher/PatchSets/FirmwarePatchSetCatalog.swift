@@ -261,6 +261,7 @@ public enum FirmwarePatchSetCatalog {
         "system-backboardd-cfw-accelerometer",
         "system-backboardd-cfw-hinge",
         "system-springboard-cfw-fold_guard",
+        "system-springboard-cfw-fold_display",
         "system-campo-cfw-entitlements",
         "system-debugserver-cfw-install",
         FirmwareGuestSystemPatchSet.arm64eX1DyldBootstrap,
