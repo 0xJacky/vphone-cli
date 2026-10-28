@@ -4056,3 +4056,24 @@ never had). Next round: (a) recreate a second machine with trimming
 disabled and diff the arbitration behavior, (b) instrument the traits
 arbiter's supported-orientation query, (c) compare the scene's
 effectiveGeometry on the two machines.
+
+Follow-up (rotation wedge root-caused to the creation firmware chain): the
+recreated machines' rotation refusal is not code. A clean bisection on a
+virgin control machine (duotest-m6, created with vm create --no-template,
+current preset): rotations away from the constructed orientation are
+refused under (a) the current build, (b) the pre-broadcast vphoned with the
+c868 dylib, and (c) the current vphoned with the bridge-free 80800232
+dylib — the exact dylib under which the original machine's rotation matrix
+was green this morning. Every display-side suspect is cleared; the one
+remaining variable is the boot chain: the original duotest-m5 was created
+on an older bundle's firmware (its bootChainBundle read 2.12.0), while
+both recreates were created with today's build as their chain, so a
+regression inside the current standard preset's firmware patches
+(kernelcache or dyld-shared-cache guest patches) breaks orientation
+arbitration on machines restored with it. Separately, a refused rotation
+also poisons the persisted hinge preference to angle 0 (folded) — the
+next boot then emulates a folded phone (dark inner screen, home does not
+wake); `display.posture open` revives it. Next round: create test
+machines with subsets of the standard preset (--block/--allow) to find
+the offending firmware patch; also make the rotation path clamp the
+persisted hinge to a sane state on refusal.
