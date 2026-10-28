@@ -204,7 +204,7 @@ static void vpInstallInnerDigitizer(void) {
 // not: the cover wins the shared panel. The compositor and backboardd's touch
 // routing follow the inner display's applied state.
 static IMP vpOriginalTransitionDisplayState;
-static __weak id vpPrimaryStateControl, vpInnerStateControl;
+static id vpPrimaryStateControl, vpInnerStateControl;
 static long long vpPrimaryWantedState = 1, vpPrimaryAppliedState = 1, vpInnerWantedState, vpInnerAppliedState = -1;
 
 static unsigned int vpStateControlDisplayId(id control) {
@@ -229,10 +229,30 @@ static void vpApplyPanelStates(id primaryCompletion, id innerCompletion) {
     if (changed && vpInnerStateControl) dispatch_async(dispatch_get_main_queue(), ^{ vpShowInnerDisplay(inner != 0); });
 }
 
+// SpringBoard asks for a transition only when it wants a state the panel is
+// not in; after a SpringBoard restart the inner display may already be lit and
+// is never asked about. So until it is, its wanted state is the state it has.
+static void vpAdoptInnerStateControl(void) {
+    if (vpInnerStateControl) return;
+    for (id display in vpReadObject(objc_getClass("CADisplay"), "displays") ?: @[]) {
+        if (!vpIsInnerDisplay(display)) continue;
+        id control = vpReadObject(display, "stateControl");
+        Method current = class_getInstanceMethod(object_getClass(control), sel_registerName("displayState"));
+        if (!current || strcmp(method_getTypeEncoding(current), "q16@0:8") != 0) return;
+        vpInnerWantedState = vpInnerAppliedState =
+            ((long long (*)(id, SEL))objc_msgSend)(control, sel_registerName("displayState")) != 0;
+        vpInnerStateControl = control;
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: adopted state %lld", vpInnerWantedState]);
+        if (vpInnerWantedState) dispatch_async(dispatch_get_main_queue(), ^{ vpShowInnerDisplay(YES); });
+        return;
+    }
+}
+
 static void vpSharedScanoutTransition(id self, SEL selector, long long state, id completion) {
     unsigned int displayId = vpStateControlDisplayId(self);
     vpFoldDisplayLog([NSString stringWithFormat:@"inner display: display %u wants state %lld", displayId, state]);
     if (displayId == 1) {
+        vpAdoptInnerStateControl();
         vpPrimaryStateControl = self;
         vpPrimaryWantedState = state;
         vpApplyPanelStates(completion, nil);
@@ -449,10 +469,13 @@ static id vpSpringBoardWindowScene(BOOL inner) {
 //
 // The render server redraws a display for commits to its own contexts only;
 // a commit by an inner-display context (an application changing its pixels)
-// leaves the hosting primary display on its last frame. So while shown, the
-// container is touched once per primary frame: a near-1 opacity flip that
-// damages all of it, without an implicit animation.
-static id vpInnerHostContext, vpInnerHostContainer, vpInnerHostRefresh;
+// leaves the hosting primary display on its last frame. So while shown, a
+// layer over the whole panel changes once per primary frame: its background
+// alternates between two clear colors, which damages every pixel without
+// a visible change. (An opacity flip on the container does the same, but
+// below 1 the container renders offscreen as a group, and hosted secure
+// windows come out as grey blocks on those frames.)
+static id vpInnerHostContext, vpInnerHostContainer, vpInnerHostDamage, vpInnerHostRefresh;
 static dispatch_source_t vpInnerHostTimer;
 
 @interface VPhoneInnerHostRefresh : NSObject
@@ -460,11 +483,17 @@ static dispatch_source_t vpInnerHostTimer;
 
 @implementation VPhoneInnerHostRefresh
 - (void)refresh:(id)link {
+    static CGColorRef clear, faint;
+    static BOOL flip;
+    if (!clear) {
+        clear = CGColorCreateSRGB(0, 0, 0, 0);
+        faint = CGColorCreateSRGB(1, 1, 1, 0);
+    }
+    flip = !flip;
     Class transaction = objc_getClass("CATransaction");
     ((void (*)(id, SEL))objc_msgSend)(transaction, sel_registerName("begin"));
     ((void (*)(id, SEL, BOOL))objc_msgSend)(transaction, sel_registerName("setDisableActions:"), YES);
-    float opacity = ((float (*)(id, SEL))objc_msgSend)(vpInnerHostContainer, sel_registerName("opacity"));
-    ((void (*)(id, SEL, float))objc_msgSend)(vpInnerHostContainer, sel_registerName("setOpacity:"), opacity < 1 ? 1 : 0.999f);
+    ((void (*)(id, SEL, CGColorRef))objc_msgSend)(vpInnerHostDamage, sel_registerName("setBackgroundColor:"), flip ? faint : clear);
     ((void (*)(id, SEL))objc_msgSend)(transaction, sel_registerName("commit"));
 }
 @end
@@ -490,6 +519,7 @@ static void vpFitInnerHosts(CGRect inner) {
     vpInnerHostPanel = panel;
     id root = vpReadObject(vpInnerHostContext, "layer");
     ((void (*)(id, SEL, CGRect))objc_msgSend)(root, sel_registerName("setFrame:"), (CGRect){CGPointZero, pixels.size});
+    ((void (*)(id, SEL, CGRect))objc_msgSend)(vpInnerHostDamage, sel_registerName("setFrame:"), (CGRect){CGPointZero, pixels.size});
     BOOL turned = inner.size.width > inner.size.height;
     CGSize upright = turned ? CGSizeMake(inner.size.height, inner.size.width) : inner.size;
     CGFloat scale = MIN(1, MIN(panel.width / upright.width, panel.height / upright.height));
@@ -552,7 +582,7 @@ void vpShowInnerDisplay(BOOL shown) {
             ((void (*)(id, SEL))objc_msgSend)(vpInnerHostRefresh, sel_registerName("invalidate"));
             vpInnerHostRefresh = nil;
             ((void (*)(id, SEL))objc_msgSend)(vpInnerHostContext, sel_registerName("invalidate"));
-            vpInnerHostContext = vpInnerHostContainer = nil;
+            vpInnerHostContext = vpInnerHostContainer = vpInnerHostDamage = nil;
             vpInnerHostLayers = nil;
             vpInnerHostPanel = CGSizeZero;
             vpFoldDisplayLog(@"inner display: shown=0");
@@ -578,6 +608,9 @@ void vpShowInnerDisplay(BOOL shown) {
             ((CGColorRef (*)(id, SEL))objc_msgSend)(vpReadObject(objc_getClass("UIColor"), "blackColor"), sel_registerName("CGColor")));
         id container = [objc_getClass("CALayer") new];
         ((void (*)(id, SEL, id))objc_msgSend)(root, sel_registerName("addSublayer:"), container);
+        id damage = [objc_getClass("CALayer") new];
+        ((void (*)(id, SEL, id))objc_msgSend)(root, sel_registerName("addSublayer:"), damage);
+        vpInnerHostDamage = damage;
         ((void (*)(id, SEL, id))objc_msgSend)(context, sel_registerName("setLayer:"), root);
         ((void (*)(id, SEL, float))objc_msgSend)(context, sel_registerName("setLevel:"), 1.0e9f);
         vpInnerHostContext = context;
