@@ -4602,3 +4602,54 @@ portrait, as on any iPhone.
 
 Open: in landscape on the cover, the `AxisAlignableSplitV68Cover` status bar
 draws its time and battery over Safari's address field.
+
+## 2026-10-29: the fold owns the panel; hidden windows hosted
+
+Reported after manual testing on duospike-inner: the fold control sometimes
+left the screen on the inner display or black instead of the cover, the inner
+Dock did not respond, and the screen still flickered.
+
+**Fold control.** The shared panel used to follow SpringBoard's power
+requests alone (lit while either panel wanted it, the cover winning). Those
+requests do not follow the fold:
+
+- With the inner display asleep (the 60 s auto-lock), closing made SpringBoard
+  light the inner display for about three seconds and then turn it off; the
+  cover was never asked on. The panel showed the folded-away inner display,
+  then went black.
+- In a long-running SpringBoard, a close resolved FullyClosed (SpringBoard's
+  log said so at the next open) without any power request: the panel kept
+  showing the inner display.
+
+The panel now belongs to whichever display holds the primary content,
+`-[SBDisplayContentModeCoordinator primaryWindowScene]`, and is lit while
+that display wants to be; the other panel's requests are applied but not
+shown. Ownership is re-read on every power request and after each
+`performDisplayContentModeTransitionWithCoordinator:`, so a fold without a
+power request still hands the panel over. With that, SpringBoard's own
+requests land on the right panel: closing awake, closing after the auto-lock,
+closing after the sleep button, and opening asleep each light the arriving
+panel (the cover's lock screen or home screen, the inner lock screen). An
+extra wake on a fold, tried first, was not needed.
+(`_displayContentModeChangedWithContext:continuationLockProvider:` appears in
+the symbols only through its blocks; the runtime has no such method.)
+
+**Flicker.** A 120 Hz capture with a per-tile transient detector (a 24×24
+grid, a tile that jumps and comes back within two frames) found one frame left:
+going home from an app, the first frame of the shrinking app sat on black.
+The compositor hosted only visible windows; the home screen's windows came
+back with new `CALayerHost`s, and a host draws nothing for its first frame.
+Hidden windows are now hosted too (they draw nothing); the frame shows the
+dimmed home screen blur instead (backdrop 0.22 instead of 0.12, brightening
+over the next frames).
+
+**Touch.** Automation taps and guest-injected touches with and without edge
+flags land at the expected points on all four edges and corners, in every
+orientation (`locationInView:` equals the screenshot point divided by 3),
+and the Dock launches its apps after folds, rotations, sleep/wake and app
+switching. The user's dead Dock was in a SpringBoard that had been running
+for hours and was not reproduced; once, right after a SpringBoard restart and
+a fold, the Dock ignored taps until the next restart while the home screen's
+own icons kept working. Not yet explained; the next occurrence should be
+caught with `logs.syslog` for SpringBoard during a Dock tap ("Sending UIEvent
+... to window" and "Allowing tap for icon view").

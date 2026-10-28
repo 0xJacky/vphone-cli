@@ -12,14 +12,24 @@ static void vpShowInnerDisplay(BOOL shown);
 // on, 0 off): open, the cover (primary, display 1) goes off and the inner
 // display on; closed, the reverse. On this guest the primary is the only
 // scanout, and open it has to show the inner display, which SpringBoard
-// composites onto it (vpShowInnerDisplay). So the primary is kept on while
-// either panel wants it; a screen-off turns both off. Closing does not turn
-// the inner display off, so the inner display is lit only while the cover is
-// not: the cover wins the shared panel. The compositor and backboardd's touch
-// routing follow the inner display's applied state.
+// composites onto it (vpShowInnerDisplay). Which panel the scanout shows
+// follows the fold, not the power requests: the panel holding the primary
+// content (SBDisplayContentModeCoordinator's primaryWindowScene) owns it, and
+// the scanout is on while that panel wants to be. SpringBoard powers the
+// panel facing away as it likes (closing does not turn the inner display off,
+// and closing a sleeping device lights the inner display for a moment); on a
+// real Duo that panel is folded away, so here it is not shown. The compositor
+// and backboardd's touch routing follow the inner display's applied state.
 static IMP vpOriginalTransitionDisplayState;
 static id vpPrimaryStateControl, vpInnerStateControl;
 static long long vpPrimaryWantedState = 1, vpPrimaryAppliedState = 1, vpInnerWantedState, vpInnerAppliedState = -1;
+
+// The cover until the inner display is resolved and holds the primary content.
+static BOOL vpInnerOwnsPanel(void) {
+    id innerScene = vpSpringBoardWindowScene(YES);
+    id coordinator = vpReadObject(vpReadObject(objc_getClass("UIApplication"), "sharedApplication"), "displayContentModeCoordinator");
+    return innerScene && vpReadObject(coordinator, "primaryWindowScene") == innerScene;
+}
 
 static unsigned int vpStateControlDisplayId(id control) {
     Ivar ivar = class_getInstanceVariable(object_getClass(control), "_display_id");
@@ -35,9 +45,10 @@ static void vpApplyPanelState(id control, long long state, long long *applied, i
 }
 
 static void vpApplyPanelStates(id primaryCompletion, id innerCompletion) {
-    vpApplyPanelState(vpPrimaryStateControl, vpPrimaryWantedState || vpInnerWantedState ? 1 : 0,
+    BOOL innerOwns = vpInnerOwnsPanel();
+    vpApplyPanelState(vpPrimaryStateControl, (innerOwns ? vpInnerWantedState : vpPrimaryWantedState) ? 1 : 0,
         &vpPrimaryAppliedState, primaryCompletion);
-    long long inner = vpInnerWantedState && !vpPrimaryWantedState ? 1 : 0;
+    long long inner = innerOwns && vpInnerWantedState ? 1 : 0;
     BOOL changed = inner != vpInnerAppliedState;
     vpApplyPanelState(vpInnerStateControl, inner, &vpInnerAppliedState, innerCompletion);
     if (changed && vpInnerStateControl) dispatch_async(dispatch_get_main_queue(), ^{ vpShowInnerDisplay(inner != 0); });
@@ -84,6 +95,32 @@ static void vpSharedScanoutTransition(id self, SEL selector, long long state, id
     vpApplyPanelStates(nil, completion);
 }
 
+// A fold moves the primary content to the other panel, which takes the
+// scanout over even when no power request comes with it.
+static IMP vpOriginalPerformContentModeTransition;
+static int vpInnerOwnedPanel = -1;
+
+static void vpFollowContentModeTransition(id self, SEL selector, id transitionCoordinator) {
+    ((void (*)(id, SEL, id))vpOriginalPerformContentModeTransition)(self, selector, transitionCoordinator);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        BOOL innerOwns = vpInnerOwnsPanel();
+        if (innerOwns == vpInnerOwnedPanel) return;
+        vpInnerOwnedPanel = innerOwns;
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: panel owned by the %@", innerOwns ? @"inner display" : @"cover"]);
+        vpApplyPanelStates(nil, nil);
+    });
+}
+
+static void vpInstallContentModeOwnership(void) {
+    Method perform = class_getInstanceMethod(objc_getClass("SBDisplayContentModeCoordinator"),
+        sel_registerName("performDisplayContentModeTransitionWithCoordinator:"));
+    if (!perform || strcmp(method_getTypeEncoding(perform), "v24@0:8@16") != 0) {
+        vpFoldDisplayLog(@"inner display: content mode transition ABI unavailable");
+        return;
+    }
+    vpOriginalPerformContentModeTransition = method_setImplementation(perform, (IMP)vpFollowContentModeTransition);
+}
+
 void vpInstallSharedPanel(void) {
     Method transition = class_getInstanceMethod(objc_getClass("CADisplayStateControl"),
         sel_registerName("transitionToDisplayState:withCompletion:"));
@@ -94,6 +131,7 @@ void vpInstallSharedPanel(void) {
         return;
     }
     vpOriginalTransitionDisplayState = method_setImplementation(transition, (IMP)vpSharedScanoutTransition);
+    vpInstallContentModeOwnership();
     vpFoldDisplayLog(@"inner display: shared scanout installed");
 }
 
@@ -178,7 +216,10 @@ static void vpFitInnerHosts(CGRect inner) {
 
 // Runs just before Core Animation commits each main run loop turn, so a
 // window SpringBoard shows or hides and its host change in one transaction:
-// syncing later leaves a frame without the window's content.
+// syncing later leaves a frame without the window's content. Hidden windows
+// are hosted too (they draw nothing): a host created as its window appears
+// draws nothing for its first frame, so the home screen going back under a
+// closing app left that frame black.
 static void vpSyncInnerHosts(void) {
     Class transaction = objc_getClass("CATransaction");
     ((void (*)(id, SEL))objc_msgSend)(transaction, sel_registerName("begin"));
@@ -190,8 +231,7 @@ static void vpSyncInnerHosts(void) {
     NSMutableArray *windows = [NSMutableArray array];
     for (id scene in [vpReadObject(app, "connectedScenes") allObjects] ?: @[])
         if ([scene isKindOfClass:objc_getClass("UIWindowScene")] && vpSceneIsOnInnerDisplay(scene))
-            for (id window in vpReadObject(scene, "windows") ?: @[])
-                if (![[window valueForKey:@"hidden"] boolValue]) [windows addObject:window];
+            [windows addObjectsFromArray:vpReadObject(scene, "windows") ?: @[]];
     [windows sortUsingComparator:^NSComparisonResult(id a, id b) {
         return [[a valueForKey:@"windowLevel"] compare:[b valueForKey:@"windowLevel"]];
     }];
