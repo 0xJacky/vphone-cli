@@ -537,9 +537,16 @@ public enum FirmwareGuestSystemPatchSet {
 
             VPhonePatchDeclaration(
                 identifier: foldDisplay,
-                title: "Foldable second-display identity",
+                title: "Foldable inner display",
                 summary: """
-                Installs libvphonefolddisplay.dylib, loaded by SystemHook into SpringBoard.                 SpringBoard sizes its home grid from the display topology: with one                 always-connected display the grid keeps the outer panel's fit whatever the                 panel's pixel size, because the fold layouts key on                 +[FBDisplayManager alwaysConnectedIdentities].count >= 2 and the guest's                 paravirt GPU binds a single connector. The library pads a single answer                 with a copy of the real identity, so the count gates pass without                 inventing a display. Experimental: whether the grid then follows the                 posture is what this observes, and identity-keyed consumers may dedupe                 the copy. Foldable guests only.
+                Installs libvphonefolddisplay.dylib, loaded by SystemHook into backboardd and \
+                SpringBoard. A real iPhone Duo drives two panels: the cover is Main and the \
+                inner panel a second built-in, always-connected landscape display. backboardd \
+                publishes the inner panel as a software render display with the device tree's \
+                surface types and routes the one digitizer to whichever panel is lit; SpringBoard \
+                classifies it as built-in, resolves the fold postures for both displays natively \
+                and composites the inner display onto the guest's single panel while open. \
+                Experimental. Acts only on iPhone19,4.
                 """,
                 target: .guestFile(path: "/usr/lib/libvphonefolddisplay.dylib"),
                 applicability: VPhonePatchApplicability(iOSBase: .major(27)),
