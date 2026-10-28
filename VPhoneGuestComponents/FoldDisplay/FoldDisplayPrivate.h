@@ -184,6 +184,7 @@ void vpVirtualDisplayExperiment(BOOL create);
 BOOL vpInnerDisplayRequested(void);
 NSNumber *vpInnerDisplaySurfaceType(id deviceName);
 void vpInstallInnerRenderDisplay(void);
+void vpLogRenderDisplayState(void);
 void vpShowInnerDisplay(BOOL shown);
 void vpToggleInnerPattern(void);
 void vpResolveInnerDisplay(void);

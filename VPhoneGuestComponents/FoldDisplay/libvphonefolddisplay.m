@@ -47,6 +47,9 @@ static void vpInstallBackboardProbes(void) {
         ^(int token) { vpEnableVirtualDisplayProbe(); });
     notify_register_dispatch("com.vphone.display.virtual.tag-unknown", &tagToken, dispatch_get_main_queue(),
         ^(int token) { vpTagVirtualDisplayProbe(); });
+    static int innerStateToken;
+    notify_register_dispatch("com.vphone.display.inner.server-state", &innerStateToken, dispatch_get_main_queue(),
+        ^(int token) { vpLogRenderDisplayState(); });
 }
 
 // MARK: - SpringBoard hooks

@@ -76,6 +76,23 @@ NSNumber *vpInnerDisplaySurfaceType(id deviceName) {
     return nil;
 }
 
+// Each render display's power and blanking, as backboardd holds them.
+void vpLogRenderDisplayState(void) {
+    @try {
+        id server = ((id (*)(id, SEL))objc_msgSend)(objc_getClass("CAWindowServer"), sel_registerName("serverIfRunning"));
+        for (id display in ((id (*)(id, SEL))objc_msgSend)(server, sel_registerName("displays"))) {
+            if (![[display valueForKey:@"enabled"] boolValue] && ![[display valueForKey:@"deviceName"] isEqual:@"primary"] &&
+                display != vpInnerRenderDisplay) continue;
+            NSMutableString *state = [NSMutableString stringWithFormat:@"inner display: server %@", [display valueForKey:@"deviceName"]];
+            for (NSString *key in @[@"enabled", @"isBlanked", @"disablesUpdates", @"brightness"])
+                [state appendFormat:@" %@=%@", key, [display respondsToSelector:NSSelectorFromString(key)] ? [display valueForKey:key] : @"-"];
+            vpFoldDisplayLog(state);
+        }
+    } @catch (NSException *exception) {
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: server state exception %@", exception.reason]);
+    }
+}
+
 void vpInstallInnerRenderDisplay(void) {
     if (!vpInnerDisplayRequested()) return;
     dispatch_async(dispatch_get_main_queue(), ^{ vpAddInnerRenderDisplay(0); });

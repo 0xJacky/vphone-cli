@@ -4362,3 +4362,28 @@ window is cover-sized. Open, the panel goes black at 0 fps: SpringBoard
 turns the cover display off, as on a real Duo, and on this guest the cover
 is Main, the only physical scanout, so the composited inner display has
 nowhere to appear. SpringBoard stayed up throughout.
+
+### Open: the cover is powered off below CAWindowServerDisplay (2026-10-28 night)
+
+`com.vphone.display.inner.server-state` logs each render display as
+backboardd holds it. Closed: primary `enabled=1 isBlanked=0`, inner
+`enabled=0 isBlanked=1`. Open: the reverse. backboardd powers the panels
+as a real Duo does, which on this guest leaves the only scanout (the
+primary) off.
+
+Swizzling `-[CAWindowServerDisplay setEnabled:]`/`setBlanked:` showed
+neither is called for the primary when the device opens; the change comes
+from below (QuartzCore has `CA::WindowServer::Display::set_power_state`
+and `IOMFBDisplay::set_power_state_locked`). Re-enabling and unblanking the
+primary through the original setters whenever the inner display was lit
+did make the flags read `enabled=1 isBlanked=0` while open, but the VM
+display still showed no frames (0 fps), so the power state underneath
+stayed off. The experiment was removed. The next lever is either the C++
+power path for the primary, or keeping SpringBoard's backlight host for
+the cover on while the inner display holds primary content.
+
+Separately, SpringBoard crashed three times while the posture changed with
+both panels resolved: a Swift fatal error in UIKitCore
+`ScrollEdgeEffectView.swift`, reached from `-[UIWindow
+_sceneSettingsSceneRegionsDidChange:]` → layout. It restarts on its own;
+the cause is not yet known.
