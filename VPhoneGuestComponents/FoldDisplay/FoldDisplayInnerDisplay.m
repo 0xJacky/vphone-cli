@@ -281,19 +281,58 @@ static id vpSpringBoardWindowScene(BOOL inner) {
     return nil;
 }
 
-// MARK: - Stage 1: the panel shows the inner display
+// MARK: - SpringBoard: the panel shows the inner display
 
 // The render server's own clone of a display (addClone:options:) never
 // reaches this guest's paravirtual panel, so SpringBoard composites
-// instead: a window on Main hosts every window of the inner display's
-// scenes by render context (CALayerHost, as scene hosting does), turned
-// and scaled from the landscape panel onto the portrait framebuffer.
-static id vpInnerHostWindow, vpInnerHostContainer;
+// instead: a render context ordered onto the primary display above
+// everything hosts every window of the inner display's scenes by render
+// context (CALayerHost, as scene hosting does). It is not a window of
+// SB-main, because open, SpringBoard gives the cover (Main) auxiliary
+// content and takes its scene's windows off screen. Touches on the hosted
+// windows reach their owners through backboardd's render-tree hit test.
+static id vpInnerHostContext, vpInnerHostContainer;
 static dispatch_source_t vpInnerHostTimer;
 static NSMutableDictionary<NSNumber *, id> *vpInnerHostLayers;
+static CGSize vpInnerHostPanel;
+
+static id vpPrimaryCADisplay(void) {
+    for (id display in vpReadObject(objc_getClass("CADisplay"), "displays") ?: @[])
+        if ([[display valueForKey:@"deviceName"] isEqual:@"primary"]) return display;
+    return nil;
+}
+
+// A display-level context works in the panel's pixels: the root covers them,
+// and the inner display's points are fitted onto the panel's points,
+// turned a quarter (-90 degrees) if it reads landscape on the portrait
+// panel, centered, shrunk only if it does not fit.
+static void vpFitInnerHosts(CGRect inner) {
+    id primary = vpPrimaryCADisplay();
+    CGRect pixels = ((CGRect (*)(id, SEL))objc_msgSend)(primary, sel_registerName("bounds"));
+    double pointScale = [[primary valueForKey:@"pointScale"] doubleValue] ?: 1;
+    CGSize panel = CGSizeMake(pixels.size.width / pointScale, pixels.size.height / pointScale);
+    if (CGSizeEqualToSize(panel, vpInnerHostPanel)) return;
+    vpInnerHostPanel = panel;
+    id root = vpReadObject(vpInnerHostContext, "layer");
+    ((void (*)(id, SEL, CGRect))objc_msgSend)(root, sel_registerName("setFrame:"), (CGRect){CGPointZero, pixels.size});
+    BOOL turned = inner.size.width > inner.size.height;
+    CGSize upright = turned ? CGSizeMake(inner.size.height, inner.size.width) : inner.size;
+    CGFloat scale = MIN(1, MIN(panel.width / upright.width, panel.height / upright.height));
+    CGAffineTransform transform = CGAffineTransformMakeScale(scale * pointScale, scale * pointScale);
+    if (turned) transform = CGAffineTransformRotate(transform, -M_PI_2);
+    id container = vpInnerHostContainer;
+    ((void (*)(id, SEL, CGRect))objc_msgSend)(container, sel_registerName("setBounds:"), (CGRect){CGPointZero, inner.size});
+    ((void (*)(id, SEL, CGPoint))objc_msgSend)(container, sel_registerName("setPosition:"), CGPointMake(CGRectGetMidX(pixels), CGRectGetMidY(pixels)));
+    ((void (*)(id, SEL, CGAffineTransform))objc_msgSend)(container, sel_registerName("setAffineTransform:"), transform);
+    vpFoldDisplayLog([NSString stringWithFormat:@"inner display: fitted panel=%@ inner=%@ turned=%d scale=%.3f",
+        vpSizeText(panel), vpSizeText(inner.size), turned, scale]);
+}
 
 static void vpSyncInnerHosts(void) {
     id app = vpReadObject(objc_getClass("UIApplication"), "sharedApplication");
+    id innerScene = vpSpringBoardWindowScene(YES);
+    if (innerScene)
+        vpFitInnerHosts(((CGRect (*)(id, SEL))objc_msgSend)(vpReadObject(innerScene, "coordinateSpace"), sel_registerName("bounds")));
     NSMutableArray *windows = [NSMutableArray array];
     for (id scene in [vpReadObject(app, "connectedScenes") allObjects] ?: @[])
         if ([scene isKindOfClass:objc_getClass("UIWindowScene")] && vpSceneIsOnInnerDisplay(scene))
@@ -303,7 +342,6 @@ static void vpSyncInnerHosts(void) {
         return [[a valueForKey:@"windowLevel"] compare:[b valueForKey:@"windowLevel"]];
     }];
     NSMutableSet *live = [NSMutableSet set];
-    id container = vpReadObject(vpInnerHostContainer, "layer");
     SEL contextIdSelector = sel_registerName("_contextId");
     for (NSUInteger index = 0; index < windows.count; index++) {
         id window = windows[index];
@@ -316,7 +354,7 @@ static void vpSyncInnerHosts(void) {
         if (!host) {
             host = [objc_getClass("CALayerHost") new];
             ((void (*)(id, SEL, unsigned int))objc_msgSend)(host, sel_registerName("setContextId:"), contextId);
-            ((void (*)(id, SEL, id))objc_msgSend)(container, sel_registerName("addSublayer:"), host);
+            ((void (*)(id, SEL, id))objc_msgSend)(vpInnerHostContainer, sel_registerName("addSublayer:"), host);
             vpInnerHostLayers[key] = host;
         }
         ((void (*)(id, SEL, CGRect))objc_msgSend)(host, sel_registerName("setFrame:"),
@@ -333,60 +371,49 @@ static void vpSyncInnerHosts(void) {
 void vpShowInnerDisplay(BOOL shown) {
     @try {
         if (!shown) {
-            if (!vpInnerHostWindow) return;
+            if (!vpInnerHostContext) return;
             dispatch_source_cancel(vpInnerHostTimer);
             vpInnerHostTimer = nil;
-            ((void (*)(id, SEL, BOOL))objc_msgSend)(vpInnerHostWindow, sel_registerName("setHidden:"), YES);
-            vpInnerHostWindow = vpInnerHostContainer = nil;
+            ((void (*)(id, SEL))objc_msgSend)(vpInnerHostContext, sel_registerName("invalidate"));
+            vpInnerHostContext = vpInnerHostContainer = nil;
             vpInnerHostLayers = nil;
+            vpInnerHostPanel = CGSizeZero;
             vpFoldDisplayLog(@"inner display: shown=0");
             return;
         }
-        if (vpInnerHostWindow) return;
-        id innerScene = vpSpringBoardWindowScene(YES), mainScene = vpSpringBoardWindowScene(NO);
-        Method contextId = class_getInstanceMethod(objc_getClass("UIWindow"), sel_registerName("_contextId"));
+        if (vpInnerHostContext) return;
+        id primary = vpPrimaryCADisplay();
+        NSString *__unsafe_unretained *displayable = (NSString *__unsafe_unretained *)dlsym(RTLD_DEFAULT, "kCAContextDisplayable");
+        NSString *__unsafe_unretained *displayIdKey = (NSString *__unsafe_unretained *)dlsym(RTLD_DEFAULT, "kCAContextDisplayId");
         Method hostContext = class_getInstanceMethod(objc_getClass("CALayerHost"), sel_registerName("setContextId:"));
-        if (!innerScene || !mainScene || !contextId || !hostContext ||
-            strcmp(method_getTypeEncoding(contextId), "I16@0:8") != 0 ||
-            strcmp(method_getTypeEncoding(hostContext), "v20@0:8I16") != 0) {
-            vpFoldDisplayLog([NSString stringWithFormat:@"inner display: show unavailable inner=%d main=%d contextId=%s host=%s",
-                innerScene != nil, mainScene != nil, contextId ? method_getTypeEncoding(contextId) : "missing",
-                hostContext ? method_getTypeEncoding(hostContext) : "missing"]);
+        Method level = class_getInstanceMethod(objc_getClass("CAContext"), sel_registerName("setLevel:"));
+        if (!primary || !displayable || !displayIdKey || !hostContext || !level ||
+            strcmp(method_getTypeEncoding(hostContext), "v20@0:8I16") != 0 || strcmp(method_getTypeEncoding(level), "v20@0:8f16") != 0) {
+            vpFoldDisplayLog([NSString stringWithFormat:@"inner display: show unavailable primary=%d keys=%d host=%s level=%s",
+                primary != nil, displayable && displayIdKey, hostContext ? method_getTypeEncoding(hostContext) : "missing",
+                level ? method_getTypeEncoding(level) : "missing"]);
             return;
         }
-        CGRect panel = ((CGRect (*)(id, SEL))objc_msgSend)(vpReadObject(mainScene, "coordinateSpace"), sel_registerName("bounds"));
-        CGRect inner = ((CGRect (*)(id, SEL))objc_msgSend)(vpReadObject(innerScene, "coordinateSpace"), sel_registerName("bounds"));
-        id window = ((id (*)(id, SEL, id))objc_msgSend)([objc_getClass("UIWindow") alloc],
-            sel_registerName("initWithWindowScene:"), mainScene);
-        ((void (*)(id, SEL, CGRect))objc_msgSend)(window, sel_registerName("setFrame:"), panel);
-        ((void (*)(id, SEL, double))objc_msgSend)(window, sel_registerName("setWindowLevel:"), 9999999.0);
-        ((void (*)(id, SEL, id))objc_msgSend)(window, sel_registerName("setBackgroundColor:"),
-            vpReadObject(objc_getClass("UIColor"), "blackColor"));
-        // The inner display in its own points, turned a quarter (the
-        // interface-4 mount, -90 degrees) when it is landscape on the
-        // portrait panel, scaled to fit and centered.
-        id container = ((id (*)(id, SEL, CGRect))objc_msgSend)([objc_getClass("UIView") alloc],
-            sel_registerName("initWithFrame:"), inner);
-        BOOL turned = inner.size.width > inner.size.height;
-        CGSize upright = turned ? CGSizeMake(inner.size.height, inner.size.width) : inner.size;
-        CGFloat scale = MIN(panel.size.width / upright.width, panel.size.height / upright.height);
-        CGAffineTransform transform = CGAffineTransformMakeScale(scale, scale);
-        if (turned) transform = CGAffineTransformRotate(transform, -M_PI_2);
-        ((void (*)(id, SEL, CGPoint))objc_msgSend)(container, sel_registerName("setCenter:"),
-            CGPointMake(CGRectGetMidX(panel), CGRectGetMidY(panel)));
-        ((void (*)(id, SEL, CGAffineTransform))objc_msgSend)(container, sel_registerName("setTransform:"), transform);
-        ((void (*)(id, SEL, id))objc_msgSend)(window, sel_registerName("addSubview:"), container);
-        ((void (*)(id, SEL, BOOL))objc_msgSend)(window, sel_registerName("setHidden:"), NO);
-        vpInnerHostWindow = window;
+        id context = ((id (*)(id, SEL, id))objc_msgSend)(objc_getClass("CAContext"), sel_registerName("remoteContextWithOptions:"),
+            @{*displayable: @YES, *displayIdKey: [primary valueForKey:@"displayId"]});
+        id root = [objc_getClass("CALayer") new];
+        ((void (*)(id, SEL, CGColorRef))objc_msgSend)(root, sel_registerName("setBackgroundColor:"),
+            ((CGColorRef (*)(id, SEL))objc_msgSend)(vpReadObject(objc_getClass("UIColor"), "blackColor"), sel_registerName("CGColor")));
+        id container = [objc_getClass("CALayer") new];
+        ((void (*)(id, SEL, id))objc_msgSend)(root, sel_registerName("addSublayer:"), container);
+        ((void (*)(id, SEL, id))objc_msgSend)(context, sel_registerName("setLayer:"), root);
+        ((void (*)(id, SEL, float))objc_msgSend)(context, sel_registerName("setLevel:"), 1.0e9f);
+        vpInnerHostContext = context;
         vpInnerHostContainer = container;
         vpInnerHostLayers = [NSMutableDictionary dictionary];
+        vpInnerHostPanel = CGSizeZero;
         vpSyncInnerHosts();
         vpInnerHostTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
         dispatch_source_set_timer(vpInnerHostTimer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), NSEC_PER_SEC / 4, NSEC_PER_SEC / 20);
         dispatch_source_set_event_handler(vpInnerHostTimer, ^{ vpSyncInnerHosts(); });
         dispatch_resume(vpInnerHostTimer);
-        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: shown=1 panel=%@ inner=%@ turned=%d scale=%.3f hosts=%@",
-            vpSizeText(panel.size), vpSizeText(inner.size), turned, scale, vpInnerHostLayers.allKeys]);
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: shown=1 context=%@ hosts=%lu",
+            [context valueForKey:@"contextId"], (unsigned long)vpInnerHostLayers.count]);
     } @catch (NSException *exception) {
         vpFoldDisplayLog([NSString stringWithFormat:@"inner display: show exception %@", exception.reason]);
     }
