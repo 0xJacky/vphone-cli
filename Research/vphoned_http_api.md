@@ -1230,8 +1230,14 @@ On the iPhone Duo (iPhone19,4) the fold display patch
 (`system-springboard-cfw-fold_display`) publishes the inner panel as a second
 display, and SpringBoard picks the posture policy from the pose itself:
 `FoldingDual` open, `FullyClosed` closed. vphoned publishes the pose and the
-hinge and does nothing further; `display.rotation` takes the same path as on
-any other iPhone.
+hinge and does nothing further. `display.rotation` turns a foldable guest
+(one with the virtual hinge enabled) through the same pose: it sets the pose
+orientation that gives the lit panel the requested interface orientation
+(cover: 0 portrait, 90 landscape-right, 180 upside-down, 270 landscape-left;
+inner panel, mounted a quarter turn from the cover: 0 landscape-left, 90
+portrait, 180 landscape-right, 270 upside-down) and reads the interface back.
+The accelerometer and the AssistiveTouch rotation other iPhones use do not
+turn a foldable's panels.
 
 | Param | Values |
 | --- | --- |

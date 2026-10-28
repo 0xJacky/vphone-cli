@@ -79,6 +79,9 @@ extension GuestAPI {
         case "display.rotation":
             rotationLock.lock()
             defer { rotationLock.unlock() }
+            if let orientation = optionalString(params, "orientation"), vp_hinge_get()["enabled"] as? Bool == true {
+                return try setFoldableRotation(orientation)
+            }
             if let orientation = optionalString(params, "orientation") {
                 // Preserve the physical pose across SpringBoard relaunches.
                 // CoreMotion's app pose provider cannot feed this HID sink.
@@ -294,6 +297,44 @@ extension GuestAPI {
             ]
         }
         return reply
+    }
+
+    /// A foldable guest turns with SpringBoard's device pose: each panel's
+    /// traits pipeline reads its own device orientation from the pose, so
+    /// neither the accelerometer nor the AssistiveTouch rotation icli drives
+    /// turns it. The rotation sets the pose orientation that gives the lit
+    /// panel the requested interface orientation — the inner panel is mounted
+    /// a quarter turn from the cover — and reads the interface back.
+    private static func setFoldableRotation(_ spec: String) throws -> [String: Any] {
+        let degreesByName = [
+            "0": 0, "portrait": 0, "90": 90, "landscape-left": 90, "left": 90, "180": 180, "upside-down": 180,
+            "portrait-upside-down": 180, "270": 270, "landscape-right": 270, "right": 270,
+        ]
+        guard let degrees = degreesByName[spec.lowercased()] else {
+            throw GuestAPIError.invalidRequest("unknown rotation: \(spec)")
+        }
+        let pose = vp_device_pose_get()
+        guard pose["available"] as? Bool == true, let hinge = (pose["hinge"] as? NSNumber)?.int32Value,
+              let tabletop = (pose["tabletop"] as? NSNumber)?.int32Value
+        else { throw GuestAPIError.operationFailed("SpringBoard's device pose is unavailable") }
+        // Pose orientations (poseOrientations) by interface degrees, measured
+        // on the cover (hinge closed) and on the inner panel (open).
+        let cover: [Int: Int32] = [0: 1, 90: 4, 180: 2, 270: 3]
+        let inner: [Int: Int32] = [0: 3, 90: 1, 180: 4, 270: 2]
+        GuestFoldPose.cancelStartupRestore()
+        defer { GuestFoldPose.finishExplicitRequest() }
+        guard vp_device_pose_set((hinge == 1 ? cover : inner)[degrees]!, hinge, tabletop) else {
+            throw GuestAPIError.operationFailed("SpringBoard refused the device pose")
+        }
+        for _ in 0 ..< 20 where interfaceRotationDegrees() != degrees {
+            usleep(100_000)
+        }
+        guard interfaceRotationDegrees() == degrees else {
+            throw GuestAPIError.operationFailed("The device did not apply the requested rotation.")
+        }
+        var info = rotationInfo()
+        info["requested"] = degrees
+        return info
     }
 
     /// The hinge state a settled angle reports: closed under 5°, open flat

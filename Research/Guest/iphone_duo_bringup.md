@@ -4512,7 +4512,8 @@ publishes the hinge angle (a sweep for `position`, at once otherwise) and
 replies with the request's values and the hinge service state, as before.
 `GuestFoldPose` replays a configured hinge after boot (portrait, the saved
 angle's hinge state) until SpringBoard reports it, and the latest pose after
-each SpringBoard startup. `display.rotation` is the generic iPhone path.
+each SpringBoard startup. `display.rotation` went back to the generic iPhone
+path here, which turns neither panel; see the rotation section below.
 
 To check on the device after this change:
 
@@ -4526,3 +4527,78 @@ To check on the device after this change:
   the clock reference adapter (it worked around a detached reference view
   with a nil screen; see f7d145ca above).
 - `display.rotation` while open.
+
+## 2026-10-29: flicker, screenshots and rotation on the two-display path
+
+Verified on duospike-inner (iPhone19,4, iOS 27.1) with a bundle built from
+this branch, running the cleaned-up code above.
+
+**Flicker.** Measured with a ScreenCaptureKit capture of the VM window at
+120 Hz and per-frame luma. Three causes, each confirmed by its frames:
+
+- The compositor re-set every host's frame and zPosition on each sync pass,
+  changed or not; each set made the render server drop every hosted window
+  for one frame (a fully black frame, several a second at idle). Hosts are
+  now updated only when a value changes.
+- Hosts followed SpringBoard's windows on a 250 ms timer, so a window
+  SpringBoard showed (the app-launch transition, the app's scene host) had no
+  host for up to a quarter second. The sync now runs in a main run loop
+  observer just before Core Animation's commit (order 1999999), in the same
+  transaction as SpringBoard's own window changes.
+- The per-frame damage layer: an opacity flip rendered the container
+  offscreen (grey blocks over secure windows); a 1/255 tint alternated the
+  panel's brightness at 30 Hz. It alternates between two clear colors.
+
+Rejected while measuring: `setDisablesUpdates:YES` on the inner render
+display (inner touch stops: backboardd hit-tests the rendered display) and
+`CALayerHost.rendersAsynchronously` (hosts render nothing). Result: 0 black
+frames in about 2700 captured frames across idle, taps, scrolling and
+home/app transitions.
+
+**Screenshots.** UIKit's screen capture (vphoned's `screen.screenshot`, and the
+host's saved screenshot that goes through it) renders display-level contexts
+in points, as it renders windows; a context of its own on the display works
+in pixels. The compositor was such a context, so a capture with the device
+open came out magnified by the screen scale (the top-right third of the inner
+display), the way icli already notes for the boot logo. It is now a layer at
+the top of Main's `UIRootSceneWindow`, the window Main's scenes are hosted in,
+in points like every window (every SpringBoard window measured 669×951 points
+with an identity transform). Closed, the capture is the full cover; the old
+466×678 cut is gone.
+
+**Rotation.** Neither panel turned: `display.rotation` reported "did not
+apply" for the cover and the inner panel alike, in Safari too. The chain:
+
+1. Each panel's traits pipeline (`SBTraitsEmbeddedDisplayPipelineManager`,
+   `_surfaceType` 1 for the cover, 2 for the inner panel) takes its device
+   orientation from the device pose, per panel:
+   `BSDeviceOrientationForSurfaceFromPose(surface, pose)` reads the pose's
+   cover or inner orientation, and `poseProvider:didUpdateFromPose:toPose:`
+   updates the pipeline only when that per-panel value changes. The
+   accelerometer orientation and AssistiveTouch's `setOrientation:` (icli's
+   rotation) never reach it.
+2. The test-automation pose override (`SBSTestAutomationService
+   setDevicePoseOverride:`, which `display.posture` uses) carries one device
+   orientation. SpringBoard derives each panel's from it with
+   `+[CMMagicPoseManager orientationForMagicPose:deviceSurface:]`.
+3. That method asks `+[CMMagicPoseManager sharedManager]` to rebuild a
+   `CMDeviceStateEvent` first. The guest has no motion coprocessor, so there
+   is no shared manager: the message goes to nil and both panels read
+   ambiguous, whatever the pose.
+4. The mapping itself is `+[CMDeviceStateEvent
+   propertyAForConfigType:propertyA:propertyB:propertyC:]` (configuration =
+   surface, A = orientation, B = hinge state, C = tabletop pose). Closed (B 1)
+   the cover takes A and the inner panel is ambiguous; partially open or open
+   flat (B 2, 3) the inner panel takes A and the cover takes A with landscape
+   left/right and face up/down swapped; any other hinge state, including
+   `open` 4, is ambiguous. `position: open` sets open flat (3).
+
+FoldDisplay answers `orientationForMagicPose:deviceSurface:` with that
+mapping directly, and vphoned's `display.rotation` on a foldable sets the pose
+orientation for the lit panel (table in `Research/vphoned_http_api.md`).
+Checked: cover 90/270/0 and inner 0/180/270/90 in Safari, each settled with
+the interface and the host window upright; the cover home screen stays
+portrait, as on any iPhone.
+
+Open: in landscape on the cover, the `AxisAlignableSplitV68Cover` status bar
+draws its time and battery over Safari's address field.

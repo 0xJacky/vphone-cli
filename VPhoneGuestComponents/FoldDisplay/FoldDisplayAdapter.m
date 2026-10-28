@@ -192,6 +192,39 @@ static void vpInstallContentModeResolution(void) {
     vpWatchInnerDisplayResolution();
 }
 
+// MARK: - orientation
+
+// Each panel's traits pipeline turns with its own device orientation, which
+// SpringBoard reads from the device pose per panel
+// (BSDeviceOrientationForSurfaceFromPose) and fills in from
+// +[CMMagicPoseManager orientationForMagicPose:deviceSurface:]. That asks
+// CoreMotion's shared magic pose manager to rebuild a device state event
+// first, and this guest has no motion coprocessor, so there is no manager:
+// the message goes to nil and every panel reads ambiguous, so neither turns.
+// The answer is CMDeviceStateEvent's own mapping of the pose's orientation,
+// hinge state and tabletop pose, asked directly.
+static long long vpPanelOrientation(id self, SEL selector, id pose, long long surface) {
+    long long (*read)(id, SEL) = (long long (*)(id, SEL))objc_msgSend;
+    return ((long long (*)(id, SEL, long long, long long, long long, long long))objc_msgSend)(objc_getClass("CMDeviceStateEvent"),
+        sel_registerName("propertyAForConfigType:propertyA:propertyB:propertyC:"), surface,
+        read(pose, sel_registerName("deviceOrientation")), read(pose, sel_registerName("hingeState")),
+        read(pose, sel_registerName("tabletopPose")));
+}
+
+static void vpInstallPanelOrientation(void) {
+    Method orientation = class_getClassMethod(objc_getClass("CMMagicPoseManager"),
+        sel_registerName("orientationForMagicPose:deviceSurface:"));
+    Method mapping = class_getClassMethod(objc_getClass("CMDeviceStateEvent"),
+        sel_registerName("propertyAForConfigType:propertyA:propertyB:propertyC:"));
+    if (!orientation || !mapping || strcmp(method_getTypeEncoding(orientation), "q32@0:8@16q24") != 0 ||
+        strcmp(method_getTypeEncoding(mapping), "q48@0:8q16q24q32q40") != 0) {
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: panel orientation ABI unavailable (%s, %s)",
+            orientation ? method_getTypeEncoding(orientation) : "missing", mapping ? method_getTypeEncoding(mapping) : "missing"]);
+        return;
+    }
+    method_setImplementation(orientation, (IMP)vpPanelOrientation);
+}
+
 // MARK: - installation
 
 // Installed before SpringBoard's display monitor reads the render displays.
@@ -200,6 +233,7 @@ static void vpInstallContentModeResolution(void) {
 void vpInstallInnerDisplayAdapter(void) {
     vpInstallInnerScreenIdiom();
     vpInstallInnerIdentityEncode();
+    vpInstallPanelOrientation();
     // Type 0 without the FrontBoard scope is a second UIKit-main-like
     // display, so no scope means no adapter.
     Method configurationInit = class_getInstanceMethod(objc_getClass("FBSDisplayConfiguration"),
