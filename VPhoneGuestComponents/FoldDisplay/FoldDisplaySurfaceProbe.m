@@ -14,8 +14,17 @@ static atomic_uint vpSurfaceProbeLogCount;
 // changes neither the framebuffer nor the number/identity of display sources.
 id vpSurfaceExtendedProperties(id self, SEL cmd) {
     id properties = ((id (*)(id, SEL))vpOriginalExtendedProperties)(self, cmd);
-    if (!atomic_load_explicit(&vpInnerSurfaceProbeEnabled, memory_order_acquire)) return properties;
     id name = ((id (*)(id, SEL))objc_msgSend)(self, sel_registerName("deviceName"));
+    // With the inner display published, the device tree's roles hold for
+    // good: the primary panel is the cover (display0, surface-type 1) and
+    // the inner panel is the second display (display1, surface-type 2).
+    NSNumber *role = vpInnerDisplaySurfaceType(name);
+    if (role && (!properties || [properties isKindOfClass:NSDictionary.class])) {
+        NSMutableDictionary *derived = properties ? [properties mutableCopy] : [NSMutableDictionary dictionary];
+        derived[@"DeviceSurfaceType"] = role;
+        return [derived copy];
+    }
+    if (!atomic_load_explicit(&vpInnerSurfaceProbeEnabled, memory_order_acquire)) return properties;
     BOOL primary = [name isEqual:@"primary"];
     BOOL cover = atomic_load_explicit(&vpCoverSurfaceProbeEnabled, memory_order_acquire) &&
         [name isEqual:@"VPhone Cover Probe"];

@@ -4334,3 +4334,31 @@ For later: the inner panel's `Fold` region is `{0, 1335, 1878, 0}` in its
 own pixels, which suggests a 1878-pixel-wide panel folding at row 1335;
 this guest's 2007×2853 Main and the spike's 2853×2007 inner display were
 not taken from the device tree.
+
+### SpringBoard's own posture logic drives both displays (2026-10-28 night)
+
+With the inner display published, backboardd now answers the device tree's
+roles through `extendedProperties` `DeviceSurfaceType`: the primary panel 1
+(`.cover`), the inner display 2 (`.inner`). FoldDisplay's SB-side
+`vpLogicalSurfaceType` and `vpSyncLogicalRoleResolver`, which forced Main
+to `.inner` for the single-display model, step aside while the inner display
+is requested. SB-main then reads surfaceType 1 and the inner scene 2.
+
+`-[SBDisplayContentModeCoordinator windowSceneDidConnect:]` is what calls
+`-[SBFDisplayContentModeResolver startResolvingContentModeOfDisplayForWindowScene:]`,
+and the inner display's bringup scene is never handed to it.
+`com.vphone.display.inner.resolve` hands it over (once; the resolver's
+`_displayProxies` is keyed by hardware identifier). The resolver then holds
+`legacyMain` (`.cover`) and the inner display (`.inner`), and the hinge
+picks the policy natively:
+
+| `display.posture` | Prevailing policy | Cover (Main) | Inner |
+|---|---|---|---|
+| `open` (hinge 3, 180°, `.openFlat`) | `FoldingDual`, primary on `.inner` | `.auxiliaryContent` | `.primaryContent` |
+| `closed` (hinge 1) | `FullyClosed` | `.primaryContent` | `.disabled` |
+
+Closed, the panel shows SpringBoard's real cover lock screen and the VM
+window is cover-sized. Open, the panel goes black at 0 fps: SpringBoard
+turns the cover display off, as on a real Duo, and on this guest the cover
+is Main, the only physical scanout, so the composited inner display has
+nowhere to appear. SpringBoard stayed up throughout.

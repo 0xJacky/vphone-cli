@@ -67,6 +67,15 @@ static void vpAddInnerRenderDisplay(unsigned int attempt) {
     }
 }
 
+// The surface type backboardd reports for a render display, from the
+// iPhone19,4 device tree: display0 (the primary, cover) 1, display1 (inner) 2.
+NSNumber *vpInnerDisplaySurfaceType(id deviceName) {
+    if (!vpInnerDisplayRequested()) return nil;
+    if ([deviceName isEqual:@"primary"]) return @1;
+    if ([deviceName isEqual:vpInnerDisplayName]) return @2;
+    return nil;
+}
+
 void vpInstallInnerRenderDisplay(void) {
     if (!vpInnerDisplayRequested()) return;
     dispatch_async(dispatch_get_main_queue(), ^{ vpAddInnerRenderDisplay(0); });
@@ -274,6 +283,32 @@ void vpShowInnerDisplay(BOOL shown) {
     }
 }
 
+// MARK: - SpringBoard: content mode resolution
+
+// SpringBoard's display content mode coordinator starts resolving a window
+// scene's display when the scene connects to it; the inner display's scene
+// is never handed over. Hands it over and logs what the resolver makes of
+// the two panels.
+void vpResolveInnerDisplay(void) {
+    @try {
+        id app = vpReadObject(objc_getClass("UIApplication"), "sharedApplication");
+        id coordinator = vpReadObject(app, "displayContentModeCoordinator");
+        id innerScene = vpSpringBoardWindowScene(YES);
+        Method connect = class_getInstanceMethod(object_getClass(coordinator), sel_registerName("windowSceneDidConnect:"));
+        if (!coordinator || !innerScene || !connect || strcmp(method_getTypeEncoding(connect), "v24@0:8@16") != 0) {
+            vpFoldDisplayLog([NSString stringWithFormat:@"inner display: resolve unavailable coordinator=%@ scene=%@", coordinator, innerScene]);
+            return;
+        }
+        if (![[vpReadObjectIvar(vpLogicalRoleResolver, "_displayProxies") allKeys] containsObject:
+                vpReadObject(vpReadObject(vpReadObject(vpReadObject(innerScene, "_FBSScene"), "settings"), "displayConfiguration"), "hardwareIdentifier")])
+            ((void (*)(id, SEL, id))objc_msgSend)(coordinator, sel_registerName("windowSceneDidConnect:"), innerScene);
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: resolve %@ -> %@",
+            vpReadObject(vpReadObject(innerScene, "_FBSScene"), "identifier"), vpLogicalRoleResolver]);
+    } @catch (NSException *exception) {
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: resolve exception %@", exception.reason]);
+    }
+}
+
 // MARK: - Stage 1 test pattern
 
 // A window on the inner display's scene with a clock that changes every
@@ -395,9 +430,18 @@ void vpInspectInnerDisplay(void) {
             @catch (__unused NSException *exception) {}
             id type = configuration && displayType ? displayType(configuration) : nil;
             BOOL rotates = type && supports && deviceClass && lockRole && *lockRole ? supports(*lockRole, type, deviceClass()) : NO;
-            vpFoldDisplayLog([NSString stringWithFormat:@"inner display: scene %@ %@ display=%@ bounds=%@ posterType=%@ dynamicRotation=%d",
+            NSMutableString *roles = [NSMutableString string];
+            for (NSString *key in @[@"type", @"connectionType", @"isUIKitMainLike", @"isAlwaysConnected", @"hardwareIdentifier"]) {
+                id value = nil;
+                @try { value = [configuration valueForKey:key]; } @catch (__unused NSException *exception) { value = @"-"; }
+                [roles appendFormat:@" %@=%@", key, value];
+            }
+            id surface = nil;
+            @try { surface = [scene valueForKey:@"surfaceType"]; } @catch (__unused NSException *exception) {}
+            vpFoldDisplayLog([NSString stringWithFormat:@"inner display: scene %@ %@ display=%@ bounds=%@ posterType=%@ dynamicRotation=%d surfaceType=%@ delegate=%@%@",
                 NSStringFromClass([scene class]), vpReadObject(vpReadObject(scene, "_FBSScene"), "identifier"),
-                vpReadObject(configuration, "identity"), [configuration valueForKey:@"bounds"], type, rotates]);
+                vpReadObject(configuration, "identity"), [configuration valueForKey:@"bounds"], type, rotates, surface,
+                NSStringFromClass([vpReadObject(scene, "delegate") class]), roles]);
         }
     } @catch (NSException *exception) {
         vpFoldDisplayLog([NSString stringWithFormat:@"inner display: inspect exception %@", exception.reason]);

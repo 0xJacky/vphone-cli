@@ -182,9 +182,11 @@ void vpVirtualDisplayExperiment(BOOL create);
 // MARK: - inner display spike
 
 BOOL vpInnerDisplayRequested(void);
+NSNumber *vpInnerDisplaySurfaceType(id deviceName);
 void vpInstallInnerRenderDisplay(void);
 void vpShowInnerDisplay(BOOL shown);
 void vpToggleInnerPattern(void);
+void vpResolveInnerDisplay(void);
 void vpInstallInnerDisplayAdapter(void);
 void vpInspectInnerDisplay(void);
 

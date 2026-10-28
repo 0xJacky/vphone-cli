@@ -172,6 +172,9 @@ static void vpRegisterSpringBoardNotifications(void) {
         ^(int token) { vpShowInnerDisplay(YES); });
     notify_register_dispatch("com.vphone.display.inner.hide", &innerHideToken, dispatch_get_main_queue(),
         ^(int token) { vpShowInnerDisplay(NO); });
+    static int innerResolveToken;
+    notify_register_dispatch("com.vphone.display.inner.resolve", &innerResolveToken, dispatch_get_main_queue(),
+        ^(int token) { vpResolveInnerDisplay(); });
     static int persistentCoverToken, persistentInnerToken;
     notify_register_dispatch("com.vphone.display.viewport.apply.cover", &persistentCoverToken, dispatch_get_main_queue(),
         ^(int token) { vpSetPersistentViewport(YES); });

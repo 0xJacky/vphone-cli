@@ -112,6 +112,8 @@ void vpLogicalProjectionControl(NSInteger action) {
 }
 
 void vpSyncLogicalRoleResolver(void) {
+    // A published inner display gives the resolver both panels natively.
+    if (vpInnerDisplayRequested()) return;
     @try {
         id resolver = vpLogicalRoleResolver;
         NSDictionary *proxies = vpReadObjectIvar(resolver, "_displayProxies");
@@ -399,7 +401,9 @@ void vpSetCoverViewport(BOOL enabled) {
 // Scoped experiment: do not change CADisplay type or resolver source count.
 NSInteger vpLogicalSurfaceType(id self, SEL selector) {
     NSInteger native = ((NSInteger (*)(id, SEL))vpOriginalLogicalSurfaceType)(self, selector);
-    if (vpReadingLogicalSurface || !vpAutomaticMainStatus) return native;
+    // A published inner display carries the roles natively (backboardd's
+    // DeviceSurfaceType, FoldDisplayInnerDisplay.m).
+    if (vpReadingLogicalSurface || !vpAutomaticMainStatus || vpInnerDisplayRequested()) return native;
     vpReadingLogicalSurface = YES;
     @try {
         if (![vpReadObject(vpReadObject(self, "_FBSScene"), "identifier") isEqual:@"SB-main"]) return native;
