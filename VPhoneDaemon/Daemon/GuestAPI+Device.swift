@@ -393,6 +393,23 @@ extension GuestAPI {
             if angle! < 5 {
                 _ = vp_accelerometer_set_orientation("0")
                 _ = try? postDarwinNotification("com.vphone.display.orientation.pose.refresh", state: nil)
+            } else {
+                // Opening carries the same problem in reverse: the swap
+                // derives the inner interface from the cover's portrait pose
+                // (device 1), which the rotated inner mounting renders as
+                // landscape-left. The live export cannot carry the inner
+                // table while the cover viewport holds the scene, so seed
+                // the measured inner portrait (device 3 / 270°, the
+                // [3,4,2,1] table in the research notes); the post-swap
+                // loop re-resolves from the live table either way.
+                let current = vp_device_pose_get()
+                _ = vp_device_pose_set(
+                    3,
+                    (current["hinge"] as? NSNumber)?.int32Value ?? Int32(hinge),
+                    (current["tabletop"] as? NSNumber)?.int32Value ?? Int32(tabletop)
+                )
+                _ = vp_accelerometer_set_orientation("270")
+                _ = try? postDarwinNotification("com.vphone.display.orientation.pose.refresh", state: nil)
             }
             GuestFoldPose.requestViewport(for: angle!)
             let expected = angle! < 5 ? [0.0, 0.0, 466.0, 678.0] : [0.0, 0.0, 669.0, 951.0]
@@ -423,15 +440,20 @@ extension GuestAPI {
             let desiredInterface = "0"
             if orientation == Self.poseOrientations["portrait"] {
                 var settled = false
-                for _ in 0..<2 where !settled {
-                    let staleUptime = (vp_display_orientation_mapping()["generatedUptime"] as? NSNumber)?.doubleValue ?? 0
-                    _ = try? postDarwinNotification("com.vphone.display.orientation.mapping.request", state: nil)
-                    let exportDeadline = ProcessInfo.processInfo.systemUptime + 0.8
-                    while ProcessInfo.processInfo.systemUptime < exportDeadline {
-                        let live = vp_display_orientation_mapping()
-                        if ((live["generatedUptime"] as? NSNumber)?.doubleValue ?? 0) > staleUptime,
-                           (live["configurationBounds"] as? [NSNumber])?.map(\.doubleValue) == expected { break }
-                        Thread.sleep(forTimeInterval: 0.05)
+                for pass in 0..<2 where !settled {
+                    if pass > 0 {
+                        // The first pass pokes immediately with the best
+                        // table it has; only a failed confirmation waits
+                        // for a post-apply export to settle the table.
+                        let staleUptime = (vp_display_orientation_mapping()["generatedUptime"] as? NSNumber)?.doubleValue ?? 0
+                        _ = try? postDarwinNotification("com.vphone.display.orientation.mapping.request", state: nil)
+                        let exportDeadline = ProcessInfo.processInfo.systemUptime + 0.8
+                        while ProcessInfo.processInfo.systemUptime < exportDeadline {
+                            let live = vp_display_orientation_mapping()
+                            if ((live["generatedUptime"] as? NSNumber)?.doubleValue ?? 0) > staleUptime,
+                               (live["configurationBounds"] as? [NSNumber])?.map(\.doubleValue) == expected { break }
+                            Thread.sleep(forTimeInterval: 0.05)
+                        }
                     }
                     if let values = vp_display_orientation_mapping()["deviceOrientations"] as? [Int],
                        let portrait = GuestDisplayRotation.resolve(desiredInterface, deviceOrientations: values) {
@@ -449,7 +471,7 @@ extension GuestAPI {
                         _ = try? postDarwinNotification("com.vphone.display.orientation.pose.refresh", state: nil)
                         _ = try? postDarwinNotification("com.vphone.display.orientation.arbitration.refresh", state: nil)
                         _ = try? postDarwinNotification("com.vphone.display.orientation.actuation.refresh", state: nil)
-                        let confirmDeadline = ProcessInfo.processInfo.systemUptime + 1.5
+                        let confirmDeadline = ProcessInfo.processInfo.systemUptime + 1.2
                         while ProcessInfo.processInfo.systemUptime < confirmDeadline {
                             if interfaceRotationDegrees() == portrait.interfaceDegrees {
                                 settled = true
@@ -457,6 +479,24 @@ extension GuestAPI {
                             }
                             Thread.sleep(forTimeInterval: 0.05)
                         }
+                    }
+                }
+                // A hinge sweep re-derives the cover direction once more when
+                // it crosses the fully-closed band near its end; hold the
+                // portrait actuation until the sweep has finished.
+                if sweep {
+                    let sweepDeadline = ProcessInfo.processInfo.systemUptime + 2.5
+                    while ProcessInfo.processInfo.systemUptime < sweepDeadline {
+                        let hingeNow = vp_hinge_get()
+                        if (hingeNow["sweeping"] as? Bool) != true { break }
+                        Thread.sleep(forTimeInterval: 0.05)
+                    }
+                    _ = try? postDarwinNotification("com.vphone.display.orientation.pose.refresh", state: nil)
+                    _ = try? postDarwinNotification("com.vphone.display.orientation.arbitration.refresh", state: nil)
+                    _ = try? postDarwinNotification("com.vphone.display.orientation.actuation.refresh", state: nil)
+                    if interfaceRotationDegrees() != 0 {
+                        Thread.sleep(forTimeInterval: 0.3)
+                        _ = try? postDarwinNotification("com.vphone.display.orientation.actuation.refresh", state: nil)
                     }
                 }
                 _ = try? postDarwinNotification("com.vphone.display.orientation.pose.refresh", state: nil)

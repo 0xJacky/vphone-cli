@@ -3855,3 +3855,19 @@ rotation matrix 90/0/270/0 exact; open home screen visually clean (portrait
 grid, horizontal dock, no clipping). Known remaining behavior: closing while
 unlocked sleeps the screen by design — the next wake presents the cover lock
 screen (clock) and `screen.unlock` (or a swipe) returns to the home layout.
+
+Follow-up (same morning, animated sweeps): the fold panel's animated sweeps
+(duration > 0) exposed two residual transients. The hinge sweep's
+fully-closed band crossing re-derives the cover direction once more near its
+end, after vphoned's first correction; and opening carried the cover's
+portrait pose (device 1) into the rotated inner mounting, flashing
+landscape-left until the loop re-resolved. Fixes: the resolve loop's first
+pass now pokes pose-refresh/arbitration/actuation immediately after the
+bounds confirm (the export wait moved to the retry pass only), the posture
+path holds one final actuation batch until `vp_hinge_get()["sweeping"]`
+clears, the open direction seeds the measured inner portrait (device 3 /
+270°) before the viewport apply, and the dylib's viewport adoption completes
+the cover actuation inline (`vpScheduleViewportAdoption`), so the correct
+direction lands in the same adoption turn instead of a second later. Button
+path (duration 0) verified 3/3 roundtrips clean; animated paths sample clean
+with an occasional single-sample (~0.2 s) self-healing blip on close.

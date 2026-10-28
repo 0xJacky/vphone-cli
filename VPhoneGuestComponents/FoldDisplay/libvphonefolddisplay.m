@@ -140,6 +140,7 @@ static NSArray *vpSnapshotRect(id object, const char *name);
 static void vpProcessViewportWorkspaceRequest(BOOL submit);
 static void vpApplyRootGeometry(void);
 static void vpScheduleViewportAdoption(void);
+static void vpRefreshNativeOrientationActuation(void);
 static void vpApplyQuickActionGlyphScale(void);
 
 // These helpers are kept at the boundary so the extracted status/wallpaper
@@ -276,7 +277,16 @@ static void vpScheduleViewportAdoption(void) {
     if (adoptionGeneration == atomic_load_explicit(&vpAdoptionCompletedGeneration, memory_order_relaxed)) return;
     atomic_store_explicit(&vpAdoptionCompletedGeneration, adoptionGeneration, memory_order_relaxed);
     vpApplyRootGeometry();
-    if (vpPersistentViewport) vpProcessViewportWorkspaceRequest(YES);
+    if (vpPersistentViewport) {
+        vpProcessViewportWorkspaceRequest(YES);
+        // The cover arbiter derives its direction once, at the mode swap,
+        // from the pre-swap pose, and holds it; vphoned's confirm loop
+        // corrects it only after the bounds settle, leaving a landscape
+        // frame visible for about a second. Complete the actuation with
+        // the cover's native portrait in the same adoption turn.
+        if (atomic_load_explicit(&vpCoverViewportEnabled, memory_order_acquire))
+            vpRefreshNativeOrientationActuation();
+    }
 }
 static void vpApplyRootGeometry(void) {
     if (!vpAutomaticMainStatus) return;
