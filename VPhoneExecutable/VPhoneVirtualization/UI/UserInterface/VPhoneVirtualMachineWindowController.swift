@@ -304,11 +304,18 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
                 if bounds[0].doubleValue == 0, bounds[1].doubleValue == 0,
                    (active == CGSize(width: 466, height: 678) || active == CGSize(width: 669, height: 951)),
                    active.width <= backing.width, active.height <= backing.height {
-                    let changed = panelSize != active
+                    let changedPanel = panelSize != active
                     panelSize = active
                     container.panelSize = active
                     control.interfaceOrientation = orientation
-                    if changed { applyOrientation(orientation, to: window, force: true) }
+                    // A rotation keeps the panel and only turns the guest;
+                    // the window must follow the orientation change itself,
+                    // not just a fold's panel-size change.
+                    if changedPanel {
+                        applyOrientation(orientation, to: window, force: true)
+                    } else if container.orientation != orientation {
+                        applyOrientation(orientation, to: window, force: false)
+                    }
                     return
                 }
             }

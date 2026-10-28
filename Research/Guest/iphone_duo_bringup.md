@@ -3871,3 +3871,17 @@ the cover actuation inline (`vpScheduleViewportAdoption`), so the correct
 direction lands in the same adoption turn instead of a second later. Button
 path (duration 0) verified 3/3 roundtrips clean; animated paths sample clean
 with an occasional single-sample (~0.2 s) self-healing blip on close.
+
+Follow-up (landscape re-flow): rotating the open panel to landscape left
+the home grid in its portrait arrangement rendered sideways with a black
+side band — the Main mode keeps portrait dimensions on this platform, so
+the rotation pipeline turned the framebuffer but nothing re-delivered the
+scene's coordinate space (no icon-family switch, no resize propagation;
+those only ran from the fold adoption chain). Two fixes: the dylib's
+orientation actuation now also submits the public
+`requestGeometryUpdateWithPreferences:` for the actuated direction, so
+UIKit swaps the scene space to 951x669 and the grid/dock/status re-flow
+(verified visually at 90 and 270); and the host window's orientation poll
+only re-applied the window turn when the panel size changed, so a rotation
+on the same panel left the window in the old aspect — it now follows the
+orientation change itself (animated turn, fold panel changes stay forced).

@@ -3022,6 +3022,13 @@ static void vpRefreshNativeOrientationActuation(void) {
         ((void (*)(id, SEL, NSInteger, id, CGFloat, BOOL, id))objc_msgSend)(app, selector,
             direction, scene, 0, YES, @"vphone native orientation actuation refresh");
         vpFoldDisplayLog([NSString stringWithFormat:@"orientation actuation: native callback direction=%ld", (long)direction]);
+        // The Main mode keeps portrait dimensions on this platform, so a
+        // rotation also needs UIKit to re-deliver the scene's coordinate
+        // space; otherwise the portrait layout renders sideways inside the
+        // rotated framebuffer. The public geometry request for the actuated
+        // direction makes the space swap (951x669) and the icon family and
+        // windows re-flow.
+        vpRequestSceneGeometry(scene, direction);
     } @catch (NSException *exception) {
         vpFoldDisplayLog([NSString stringWithFormat:@"orientation actuation exception: %@", exception.reason]);
     }
