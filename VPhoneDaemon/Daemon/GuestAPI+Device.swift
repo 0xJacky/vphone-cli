@@ -8,6 +8,29 @@ import VphonedNative
 extension GuestAPI {
     private static let rotationLock = NSLock()
 
+    /// The interface orientation the fold last closed with; opening returns
+    /// to it so an explicit landscape survives a fold cycle. Session state
+    /// only — a reboot restores portrait through the boot pose ladder.
+    private nonisolated(unsafe) static var foldRotationMemory: Int?
+    private static let foldRotationLock = NSLock()
+
+    /// Records a landscape worth restoring; a portrait close clears it.
+    private static func rememberFoldRotation() {
+        let degrees = interfaceRotationDegrees()
+        foldRotationLock.lock()
+        foldRotationMemory = (degrees == 90 || degrees == 270) ? degrees : nil
+        foldRotationLock.unlock()
+    }
+
+    /// Consumes the remembered orientation; nil means portrait at rest.
+    private static func takeFoldRotation() -> Int? {
+        foldRotationLock.lock()
+        defer { foldRotationLock.unlock() }
+        let degrees = foldRotationMemory
+        foldRotationMemory = nil
+        return degrees
+    }
+
     static func executeDevice(_ method: String, _ params: [String: Any]) throws -> [String: Any]? {
         switch method {
         case "device.info":
@@ -380,6 +403,14 @@ extension GuestAPI {
             ? vp_hinge_sweep(angle!, durationMs, Int32(profile))
             : vp_hinge_set(angle!)
         if ((try? deviceSnapshot())?["model"] as? String) == "iPhone19,4" {
+            // A fold cycle returns to the orientation it started from:
+            // portrait at rest, an explicit landscape survives the close.
+            // The cover presents portrait either way; opening replays the
+            // remembered direction through the same resolve-and-confirm
+            // path. Session state only — a reboot restores portrait.
+            if angle! < 5 { rememberFoldRotation() }
+            let restoreDegrees = angle! < 5 ? nil : takeFoldRotation()
+            let desiredInterface = angle! < 5 ? "0" : restoreDegrees.map(String.init) ?? "0"
             // The cover arbiter derives its direction once, at the mode
             // swap, from the scene pipeline's cached device orientation.
             // The pose override above wrote portrait (device 1 on the
@@ -393,22 +424,23 @@ extension GuestAPI {
             if angle! < 5 {
                 _ = vp_accelerometer_set_orientation("0")
                 _ = try? postDarwinNotification("com.vphone.display.orientation.pose.refresh", state: nil)
-            } else {
+            } else if let seed = GuestDisplayRotation.resolve(desiredInterface, deviceOrientations: [3, 4, 2, 1])
+                ?? GuestDisplayRotation.resolve("0", deviceOrientations: [3, 4, 2, 1]) {
                 // Opening carries the same problem in reverse: the swap
                 // derives the inner interface from the cover's portrait pose
                 // (device 1), which the rotated inner mounting renders as
                 // landscape-left. The live export cannot carry the inner
                 // table while the cover viewport holds the scene, so seed
-                // the measured inner portrait (device 3 / 270°, the
-                // [3,4,2,1] table in the research notes); the post-swap
+                // the measured inner table's device value for the desired
+                // interface (portrait is device 3 / 270°); the post-swap
                 // loop re-resolves from the live table either way.
                 let current = vp_device_pose_get()
                 _ = vp_device_pose_set(
-                    3,
+                    Int32(seed.deviceOrientation),
                     (current["hinge"] as? NSNumber)?.int32Value ?? Int32(hinge),
                     (current["tabletop"] as? NSNumber)?.int32Value ?? Int32(tabletop)
                 )
-                _ = vp_accelerometer_set_orientation("270")
+                _ = vp_accelerometer_set_orientation(String(seed.accelerometerDegrees))
                 _ = try? postDarwinNotification("com.vphone.display.orientation.pose.refresh", state: nil)
             }
             GuestFoldPose.requestViewport(for: angle!)
@@ -437,7 +469,6 @@ extension GuestAPI {
             // for a fresh export, resolve against it, and confirm through
             // SpringBoard's own interface answer, re-resolving once with
             // the settled table when the first pick mounts sideways.
-            let desiredInterface = "0"
             if orientation == Self.poseOrientations["portrait"] {
                 var settled = false
                 for pass in 0..<2 where !settled {
@@ -494,7 +525,8 @@ extension GuestAPI {
                     _ = try? postDarwinNotification("com.vphone.display.orientation.pose.refresh", state: nil)
                     _ = try? postDarwinNotification("com.vphone.display.orientation.arbitration.refresh", state: nil)
                     _ = try? postDarwinNotification("com.vphone.display.orientation.actuation.refresh", state: nil)
-                    if interfaceRotationDegrees() != 0 {
+                    let targetDegrees = Int(desiredInterface) ?? 0
+                    if interfaceRotationDegrees() != targetDegrees {
                         Thread.sleep(forTimeInterval: 0.3)
                         _ = try? postDarwinNotification("com.vphone.display.orientation.actuation.refresh", state: nil)
                     }
@@ -508,7 +540,7 @@ extension GuestAPI {
                     // Reuse the same public rotation path once the new panel
                     // is fully selected; it resolves the post-fold map again
                     // instead of relying on a stale pre-transition snapshot.
-                    _ = try? setRotation("0")
+                    _ = try? setRotation(desiredInterface)
                 }
             }
             // Real hardware blanks the inner panel when the fold closes and

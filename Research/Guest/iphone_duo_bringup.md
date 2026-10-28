@@ -3885,3 +3885,15 @@ UIKit swaps the scene space to 951x669 and the grid/dock/status re-flow
 only re-applied the window turn when the panel size changed, so a rotation
 on the same panel left the window in the old aspect — it now follows the
 orientation change itself (animated turn, fold panel changes stay forced).
+
+Follow-up (rotation memory across folds): an explicit landscape now
+survives a fold cycle. `display.posture` records the interface degrees at
+close (90/270 only) in a session-scoped memory, presents the cover
+portrait as before, and on opening replays the remembered direction
+through the same seed/resolve-and-confirm path — the open-side seed now
+resolves the desired interface against the measured inner table instead
+of hardcoding device 3, and the sweep-hold check and rotation fallback
+follow the target degrees. Verified: 90° and 270° both restore after a
+closed→open cycle with correct landscape re-flow; a portrait fold cycle
+stays portrait. The memory is session state: a reboot restores portrait
+through the boot ladder.
