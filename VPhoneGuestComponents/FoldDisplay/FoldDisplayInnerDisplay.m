@@ -18,6 +18,7 @@ static NSString *const vpInnerDisplayName = @"VPhone Duo Inner";
 static const char *vpInnerDisplayMarker = "/var/mobile/Library/Caches/vphone-duo-inner-display";
 static id vpInnerRenderDisplay;
 static BOOL vpIsInnerDisplay(id display);
+static void vpWatchInnerDisplayResolution(void);
 
 BOOL vpInnerDisplayRequested(void) {
     return access(vpInnerDisplayMarker, F_OK) == 0;
@@ -61,7 +62,8 @@ static void vpAddInnerRenderDisplay(unsigned int attempt) {
             ((void (*)(id, SEL, BOOL))objc_msgSend)(display, setEnabled, YES);
         vpTagUnknownDisplay(display);
         vpInnerRenderDisplay = display;
-        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: render display added %@", display]);
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: render display added %@ uniqueId=%@", display,
+            [display respondsToSelector:sel_registerName("uniqueId")] ? [display valueForKey:@"uniqueId"] : @"-"]);
         vpInspectRenderDisplays();
     } @catch (NSException *exception) {
         vpFoldDisplayLog([NSString stringWithFormat:@"inner display: render display exception %@", exception.reason]);
@@ -75,6 +77,60 @@ NSNumber *vpInnerDisplaySurfaceType(id deviceName) {
     if ([deviceName isEqual:@"primary"]) return @1;
     if ([deviceName isEqual:vpInnerDisplayName]) return @2;
     return nil;
+}
+
+// MARK: - backboardd: one digitizer for two panels
+
+// A real Duo has a digitizer per panel; this guest has one, bound to the
+// primary display (an empty display UUID). While the inner display is lit
+// (the device is open) that digitizer belongs to the inner display, so
+// backboardd hit-tests touches on the inner display's own contexts.
+// backboardd asks for a digitizer's display on every event and keeps
+// digitizer state per display, so the state is created under the inner
+// display the first time it is missing there.
+static IMP vpOriginalDigitizerDisplayUUID, vpOriginalDigitizerState;
+static BOOL vpLoggedDigitizerSwitch;
+
+static BOOL vpInnerPanelLit(void) {
+    id inner = vpInnerRenderDisplay;
+    return inner && [[inner valueForKey:@"enabled"] boolValue] && ![[inner valueForKey:@"isBlanked"] boolValue];
+}
+
+static id vpInnerDigitizerDisplayUUID(id self, SEL selector, id service) {
+    id uuid = ((id (*)(id, SEL, id))vpOriginalDigitizerDisplayUUID)(self, selector, service);
+    if ([uuid length] || !vpInnerPanelLit()) return uuid;
+    id inner = [vpInnerRenderDisplay valueForKey:@"uniqueId"];
+    return [inner length] ? inner : uuid;
+}
+
+static id vpInnerDigitizerState(id self, SEL selector, id service) {
+    id state = ((id (*)(id, SEL, id))vpOriginalDigitizerState)(self, selector, service);
+    if (state || !vpInnerPanelLit()) return state;
+    ((id (*)(id, SEL, id))objc_msgSend)(self, sel_registerName("_queue_addDigitizerStateForService:"), service);
+    state = ((id (*)(id, SEL, id))vpOriginalDigitizerState)(self, selector, service);
+    if (!vpLoggedDigitizerSwitch) {
+        vpLoggedDigitizerSwitch = YES;
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: digitizer %@ now on %@ (state %@)",
+            service, [vpInnerRenderDisplay valueForKey:@"uniqueId"], state]);
+    }
+    return state;
+}
+
+static void vpInstallInnerDigitizer(void) {
+    Class processor = objc_getClass("BKHIDDirectTouchEventProcessor");
+    Method uuid = class_getInstanceMethod(processor, sel_registerName("_queue_displayUUIDForDigitizerService:"));
+    Method state = class_getInstanceMethod(processor, sel_registerName("_queue_digitizerStateForService:"));
+    Method add = class_getInstanceMethod(processor, sel_registerName("_queue_addDigitizerStateForService:"));
+    const char *encodings[] = {uuid ? method_getTypeEncoding(uuid) : "missing", state ? method_getTypeEncoding(state) : "missing",
+        add ? method_getTypeEncoding(add) : "missing"};
+    if (strcmp(encodings[0], "@24@0:8@16") != 0 || strcmp(encodings[1], "@24@0:8@16") != 0 || strcmp(encodings[2], "@24@0:8@16") != 0) {
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: digitizer ABI unavailable (%s, %s, %s)",
+            encodings[0], encodings[1], encodings[2]]);
+        return;
+    }
+    vpOriginalDigitizerDisplayUUID = method_setImplementation(uuid, (IMP)vpInnerDigitizerDisplayUUID);
+    vpOriginalDigitizerState = method_setImplementation(state, (IMP)vpInnerDigitizerState);
+    vpFoldDisplayLog(@"inner display: digitizer routing installed");
 }
 
 // MARK: - SpringBoard: one scanout for two panels
@@ -156,6 +212,7 @@ void vpLogRenderDisplayState(void) {
 
 void vpInstallInnerRenderDisplay(void) {
     if (!vpInnerDisplayRequested()) return;
+    vpInstallInnerDigitizer();
     dispatch_async(dispatch_get_main_queue(), ^{ vpAddInnerRenderDisplay(0); });
 }
 
@@ -262,6 +319,7 @@ void vpInstallInnerDisplayAdapter(void) {
     vpOriginalExternal = vpReplaceDisplayGetter("isExternal", "B16@0:8", (IMP)vpInnerExternal);
     vpFoldDisplayLog([NSString stringWithFormat:@"inner display: adapter type=%d scale=%d external=%d",
         vpOriginalDisplayType != NULL, vpOriginalPointScale != NULL, vpOriginalExternal != NULL]);
+    vpWatchInnerDisplayResolution();
 }
 
 // MARK: - SpringBoard: the inner display's scenes
@@ -423,26 +481,50 @@ void vpShowInnerDisplay(BOOL shown) {
 
 // SpringBoard's display content mode coordinator starts resolving a window
 // scene's display when the scene connects to it; the inner display's scene
-// is never handed over. Hands it over and logs what the resolver makes of
-// the two panels.
+// is never handed over, so the hinge could not move content to it. Hands it
+// over once the scene and the resolver both exist (the resolver keys its
+// display proxies by hardware identifier, so this runs once per
+// SpringBoard), and reports whether the inner display is resolved.
+static BOOL vpHandOverInnerDisplay(void) {
+    id app = vpReadObject(objc_getClass("UIApplication"), "sharedApplication");
+    id coordinator = vpReadObject(app, "displayContentModeCoordinator");
+    id innerScene = vpSpringBoardWindowScene(YES);
+    id resolver = vpLogicalRoleResolver;
+    Method connect = class_getInstanceMethod(object_getClass(coordinator), sel_registerName("windowSceneDidConnect:"));
+    if (!coordinator || !innerScene || !resolver || !connect || strcmp(method_getTypeEncoding(connect), "v24@0:8@16") != 0)
+        return NO;
+    id identifier = vpReadObject(vpReadObject(vpReadObject(vpReadObject(innerScene, "_FBSScene"), "settings"),
+        "displayConfiguration"), "hardwareIdentifier");
+    if ([[vpReadObjectIvar(resolver, "_displayProxies") allKeys] containsObject:identifier]) return YES;
+    ((void (*)(id, SEL, id))objc_msgSend)(coordinator, sel_registerName("windowSceneDidConnect:"), innerScene);
+    vpFoldDisplayLog([NSString stringWithFormat:@"inner display: handed %@ to the content mode resolver: %@",
+        vpReadObject(vpReadObject(innerScene, "_FBSScene"), "identifier"), resolver]);
+    return [[vpReadObjectIvar(resolver, "_displayProxies") allKeys] containsObject:identifier];
+}
+
 void vpResolveInnerDisplay(void) {
     @try {
-        id app = vpReadObject(objc_getClass("UIApplication"), "sharedApplication");
-        id coordinator = vpReadObject(app, "displayContentModeCoordinator");
-        id innerScene = vpSpringBoardWindowScene(YES);
-        Method connect = class_getInstanceMethod(object_getClass(coordinator), sel_registerName("windowSceneDidConnect:"));
-        if (!coordinator || !innerScene || !connect || strcmp(method_getTypeEncoding(connect), "v24@0:8@16") != 0) {
-            vpFoldDisplayLog([NSString stringWithFormat:@"inner display: resolve unavailable coordinator=%@ scene=%@", coordinator, innerScene]);
-            return;
-        }
-        if (![[vpReadObjectIvar(vpLogicalRoleResolver, "_displayProxies") allKeys] containsObject:
-                vpReadObject(vpReadObject(vpReadObject(vpReadObject(innerScene, "_FBSScene"), "settings"), "displayConfiguration"), "hardwareIdentifier")])
-            ((void (*)(id, SEL, id))objc_msgSend)(coordinator, sel_registerName("windowSceneDidConnect:"), innerScene);
-        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: resolve %@ -> %@",
-            vpReadObject(vpReadObject(innerScene, "_FBSScene"), "identifier"), vpLogicalRoleResolver]);
+        if (!vpHandOverInnerDisplay()) vpFoldDisplayLog(@"inner display: resolve not ready");
     } @catch (NSException *exception) {
         vpFoldDisplayLog([NSString stringWithFormat:@"inner display: resolve exception %@", exception.reason]);
     }
+}
+
+// From SpringBoard's start, until the inner display is resolved.
+static void vpWatchInnerDisplayResolution(void) {
+    static dispatch_source_t timer;
+    static unsigned int attempts;
+    timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), NSEC_PER_SEC, NSEC_PER_SEC / 10);
+    dispatch_source_set_event_handler(timer, ^{
+        BOOL resolved = NO;
+        @try { resolved = vpHandOverInnerDisplay(); } @catch (__unused NSException *exception) {}
+        if (resolved || ++attempts >= 600) {
+            dispatch_source_cancel(timer);
+            vpFoldDisplayLog([NSString stringWithFormat:@"inner display: resolution watch done resolved=%d after %u s", resolved, attempts]);
+        }
+    });
+    dispatch_resume(timer);
 }
 
 // MARK: - Stage 1 test pattern
