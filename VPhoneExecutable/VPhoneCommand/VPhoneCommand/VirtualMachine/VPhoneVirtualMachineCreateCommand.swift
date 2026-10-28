@@ -203,14 +203,28 @@ struct VPhoneVirtualMachineCreateCommand: ParsableCommand {
         }
     }
 
-    func run() throws {
-        let resources = VPhoneResources.resolve()
+    /// The checks run makes before any work, which validate leaves to it.
+    func checkOptions() throws -> (
+        patchPreset: (preset: VPhonePatchPreset, file: VPhonePatchPreset?),
+        networkMode: VPhoneVirtualMachineManifest.NetworkConfig.NetworkMode?,
+        unlocks: Bool?,
+    ) {
         if let device, VPhoneGuestDevice.named(device) == nil {
             throw ValidationError("vphone runs \(VPhoneGuestDevice.known.map(\.productType).joined(separator: ", ")) guests, not \(device).")
         }
-        let patchPreset = try resolvedPreset()
-        let networkMode = try network.map(VPhoneVirtualMachineConfigCommand.parseMode)
-        let unlocks = try unlockAtStartup.map { try VPhoneVirtualMachineConfigCommand.parseSwitch($0, option: "--unlock-at-startup") }
+        if let template {
+            _ = try VPhoneMachineTemplates.template(template, in: lib.library)
+        }
+        return try (
+            resolvedPreset(),
+            network.map(VPhoneVirtualMachineConfigCommand.parseMode),
+            unlockAtStartup.map { try VPhoneVirtualMachineConfigCommand.parseSwitch($0, option: "--unlock-at-startup") },
+        )
+    }
+
+    func run() throws {
+        let resources = VPhoneResources.resolve()
+        let (patchPreset, networkMode, unlocks) = try checkOptions()
         let templateUse: VPhoneVirtualMachineCreator.TemplateUse = if let template {
             .identifier(template)
         } else if noTemplate || usesTVOS || customisesRestoredSystem {
