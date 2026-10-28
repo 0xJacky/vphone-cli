@@ -4387,3 +4387,34 @@ both panels resolved: a Swift fatal error in UIKitCore
 `ScrollEdgeEffectView.swift`, reached from `-[UIWindow
 _sceneSettingsSceneRegionsDidChange:]` → layout. It restarts on its own;
 the cause is not yet known.
+
+### Open shows the inner display; touch reaches it but not its windows (2026-10-28 late)
+
+- **Compositor:** a remote `CAContext` on the primary display (level 1e9),
+  not a window of SB-main: open, SpringBoard gives the cover auxiliary
+  content and takes SB-main's windows off screen. The context works in the
+  panel's pixels, so hosted inner points are scaled by the point scale, and
+  the fit is redone whenever the panel's size changes.
+- **Panel power:** SpringBoard drives each panel through
+  `-[CADisplayStateControl transitionToDisplayState:withCompletion:]`
+  (state 1 on, 0 off; `_display_id` 1 cover, 7 inner); backboardd does not.
+  The cover's state is the union of both wants, and the inner display's
+  own state shows and hides the compositor.
+- **Screen idiom:** `-[UIScreen _updateUserInterfaceIdiom]` gives the
+  device idiom only to UIKit-main-like screens; the inner screen was -1,
+  which UIKit's Swift idiom switch in `ScrollEdgeEffectView.swift` traps
+  on during posture changes. The inner screen now takes the device idiom;
+  no SpringBoard crash since.
+- **Resolution:** a watch from SpringBoard's start hands the inner scene to
+  `SBDisplayContentModeCoordinator`, so the fold button works without
+  manual steps.
+- **Touch:** `-[BKHIDDirectTouchEventProcessor
+  _queue_displayUUIDForDigitizerService:]` (asked per event) reports the
+  inner display while it is lit, and `_queue_addDigitizerStateForService:`
+  (returns an object) creates the touch state under it. backboardd's hit
+  test then finds inner windows (`windowServerHitTestWindow` names them),
+  but SpringBoard's UIKit sends the events only to `_UISystemGestureWindow`
+  and then "to windows: 0": touches do not reach the inner windows yet.
+
+With the device open, the panel shows SpringBoard's own landscape lock
+screen and home screen for the inner display, with the landscape poster.
