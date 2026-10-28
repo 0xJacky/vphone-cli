@@ -4255,3 +4255,44 @@ Test trap: a VM restart's environment sync rewrote
 into boot, after the first SpringBoard and backboardd had loaded the pushed
 build. Later SpringBoards ran stock code without any error. Re-push and
 check the on-disk hash after every VM restart.
+
+## 2026-10-28 night: dual-display spike, Stage 1 (compositing and touch)
+
+**Render-server cloning does not reach this panel.** The first attempt
+made the inner display the clone master and the LCD its clone
+(`-[CAWindowServerDisplay addClone:options:]`; the options are
+`disableOverscan`, `disableRotation`, `disableScaling`, `disableYUV`,
+`noReplayScaling`, `replayContexts`). The clone registered (`LCD.cloneMaster`
+= the inner display). The inner display was disabled and blanked by then,
+and `VirtualDisplay::can_update` gates on a state bit; unblanking it gave
+`enabled=1 isBlanked=0`, after which the LCD as its clone read
+`enabled=0 isBlanked=1` and the paravirtual panel showed either black or
+its last frame. Removing the clone restored the LCD. Not pursued further.
+
+**SpringBoard compositing works.** `com.vphone.display.inner.show` puts a
+window on Main above everything and, every 250 ms, keeps one `CALayerHost`
+per visible window of every scene on the inner display, by
+`-[UIWindow _contextId]`, ordered by window level (the way scene hosting
+shows app contexts). `.hide` removes it and Main shows again. A test window
+on the inner scene (`com.vphone.display.inner.pattern`: teal, a clock
+ticking every second, a tap count) appeared live on the physical panel,
+checked from the VM window's own framebuffer (`screencapture -l`), not the
+guest screenshot, which renders Main's layer tree.
+
+**Touch follows.** backboardd hit-tests the render tree, so a touch on a
+hosted context goes to the process that owns it. Host taps at panel
+pixels (500, 700) and (1500, 2400) reached the inner window's tap
+recognizer at (166.7, 233.3) and (500.0, 800.0) points: exact, with no
+forwarding code.
+
+**Geometry.** SpringBoard's own display transformer gives the inner panel a
+portrait interface mode (669×951, pixels 2007×2853; the 951×669 landscape
+mode stays in `otherModes`), so the inner scene is 669×951 and on this
+portrait-mounted panel it composites upright at scale 1. FoldDisplay's
+transformer hook only changes Main.
+
+Still open: the inner display carries only SpringBoard's bringup and
+aperture scenes, so it has no home screen or apps of its own yet; showing
+it is manual (no fold/posture wiring); it is only seen after a
+SpringBoard-only restart. The guest screen also sleeps within seconds after
+these restarts, so captures need a wake first.

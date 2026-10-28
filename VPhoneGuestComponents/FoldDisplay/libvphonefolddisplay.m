@@ -163,9 +163,15 @@ static void vpInstallSpringBoardHooks(void) {
 // Every com.vphone.display.* request SpringBoard answers. Registration only
 // installs the handlers; none runs before the constructor returns.
 static void vpRegisterSpringBoardNotifications(void) {
-    static int innerDisplayInspectToken;
+    static int innerDisplayInspectToken, innerPatternToken, innerShowToken, innerHideToken;
     notify_register_dispatch("com.vphone.display.inner.inspect", &innerDisplayInspectToken, dispatch_get_main_queue(),
         ^(int token) { vpInspectInnerDisplay(); });
+    notify_register_dispatch("com.vphone.display.inner.pattern", &innerPatternToken, dispatch_get_main_queue(),
+        ^(int token) { vpToggleInnerPattern(); });
+    notify_register_dispatch("com.vphone.display.inner.show", &innerShowToken, dispatch_get_main_queue(),
+        ^(int token) { vpShowInnerDisplay(YES); });
+    notify_register_dispatch("com.vphone.display.inner.hide", &innerHideToken, dispatch_get_main_queue(),
+        ^(int token) { vpShowInnerDisplay(NO); });
     static int persistentCoverToken, persistentInnerToken;
     notify_register_dispatch("com.vphone.display.viewport.apply.cover", &persistentCoverToken, dispatch_get_main_queue(),
         ^(int token) { vpSetPersistentViewport(YES); });

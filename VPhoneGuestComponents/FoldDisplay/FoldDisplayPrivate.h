@@ -183,6 +183,8 @@ void vpVirtualDisplayExperiment(BOOL create);
 
 BOOL vpInnerDisplayRequested(void);
 void vpInstallInnerRenderDisplay(void);
+void vpShowInnerDisplay(BOOL shown);
+void vpToggleInnerPattern(void);
 void vpInstallInnerDisplayAdapter(void);
 void vpInspectInnerDisplay(void);
 

@@ -146,6 +146,205 @@ void vpInstallInnerDisplayAdapter(void) {
         vpOriginalDisplayType != NULL, vpOriginalPointScale != NULL, vpOriginalExternal != NULL]);
 }
 
+// MARK: - SpringBoard: the inner display's scenes
+
+static BOOL vpSceneIsOnInnerDisplay(id scene) {
+    id configuration = vpReadObject(vpReadObject(vpReadObject(scene, "_FBSScene"), "settings"), "displayConfiguration");
+    id identity = vpReadObject(configuration, "identity");
+    return identity && ![[identity description] isEqual:@"Main"];
+}
+
+// The SpringBoard window scene (not an aperture subclass) on the inner
+// display, or on Main.
+static id vpSpringBoardWindowScene(BOOL inner) {
+    id app = vpReadObject(objc_getClass("UIApplication"), "sharedApplication");
+    for (id scene in [vpReadObject(app, "connectedScenes") allObjects] ?: @[])
+        if ([scene class] == objc_getClass("SBWindowScene") && vpSceneIsOnInnerDisplay(scene) == inner) return scene;
+    return nil;
+}
+
+// MARK: - Stage 1: the panel shows the inner display
+
+// The render server's own clone of a display (addClone:options:) never
+// reaches this guest's paravirtual panel, so SpringBoard composites
+// instead: a window on Main hosts every window of the inner display's
+// scenes by render context (CALayerHost, as scene hosting does), turned
+// and scaled from the landscape panel onto the portrait framebuffer.
+static id vpInnerHostWindow, vpInnerHostContainer;
+static dispatch_source_t vpInnerHostTimer;
+static NSMutableDictionary<NSNumber *, id> *vpInnerHostLayers;
+
+static void vpSyncInnerHosts(void) {
+    id app = vpReadObject(objc_getClass("UIApplication"), "sharedApplication");
+    NSMutableArray *windows = [NSMutableArray array];
+    for (id scene in [vpReadObject(app, "connectedScenes") allObjects] ?: @[])
+        if ([scene isKindOfClass:objc_getClass("UIWindowScene")] && vpSceneIsOnInnerDisplay(scene))
+            for (id window in vpReadObject(scene, "windows") ?: @[])
+                if (![[window valueForKey:@"hidden"] boolValue]) [windows addObject:window];
+    [windows sortUsingComparator:^NSComparisonResult(id a, id b) {
+        return [[a valueForKey:@"windowLevel"] compare:[b valueForKey:@"windowLevel"]];
+    }];
+    NSMutableSet *live = [NSMutableSet set];
+    id container = vpReadObject(vpInnerHostContainer, "layer");
+    SEL contextIdSelector = sel_registerName("_contextId");
+    for (NSUInteger index = 0; index < windows.count; index++) {
+        id window = windows[index];
+        if (![window respondsToSelector:contextIdSelector]) continue;
+        unsigned int contextId = ((unsigned int (*)(id, SEL))objc_msgSend)(window, contextIdSelector);
+        if (!contextId) continue;
+        NSNumber *key = @(contextId);
+        [live addObject:key];
+        id host = vpInnerHostLayers[key];
+        if (!host) {
+            host = [objc_getClass("CALayerHost") new];
+            ((void (*)(id, SEL, unsigned int))objc_msgSend)(host, sel_registerName("setContextId:"), contextId);
+            ((void (*)(id, SEL, id))objc_msgSend)(container, sel_registerName("addSublayer:"), host);
+            vpInnerHostLayers[key] = host;
+        }
+        ((void (*)(id, SEL, CGRect))objc_msgSend)(host, sel_registerName("setFrame:"),
+            ((CGRect (*)(id, SEL))objc_msgSend)(window, sel_registerName("frame")));
+        ((void (*)(id, SEL, double))objc_msgSend)(host, sel_registerName("setZPosition:"), index);
+    }
+    for (NSNumber *key in vpInnerHostLayers.allKeys) {
+        if ([live containsObject:key]) continue;
+        ((void (*)(id, SEL))objc_msgSend)(vpInnerHostLayers[key], sel_registerName("removeFromSuperlayer"));
+        [vpInnerHostLayers removeObjectForKey:key];
+    }
+}
+
+void vpShowInnerDisplay(BOOL shown) {
+    @try {
+        if (!shown) {
+            if (!vpInnerHostWindow) return;
+            dispatch_source_cancel(vpInnerHostTimer);
+            vpInnerHostTimer = nil;
+            ((void (*)(id, SEL, BOOL))objc_msgSend)(vpInnerHostWindow, sel_registerName("setHidden:"), YES);
+            vpInnerHostWindow = vpInnerHostContainer = nil;
+            vpInnerHostLayers = nil;
+            vpFoldDisplayLog(@"inner display: shown=0");
+            return;
+        }
+        if (vpInnerHostWindow) return;
+        id innerScene = vpSpringBoardWindowScene(YES), mainScene = vpSpringBoardWindowScene(NO);
+        Method contextId = class_getInstanceMethod(objc_getClass("UIWindow"), sel_registerName("_contextId"));
+        Method hostContext = class_getInstanceMethod(objc_getClass("CALayerHost"), sel_registerName("setContextId:"));
+        if (!innerScene || !mainScene || !contextId || !hostContext ||
+            strcmp(method_getTypeEncoding(contextId), "I16@0:8") != 0 ||
+            strcmp(method_getTypeEncoding(hostContext), "v20@0:8I16") != 0) {
+            vpFoldDisplayLog([NSString stringWithFormat:@"inner display: show unavailable inner=%d main=%d contextId=%s host=%s",
+                innerScene != nil, mainScene != nil, contextId ? method_getTypeEncoding(contextId) : "missing",
+                hostContext ? method_getTypeEncoding(hostContext) : "missing"]);
+            return;
+        }
+        CGRect panel = ((CGRect (*)(id, SEL))objc_msgSend)(vpReadObject(mainScene, "coordinateSpace"), sel_registerName("bounds"));
+        CGRect inner = ((CGRect (*)(id, SEL))objc_msgSend)(vpReadObject(innerScene, "coordinateSpace"), sel_registerName("bounds"));
+        id window = ((id (*)(id, SEL, id))objc_msgSend)([objc_getClass("UIWindow") alloc],
+            sel_registerName("initWithWindowScene:"), mainScene);
+        ((void (*)(id, SEL, CGRect))objc_msgSend)(window, sel_registerName("setFrame:"), panel);
+        ((void (*)(id, SEL, double))objc_msgSend)(window, sel_registerName("setWindowLevel:"), 9999999.0);
+        ((void (*)(id, SEL, id))objc_msgSend)(window, sel_registerName("setBackgroundColor:"),
+            vpReadObject(objc_getClass("UIColor"), "blackColor"));
+        // The inner display in its own points, turned a quarter (the
+        // interface-4 mount, -90 degrees) when it is landscape on the
+        // portrait panel, scaled to fit and centered.
+        id container = ((id (*)(id, SEL, CGRect))objc_msgSend)([objc_getClass("UIView") alloc],
+            sel_registerName("initWithFrame:"), inner);
+        BOOL turned = inner.size.width > inner.size.height;
+        CGSize upright = turned ? CGSizeMake(inner.size.height, inner.size.width) : inner.size;
+        CGFloat scale = MIN(panel.size.width / upright.width, panel.size.height / upright.height);
+        CGAffineTransform transform = CGAffineTransformMakeScale(scale, scale);
+        if (turned) transform = CGAffineTransformRotate(transform, -M_PI_2);
+        ((void (*)(id, SEL, CGPoint))objc_msgSend)(container, sel_registerName("setCenter:"),
+            CGPointMake(CGRectGetMidX(panel), CGRectGetMidY(panel)));
+        ((void (*)(id, SEL, CGAffineTransform))objc_msgSend)(container, sel_registerName("setTransform:"), transform);
+        ((void (*)(id, SEL, id))objc_msgSend)(window, sel_registerName("addSubview:"), container);
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(window, sel_registerName("setHidden:"), NO);
+        vpInnerHostWindow = window;
+        vpInnerHostContainer = container;
+        vpInnerHostLayers = [NSMutableDictionary dictionary];
+        vpSyncInnerHosts();
+        vpInnerHostTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+        dispatch_source_set_timer(vpInnerHostTimer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), NSEC_PER_SEC / 4, NSEC_PER_SEC / 20);
+        dispatch_source_set_event_handler(vpInnerHostTimer, ^{ vpSyncInnerHosts(); });
+        dispatch_resume(vpInnerHostTimer);
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: shown=1 panel=%@ inner=%@ turned=%d scale=%.3f hosts=%@",
+            vpSizeText(panel.size), vpSizeText(inner.size), turned, scale, vpInnerHostLayers.allKeys]);
+    } @catch (NSException *exception) {
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: show exception %@", exception.reason]);
+    }
+}
+
+// MARK: - Stage 1 test pattern
+
+// A window on the inner display's scene with a clock that changes every
+// second, so a frame reaching the panel can be told from a stale one, and a
+// tap count, so a touch reaching the inner display can be told too.
+static id vpInnerPatternWindow;
+static dispatch_source_t vpInnerPatternTimer;
+static unsigned int vpInnerPatternTaps;
+
+@interface VPhoneInnerPatternTapTarget : NSObject
+@end
+
+@implementation VPhoneInnerPatternTapTarget
+- (void)tapped:(id)recognizer {
+    vpInnerPatternTaps++;
+    CGPoint point = ((CGPoint (*)(id, SEL, id))objc_msgSend)(recognizer, sel_registerName("locationInView:"), nil);
+    vpFoldDisplayLog([NSString stringWithFormat:@"inner display: pattern tap %u at {%.1f, %.1f}", vpInnerPatternTaps, point.x, point.y]);
+}
+@end
+
+static VPhoneInnerPatternTapTarget *vpInnerPatternTapTarget;
+
+void vpToggleInnerPattern(void) {
+    @try {
+        if (vpInnerPatternWindow) {
+            dispatch_source_cancel(vpInnerPatternTimer);
+            vpInnerPatternTimer = nil;
+            ((void (*)(id, SEL, BOOL))objc_msgSend)(vpInnerPatternWindow, sel_registerName("setHidden:"), YES);
+            vpInnerPatternWindow = nil;
+            vpFoldDisplayLog(@"inner display: pattern removed");
+            return;
+        }
+        id innerScene = vpSpringBoardWindowScene(YES);
+        if (!innerScene) { vpFoldDisplayLog(@"inner display: pattern has no inner window scene"); return; }
+        CGRect bounds = ((CGRect (*)(id, SEL))objc_msgSend)(vpReadObject(innerScene, "coordinateSpace"), sel_registerName("bounds"));
+        id window = ((id (*)(id, SEL, id))objc_msgSend)([objc_getClass("UIWindow") alloc],
+            sel_registerName("initWithWindowScene:"), innerScene);
+        ((void (*)(id, SEL, CGRect))objc_msgSend)(window, sel_registerName("setFrame:"), bounds);
+        ((void (*)(id, SEL, double))objc_msgSend)(window, sel_registerName("setWindowLevel:"), 10000000.0);
+        ((void (*)(id, SEL, id))objc_msgSend)(window, sel_registerName("setBackgroundColor:"),
+            vpReadObject(objc_getClass("UIColor"), "systemTealColor"));
+        id label = ((id (*)(id, SEL, CGRect))objc_msgSend)([objc_getClass("UILabel") alloc],
+            sel_registerName("initWithFrame:"), CGRectInset(bounds, 40, 40));
+        ((void (*)(id, SEL, long long))objc_msgSend)(label, sel_registerName("setNumberOfLines:"), 0);
+        ((void (*)(id, SEL, long long))objc_msgSend)(label, sel_registerName("setTextAlignment:"), 1);
+        ((void (*)(id, SEL, id))objc_msgSend)(label, sel_registerName("setFont:"),
+            ((id (*)(id, SEL, double))objc_msgSend)(objc_getClass("UIFont"), sel_registerName("boldSystemFontOfSize:"), 64));
+        ((void (*)(id, SEL, id))objc_msgSend)(window, sel_registerName("addSubview:"), label);
+        vpInnerPatternTapTarget = vpInnerPatternTapTarget ?: [VPhoneInnerPatternTapTarget new];
+        id tap = ((id (*)(id, SEL, id, SEL))objc_msgSend)([objc_getClass("UITapGestureRecognizer") alloc],
+            sel_registerName("initWithTarget:action:"), vpInnerPatternTapTarget, @selector(tapped:));
+        ((void (*)(id, SEL, id))objc_msgSend)(window, sel_registerName("addGestureRecognizer:"), tap);
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(window, sel_registerName("setHidden:"), NO);
+        vpInnerPatternWindow = window;
+        NSString *size = [NSString stringWithFormat:@"%.0fx%.0f", bounds.size.width, bounds.size.height];
+        vpInnerPatternTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+        dispatch_source_set_timer(vpInnerPatternTimer, DISPATCH_TIME_NOW, NSEC_PER_SEC, NSEC_PER_SEC / 10);
+        dispatch_source_set_event_handler(vpInnerPatternTimer, ^{
+            NSString *time = [NSDateFormatter localizedStringFromDate:NSDate.date dateStyle:NSDateFormatterNoStyle
+                                                            timeStyle:NSDateFormatterMediumStyle];
+            ((void (*)(id, SEL, id))objc_msgSend)(label, sel_registerName("setText:"),
+                [NSString stringWithFormat:@"INNER %@\n%@\ntaps %u", size, time, vpInnerPatternTaps]);
+        });
+        dispatch_resume(vpInnerPatternTimer);
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: pattern on %@ bounds=%@",
+            vpReadObject(vpReadObject(innerScene, "_FBSScene"), "identifier"), size]);
+    } @catch (NSException *exception) {
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: pattern exception %@", exception.reason]);
+    }
+}
+
 // MARK: - Stage 0 report
 
 // The spike's pass criteria, read live: the always-connected identities,
