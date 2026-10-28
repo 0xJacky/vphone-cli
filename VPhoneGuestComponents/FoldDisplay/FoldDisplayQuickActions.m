@@ -29,6 +29,23 @@ void vpInspectQuickActions(void) {
                     vpFoldDisplayLog([NSString stringWithFormat:@"quick action view: class=%@ frame=%@ alpha=%@ hidden=%@",
                         className, [view valueForKey:@"frame"], [view valueForKey:@"alpha"], [view valueForKey:@"hidden"]]);
                     vpDumpObjectIvars(view, @"quick action instance", 48);
+                    if ([className isEqualToString:@"CSQuickActionImageGlyphView"]) {
+                        // The glyph's geometry chain: the size the button's
+                        // layout set, the symbol's own size, the container
+                        // the scale lives on, and the size that reaches the
+                        // window.
+                        id superview = [view valueForKey:@"superview"];
+                        CGRect bounds = ((CGRect (*)(id, SEL))objc_msgSend)(view, sel_registerName("bounds"));
+                        CGRect onScreen = ((CGRect (*)(id, SEL, CGRect, id))objc_msgSend)(view,
+                            sel_registerName("convertRect:toView:"), bounds, nil);
+                        vpFoldDisplayLog([NSString stringWithFormat:@"quick action glyph: bounds=%@ transform=%@ image=%@ window={%.1f, %.1f} container=%@ %@ subviews=%lu sublayerTransform=%@",
+                            vpSizeText(bounds.size), [view valueForKey:@"transform"],
+                            [vpReadObjectIvar(view, "_image") valueForKey:@"size"],
+                            onScreen.size.width, onScreen.size.height,
+                            NSStringFromClass([superview class]), [superview valueForKey:@"bounds"],
+                            (unsigned long)[[superview valueForKey:@"subviews"] count],
+                            [[superview valueForKey:@"layer"] valueForKey:@"sublayerTransform"]]);
+                    }
                     if ([className isEqualToString:@"CSQuickActionsButton"]) {
                         // Read-only computed getters; they reveal which metric
                         // row the native layout resolved for this instance.
@@ -73,82 +90,97 @@ void vpInspectQuickActions(void) {
 
 // MARK: - glyph scale
 
-// The user-validated glyph factor, applied without any experiment opt-in:
-// over a SpringBoard startup ladder, after every orientation actuation
-// refresh, after viewport transitions, and once per clock tick, because
-// lock-screen rebuilds create fresh glyph instances.  The glyph class's
-// method list is never touched (round-12/13); a plain transform walk is
-// the only safe lever.
-// The glyph frames are the symbol metrics times one shared multiplier, so
-// a tall symbol (flashlight.off.fill, 20x37pt) towers over a wide one
-// (camera.fill, 24x18pt) under any uniform factor.  Keep the flashlight at
-// the accepted 16pt long side, while restoring the camera to the 0.82 target
-// factor selected by the real-device comparison.  Bounds are deliberately used
-// below: unlike frame, they are in the glyph's own coordinate space and do
-// not include the transform we set.  This makes every retry idempotent during
-// rotation/fold pulses and prevents the camera from being scaled down again.
-static double const vpQuickActionTallGlyphLongSide = 16.0;
-static double const vpQuickActionCameraScale = 0.82;
-static char vpQuickActionNativeBoundsKey;
+// The Duo cover sheet lays the glyphs out at 20x37pt (flashlight) and
+// 35x26pt (camera) inside a 48pt icon; a real iPhone Duo's landscape lock
+// screen draws them at about 15x27pt and 23x17pt in the same 48pt icon.
+// Those are 0.75 and 0.66 of the layout sizes, one factor within the
+// measurement, so both glyphs take vpQuickActionGlyphScale and keep the
+// per-symbol proportions the native layout gives them (the user's earlier
+// visual check had settled on 0.68).
+//
+// The lever is the glyph's transform, but the button lays the glyph out with
+// setFrame:, which on a transformed view grows the bounds until the visual
+// frame is the native size again. Whether a glyph looked scaled depended on
+// whether a layout pass followed the walk. Each glyph therefore moves to a
+// runtime subclass (as KVO does) whose setFrame: sets center and bounds from
+// the layout rect, so the transform survives every later pass. The glyph
+// class's own method list is never written: its image's method pages are
+// read-only and method_setImplementation there faults (round-12/13).
+static double const vpQuickActionGlyphScale = 0.70;
 static atomic_uint vpQuickActionScaleGeneration;
+static Class vpQuickActionGlyphSubclass;
+static IMP vpQuickActionGlyphSetFrame;
+
+static void vpQuickActionGlyphSetFrameReplacement(id self, SEL selector, CGRect frame) {
+    CGAffineTransform transform = ((CGAffineTransform (*)(id, SEL))objc_msgSend)(self, sel_registerName("transform"));
+    if (CGAffineTransformIsIdentity(transform)) {
+        ((void (*)(id, SEL, CGRect))vpQuickActionGlyphSetFrame)(self, selector, frame);
+        return;
+    }
+    CGRect bounds = ((CGRect (*)(id, SEL))objc_msgSend)(self, sel_registerName("bounds"));
+    bounds.size = frame.size;
+    ((void (*)(id, SEL, CGRect))objc_msgSend)(self, sel_registerName("setBounds:"), bounds);
+    ((void (*)(id, SEL, CGPoint))objc_msgSend)(self, sel_registerName("setCenter:"),
+        CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame)));
+}
+
+static Class vpQuickActionGlyphReportedClass(id self, SEL selector) {
+    return class_getSuperclass(object_getClass(self));
+}
+
+// Moves one glyph to the layout-preserving subclass. Refuses a glyph whose
+// class is already someone else's subclass (a KVO observer, say).
+static BOOL vpAdoptQuickActionGlyph(id view, Class glyphClass) {
+    Class current = object_getClass(view);
+    if (current == vpQuickActionGlyphSubclass && current) return YES;
+    if (current != glyphClass) return NO;
+    if (!vpQuickActionGlyphSubclass) {
+        SEL setFrame = sel_registerName("setFrame:");
+        Method method = class_getInstanceMethod(glyphClass, setFrame);
+        if (!method) return NO;
+        Class subclass = objc_allocateClassPair(glyphClass, "VPhoneQuickActionGlyphView", 0);
+        if (!subclass) return NO;
+        vpQuickActionGlyphSetFrame = method_getImplementation(method);
+        class_addMethod(subclass, setFrame, (IMP)vpQuickActionGlyphSetFrameReplacement, method_getTypeEncoding(method));
+        class_addMethod(subclass, sel_registerName("class"), (IMP)vpQuickActionGlyphReportedClass, "#16@0:8");
+        objc_registerClassPair(subclass);
+        vpQuickActionGlyphSubclass = subclass;
+    }
+    object_setClass(view, vpQuickActionGlyphSubclass);
+    return YES;
+}
 
 void vpApplyQuickActionGlyphScale(void) {
     @try {
         id app = vpReadObject(objc_getClass("UIApplication"), "sharedApplication");
-        if (!app) return;
-        NSUInteger touched = 0, rescaled = 0;
+        Class glyphClass = objc_getClass("CSQuickActionImageGlyphView");
+        if (!app || !glyphClass) return;
+        NSUInteger touched = 0, rescaled = 0, refused = 0;
         for (id window in vpReadObject(app, "windows")) {
             NSMutableArray *pending = [NSMutableArray arrayWithObject:window];
             while (pending.count) {
                 id view = pending.lastObject;
                 [pending removeLastObject];
-                if ([view isKindOfClass:objc_getClass("CSQuickActionImageGlyphView")]) {
-                    SEL transformSelector = sel_registerName("transform");
-                    SEL boundsSelector = sel_registerName("bounds");
-                    if (![view respondsToSelector:transformSelector] || ![view respondsToSelector:boundsSelector]) continue;
-                    CGAffineTransform current = ((CGAffineTransform (*)(id, SEL))objc_msgSend)(view, transformSelector);
-                    CGRect bounds = ((CGRect (*)(id, SEL))objc_msgSend)(view, boundsSelector);
-                    touched++;
-                    // UIKit's bounds should be transform-independent, but
-                    // this private glyph view can be relaid out with a new
-                    // bounds after a fold. Capture the first native value so
-                    // later passes cannot turn a prior result into their new
-                    // input, even if the view's layout code rewrites it.
-                    NSValue *nativeBoundsValue = objc_getAssociatedObject(view, &vpQuickActionNativeBoundsKey);
-                    CGRect nativeBounds = bounds;
-                    if ([nativeBoundsValue isKindOfClass:[NSValue class]]) {
-                        [nativeBoundsValue getValue:&nativeBounds size:sizeof(nativeBounds)];
-                    } else {
-                        // Do not freeze the pre-layout zero rect. The next
-                        // scheduled pass must be allowed to capture the
-                        // first real glyph bounds.
-                        if (fmax(bounds.size.width, bounds.size.height) < 1) continue;
-                        nativeBoundsValue = [NSValue value:&nativeBounds withObjCType:@encode(CGRect)];
-                        objc_setAssociatedObject(view, &vpQuickActionNativeBoundsKey,
-                            nativeBoundsValue, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                    }
-                    double longSide = fmax(nativeBounds.size.width, nativeBounds.size.height);
-                    if (longSide < 1) continue;
-                    BOOL isWideGlyph = nativeBounds.size.width > nativeBounds.size.height * 1.15;
-                    double scale = isWideGlyph
-                        ? vpQuickActionCameraScale
-                        : vpQuickActionTallGlyphLongSide / longSide;
-                    if (scale > 1) scale = 1;
-                    if (scale < 0.2) scale = 0.2;
-                    if (fabs(current.a - scale) < 0.001 &&
-                        fabs(current.d - scale) < 0.001) continue;
-                    CGAffineTransform scaled = CGAffineTransformMakeScale(scale, scale);
-                    NSValue *value = [NSValue value:&scaled withObjCType:@encode(CGAffineTransform)];
-                    [view setValue:value forKey:@"transform"];
-                    rescaled++;
-                }
                 for (id child in [view valueForKey:@"subviews"] ?: @[]) [pending addObject:child];
+                if (![view isKindOfClass:glyphClass]) continue;
+                touched++;
+                // The subclass keeps bounds equal to the layout size, so the
+                // transform alone sets the drawn size.
+                if (!vpAdoptQuickActionGlyph(view, glyphClass)) { refused++; continue; }
+                CGRect bounds = ((CGRect (*)(id, SEL))objc_msgSend)(view, sel_registerName("bounds"));
+                // Not laid out yet; a later pass catches it.
+                if (bounds.size.width < 1 || bounds.size.height < 1) continue;
+                double scale = vpQuickActionGlyphScale;
+                CGAffineTransform current = ((CGAffineTransform (*)(id, SEL))objc_msgSend)(view, sel_registerName("transform"));
+                if (fabs(current.a - scale) < 0.001 && fabs(current.d - scale) < 0.001 && current.b == 0 && current.c == 0) continue;
+                ((void (*)(id, SEL, CGAffineTransform))objc_msgSend)(view, sel_registerName("setTransform:"),
+                    CGAffineTransformMakeScale(scale, scale));
+                rescaled++;
             }
         }
-        if (rescaled)
-            vpFoldDisplayLog([NSString stringWithFormat:@"quick action glyph scale: %lu of %lu views (camera %.2f, tall long side %.0fpt)",
-                (unsigned long)rescaled, (unsigned long)touched, vpQuickActionCameraScale,
-                vpQuickActionTallGlyphLongSide]);
+        if (rescaled || refused)
+            vpFoldDisplayLog([NSString stringWithFormat:@"quick action glyph scale: %lu of %lu views rescaled, %lu refused",
+                (unsigned long)rescaled, (unsigned long)touched, (unsigned long)refused]);
     } @catch (NSException *exception) {
         vpFoldDisplayLog([NSString stringWithFormat:@"quick action glyph scale exception: %@", exception.reason]);
     }
@@ -157,7 +189,7 @@ void vpApplyQuickActionGlyphScale(void) {
 // The native orientation callback starts a new CoverSheet layout; its glyph
 // views can be rebuilt after the callback returns. Apply on the next main-queue
 // turn and at two short settling points, while coalescing stale rotation
-// schedules. Each pass is safe because it uses the cached native bounds above.
+// schedules. Repeated passes are no-ops once a glyph carries its scale.
 void vpScheduleQuickActionGlyphScale(void) {
     if (!vpAutomaticMainStatus) return;
     unsigned int generation = atomic_fetch_add_explicit(&vpQuickActionScaleGeneration, 1, memory_order_acq_rel) + 1;

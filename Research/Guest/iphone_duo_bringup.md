@@ -4155,3 +4155,34 @@ export table is unchanged. On duotest-m5 the split and the pre-split build
 gave the same install log and the same rotation and fold results: 90°
 settles, then 0° and 270° are refused ("did not settle"), and closed/open
 land 466×678 and 669×951. That refusal on this machine predates the split.
+
+### QuickAction glyphs: why the scale came and went (2026-10-28 evening)
+
+`quickaction.inspect` now logs each glyph's bounds, transform, symbol image
+size and on-screen size. After a respring the flashlight showed bounds 20x37,
+transform 0.436, on screen 8.9x16, while the camera showed bounds 35x26,
+transform 0.82, on screen 28.4x21.6 (its native size). `CSQuickActionsButton`
+lays the glyph out with `setFrame:`, and on a transformed view UIKit answers
+by growing the bounds until the visual frame is the requested one. A glyph
+looked scaled only if no layout pass followed the walk, and the walk skipped
+it afterwards because its transform already matched. That is the reported
+"not idempotent / not uniform".
+
+Fix (`FoldDisplayQuickActions.m`): each glyph moves to a runtime subclass,
+`VPhoneQuickActionGlyphView`, as KVO does, whose `setFrame:` sets center and
+bounds from the layout rect when a transform is present, and whose `-class`
+reports the original class. `CSQuickActionImageGlyphView`'s own method list
+is still never written. The glyph's container (48x48 `UIView`) holds two
+subviews, so a `sublayerTransform` there was ruled out.
+
+Target: one factor, `vpQuickActionGlyphScale` = 0.70, on the native layout
+sizes (flashlight 20x37, camera 35x26; the camera's 28x22 seen earlier was
+already an effective 0.82). A real iPhone Duo landscape lock screen
+(1535px for 951pt, 77px buttons) draws the flashlight at about 15x27pt and
+the camera at 23x17pt: 0.75 and 0.66 of the layout sizes, one factor within
+the measurement. Drawing both at their symbol image size (12x22, 25x19) was
+tried first and made the flashlight shorter than the camera, which the real
+device does not do. The tall/wide split (16pt long side, camera 0.82) is gone.
+
+Verified on duotest-m5: 14.2x25.7 and 24.3x18.4 on screen after two lock
+cycles, a rotation to 90°, folding closed, opening, and another lock cycle.
