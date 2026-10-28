@@ -203,6 +203,35 @@ void vpInstallSceneStatusPolicy(void) {
 }
 @end
 
+// Asks the native, read-only provider factory which provider the given
+// Duo panel takes, by showing it a preview of the screen with that panel's
+// native pixels and an exclusion area of the profile's notch. Every screen
+// on this guest carries Main's MobileGestalt panel metrics, so the factory
+// would otherwise pick a generic island provider. Nil unless the factory
+// itself selects the profile.
+static Class vpDuoPanelStatusClass(id screen, id info, BOOL inner) {
+    Class (*original)(id, id) = vpOriginalMainStatusClassLookup;
+    Class profile = objc_getClass(inner ? "STUIStatusBarVisualProvider_AxisAlignableSplit2007" :
+        "STUIStatusBarVisualProvider_AxisAlignableSplitV68Cover");
+    SEL notchSelector = sel_registerName("notchSize");
+    NSMethodSignature *notchSignature = [profile methodSignatureForSelector:notchSelector];
+    if (notchSignature.methodReturnLength != sizeof(CGSize)) return Nil;
+    CGSize notch = ((CGSize (*)(id, SEL))objc_msgSend)(profile, notchSelector);
+    Class shapeClass = objc_getClass("UISDisplaySingleRectShape");
+    SEL initializer = sel_registerName("initWithRect:");
+    NSMethodSignature *shapeSignature = [shapeClass instanceMethodSignatureForSelector:initializer];
+    if (shapeSignature.numberOfArguments != 3 ||
+        strcmp([shapeSignature getArgumentTypeAtIndex:2], "{CGRect={CGPoint=dd}{CGSize=dd}}") != 0) return Nil;
+    VPhoneStatusScreenPreview *preview = [VPhoneStatusScreenPreview alloc];
+    preview.source = screen;
+    preview.referenceBounds = inner ? CGRectMake(0, 0, 2007, 2853) : CGRectMake(0, 0, 1398, 2034);
+    preview.skipEmbeddedCache = YES;
+    preview.previewExclusion = ((id (*)(id, SEL, CGRect))objc_msgSend)([shapeClass alloc], initializer,
+        CGRectMake(0, 0, notch.width, notch.height));
+    Class selected = original(preview, info);
+    return selected == profile ? selected : Nil;
+}
+
 static Class vpMainStatusClassLookup(id screen, id info) {
     Class (*original)(id, id) = vpOriginalMainStatusClassLookup;
     if (!vpMainStatusProfileEnabled || ![NSThread isMainThread]) return original(screen, info);
@@ -214,28 +243,35 @@ static Class vpMainStatusClassLookup(id screen, id info) {
     if (![identity isEqual:vpReadObject(root, "identity")] ||
         screen != vpReadObject(vpMainStatusProfileScene, "screen") ||
         !(inner || cover)) return original(screen, info);
-    Class profile = objc_getClass(inner ? "STUIStatusBarVisualProvider_AxisAlignableSplit2007" :
-        "STUIStatusBarVisualProvider_AxisAlignableSplitV68Cover");
-    SEL notchSelector = sel_registerName("notchSize");
-    NSMethodSignature *notchSignature = [profile methodSignatureForSelector:notchSelector];
-    if (notchSignature.methodReturnLength != sizeof(CGSize)) return original(screen, info);
-    CGSize notch = ((CGSize (*)(id, SEL))objc_msgSend)(profile, notchSelector);
-    Class shapeClass = objc_getClass("UISDisplaySingleRectShape");
-    SEL initializer = sel_registerName("initWithRect:");
-    NSMethodSignature *shapeSignature = [shapeClass instanceMethodSignatureForSelector:initializer];
-    if (shapeSignature.numberOfArguments != 3 ||
-        strcmp([shapeSignature getArgumentTypeAtIndex:2], "{CGRect={CGPoint=dd}{CGSize=dd}}") != 0) return original(screen, info);
-    VPhoneStatusScreenPreview *preview = [VPhoneStatusScreenPreview alloc];
-    preview.source = screen;
-    preview.referenceBounds = inner ? CGRectMake(0, 0, 2007, 2853) : CGRectMake(0, 0, 1398, 2034);
-    preview.skipEmbeddedCache = YES;
-    preview.previewExclusion = ((id (*)(id, SEL, CGRect))objc_msgSend)([shapeClass alloc], initializer,
-        CGRectMake(0, 0, notch.width, notch.height));
-    Class selected = original(preview, info);
-    if (selected != profile) return original(screen, info);
+    Class selected = vpDuoPanelStatusClass(screen, info, inner);
+    if (!selected) return original(screen, info);
     if (vpMainStatusProfileLogCount++ < 8)
         vpFoldDisplayLog([NSString stringWithFormat:@"Main status profile: native %@ lookup accepted; original data/screen/identity retained", inner ? @"inner" : @"cover"]);
     return selected;
+}
+
+// With the inner display published each screen is one panel: the inner
+// display's screen is the inner panel and Main's is the cover.
+static Class vpDualStatusClassLookup(id screen, id info) {
+    Class (*original)(id, id) = vpOriginalMainStatusClassLookup;
+    if (![NSThread isMainThread]) return original(screen, info);
+    id identity = vpReadObject(vpReadObject(screen, "displayConfiguration"), "identity");
+    if (!identity) return original(screen, info);
+    BOOL inner = ![[identity description] isEqual:@"Main"];
+    Class selected = vpDuoPanelStatusClass(screen, info, inner);
+    if (vpMainStatusProfileLogCount++ < 8)
+        vpFoldDisplayLog([NSString stringWithFormat:@"status bar: %@ screen takes %@", inner ? @"inner" : @"cover",
+            selected ? NSStringFromClass(selected) : @"the native provider"]);
+    return selected ?: original(screen, info);
+}
+
+void vpInstallDualStatusLookup(void) {
+    void *target = dlsym(RTLD_DEFAULT, "STUIStatusBarGetVisualProviderClassForScreen");
+    MISFixDetourResult (*install)(const char *, void *, void *, void **) = dlsym(RTLD_DEFAULT, "MISFixDetour");
+    if (!target || !install) { vpFoldDisplayLog(@"status bar: native lookup/detour API unavailable"); return; }
+    MISFixDetourResult result = install("Duo per-panel status profile", target, (void *)vpDualStatusClassLookup,
+        &vpOriginalMainStatusClassLookup);
+    vpFoldDisplayLog([NSString stringWithFormat:@"status bar: per-panel lookup detour result=%d", result]);
 }
 
 void vpInstallMainStatusLookup(void) {
@@ -405,6 +441,8 @@ void vpRestoreStatusProfileLookup(void) {
 }
 
 void vpPulseStatusProfileLookup(void) {
+    // Single-display only: a published inner display has its own status bar.
+    if (vpInnerDisplayRequested()) return;
     @try {
         if (vpStatusProfileLookupEnabled || !vpUIConfigPublished || vpMainInnerWindowScene() != vpUIConfigWindowScene) return;
         Method methods[4];

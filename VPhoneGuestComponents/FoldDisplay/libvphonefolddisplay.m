@@ -56,6 +56,7 @@ static void vpInstallBackboardProbes(void) {
 
 static void vpInstallSpringBoardHooks(void) {
     vpInstallInnerDisplayAdapter();
+    vpInstallInnerTouch();
     // The round-16 landscape wallpaper gate is now part of the Duo startup
     // path.  The one-shot marker remains accepted for older guests, but a
     // fresh boot must not silently fall back to the portrait wallpaper
@@ -107,25 +108,36 @@ static void vpInstallSpringBoardHooks(void) {
         vpFoldDisplayLog(@"panel adapter: retired builtin promotion marker discarded");
     if (vpConsumeDisplayExperimentFlag("/var/mobile/Library/Caches/vphone-duo-shared-family.once"))
         vpInstallSharedInnerFamily();
+    // With the inner display published, Main is the cover and the inner panel
+    // has scenes of its own: each screen's status bar provider is chosen for
+    // its own panel (vpInstallDualStatusLookup). The single-display profile
+    // lookup and scene status policy below would pin Main to the inner
+    // panel's profile instead.
+    BOOL nativeStatus = vpInnerDisplayRequested();
     BOOL requestedMainStatus = vpConsumeDisplayExperimentFlag("/var/mobile/Library/Caches/vphone-duo-main-status.once");
-    if (vpAutomaticMainStatus || requestedMainStatus) vpInstallMainStatusLookup();
+    if (nativeStatus) vpInstallDualStatusLookup();
+    else if (vpAutomaticMainStatus || requestedMainStatus) vpInstallMainStatusLookup();
     if (vpAutomaticMainStatus) {
-        static int mainStatusStartupToken;
-        notify_register_dispatch("com.apple.springboard.finishedstartup", &mainStatusStartupToken, dispatch_get_main_queue(),
-            ^(int token) { vpPulseMainStatusProfile(); });
-        // The library may load before scene construction or after the startup
-        // notification. Bounded retries establish the existing Main renderer.
-        for (unsigned int retry = 1; retry <= 12; ++retry)
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, retry * NSEC_PER_SEC), dispatch_get_main_queue(),
-                ^{ vpPulseMainStatusProfile(); });
+        if (!nativeStatus) {
+            static int mainStatusStartupToken;
+            notify_register_dispatch("com.apple.springboard.finishedstartup", &mainStatusStartupToken, dispatch_get_main_queue(),
+                ^(int token) { vpPulseMainStatusProfile(); });
+            // The library may load before scene construction or after the startup
+            // notification. Bounded retries establish the existing Main renderer.
+            for (unsigned int retry = 1; retry <= 12; ++retry)
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, retry * NSEC_PER_SEC), dispatch_get_main_queue(),
+                    ^{ vpPulseMainStatusProfile(); });
+        }
         // The same ladder establishes the default quick-action glyph scale
         // on every lock-screen construction timing without any opt-in file.
         for (unsigned int retry = 1; retry <= 12; ++retry)
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, retry * NSEC_PER_SEC), dispatch_get_main_queue(),
                 ^{ vpApplyQuickActionGlyphScale(); });
     }
-    if (vpAutomaticMainStatus || vpConsumeDisplayExperimentFlag("/var/mobile/Library/Caches/vphone-duo-scene-status.once"))
+    BOOL requestedSceneStatus = vpConsumeDisplayExperimentFlag("/var/mobile/Library/Caches/vphone-duo-scene-status.once");
+    if (!nativeStatus && (vpAutomaticMainStatus || requestedSceneStatus))
         vpInstallSceneStatusPolicy();
+    if (nativeStatus) vpFoldDisplayLog(@"status bar: native per-screen providers, single-display status shims not installed");
     if (vpConsumeDisplayExperimentFlag("/var/mobile/Library/Caches/vphone-duo-root-scene-policy.once"))
         vpFoldDisplayLog(@"root scene policy: retired global Main conversion marker discarded");
     if (vpConsumeDisplayExperimentFlag("/var/mobile/Library/Caches/vphone-duo-inner-family.once")) {

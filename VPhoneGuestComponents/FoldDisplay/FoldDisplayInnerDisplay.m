@@ -30,31 +30,25 @@ BOOL vpInnerDisplayRequested(void) {
 - (instancetype)initWithOptions:(NSDictionary *)options;
 @end
 
-// Adds the inner panel's render display once the render server runs. It is
+// Adds the inner panel's render display to a render server, once. It is
 // never removed: FrontBoard keeps identities for the life of the monitor.
-static void vpAddInnerRenderDisplay(unsigned int attempt) {
+// Normally called from the server's display detection (FoldDisplayInnerBoot.m),
+// so the display exists before any client reads the inventory.
+BOOL vpAddInnerRenderDisplayToServer(id server) {
+    if (vpInnerRenderDisplay || !server) return NO;
     @try {
-        id server = ((id (*)(id, SEL))objc_msgSend)(objc_getClass("CAWindowServer"), sel_registerName("serverIfRunning"));
-        if (!server) {
-            if (attempt < 30)
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(),
-                    ^{ vpAddInnerRenderDisplay(attempt + 1); });
-            else
-                vpFoldDisplayLog(@"inner display: render server never ran");
-            return;
-        }
         Class cls = objc_getClass("CAWindowServerVirtualDisplay");
         Method initializer = class_getInstanceMethod(cls, sel_registerName("initWithOptions:"));
         if (!initializer || strcmp(method_getTypeEncoding(initializer), "@24@0:8@16") != 0) {
             vpFoldDisplayLog(@"inner display: virtual display initializer ABI unavailable");
-            return;
+            return NO;
         }
         // The panel's native pixels, landscape: 951x669 points at 3x.
         id display = [(id<VPhoneInnerDisplayInitialization>)[cls alloc] initWithOptions:@{
             @"kCAVirtualDisplayWidth": @2853, @"kCAVirtualDisplayHeight": @2007,
             @"kCAVirtualDisplayUpdateRate": @60, @"kCAVirtualDisplayName": vpInnerDisplayName,
         }];
-        if (!display) { vpFoldDisplayLog(@"inner display: initializer returned nil"); return; }
+        if (!display) { vpFoldDisplayLog(@"inner display: initializer returned nil"); return NO; }
         ((void (*)(id, SEL, id))objc_msgSend)(server, sel_registerName("addDisplay:"), display);
         SEL setEnabled = sel_registerName("setEnabled:");
         Method enable = class_getInstanceMethod(object_getClass(display), setEnabled);
@@ -65,9 +59,25 @@ static void vpAddInnerRenderDisplay(unsigned int attempt) {
         vpFoldDisplayLog([NSString stringWithFormat:@"inner display: render display added %@ uniqueId=%@", display,
             [display respondsToSelector:sel_registerName("uniqueId")] ? [display valueForKey:@"uniqueId"] : @"-"]);
         vpInspectRenderDisplays();
+        return YES;
     } @catch (NSException *exception) {
         vpFoldDisplayLog([NSString stringWithFormat:@"inner display: render display exception %@", exception.reason]);
     }
+    return NO;
+}
+
+// The fallback for a render server that was already running when this
+// library loaded: add the display once the server answers.
+static void vpAddInnerRenderDisplay(unsigned int attempt) {
+    if (vpInnerRenderDisplay) return;
+    id server = ((id (*)(id, SEL))objc_msgSend)(objc_getClass("CAWindowServer"), sel_registerName("serverIfRunning"));
+    if (server)
+        vpAddInnerRenderDisplayToServer(server);
+    else if (attempt < 30)
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(),
+            ^{ vpAddInnerRenderDisplay(attempt + 1); });
+    else
+        vpFoldDisplayLog(@"inner display: render server never ran");
 }
 
 // The surface type backboardd reports for a render display, from the
@@ -116,6 +126,54 @@ static id vpInnerDigitizerState(id self, SEL selector, id service) {
     return state;
 }
 
+// The inner panel is mounted at 270 degrees (device tree display1), so its
+// digitizer reports positions in the panel's portrait frame, and the panel
+// shows the inner display turned to match. This guest's single digitizer
+// reports positions on the portrait cover panel, which backboardd would
+// stretch onto the inner display's landscape space unturned; while the
+// inner display has the digitizer, each finger's normalized position is
+// turned by the mount first.
+typedef struct __IOHIDEvent *VPHIDEventRef;
+static IMP vpOriginalHandleDirectTouch;
+static CFArrayRef (*vpHIDEventChildren)(VPHIDEventRef);
+static uint32_t (*vpHIDEventType)(VPHIDEventRef);
+static double (*vpHIDEventGetFloat)(VPHIDEventRef, uint32_t);
+static void (*vpHIDEventSetFloat)(VPHIDEventRef, uint32_t, double);
+
+static void vpTurnDigitizerPosition(VPHIDEventRef event) {
+    static const uint32_t digitizer = 11, x = 11 << 16, y = (11 << 16) | 1;
+    if (vpHIDEventType(event) == digitizer) {
+        double nx = vpHIDEventGetFloat(event, x), ny = vpHIDEventGetFloat(event, y);
+        vpHIDEventSetFloat(event, x, 1 - ny);
+        vpHIDEventSetFloat(event, y, nx);
+    }
+    CFArrayRef children = vpHIDEventChildren(event);
+    for (CFIndex index = 0; children && index < CFArrayGetCount(children); index++)
+        vpTurnDigitizerPosition((VPHIDEventRef)CFArrayGetValueAtIndex(children, index));
+}
+
+static void vpInnerHandleDirectTouch(id self, SEL selector, void *event, id service) {
+    if (event && vpInnerPanelLit()) vpTurnDigitizerPosition((VPHIDEventRef)event);
+    ((void (*)(id, SEL, void *, id))vpOriginalHandleDirectTouch)(self, selector, event, service);
+}
+
+static void vpInstallInnerDigitizerTurn(Class processor) {
+    Method handle = class_getInstanceMethod(processor, sel_registerName("_handleDirectTouchEvent:service:"));
+    const char *encoding = handle ? method_getTypeEncoding(handle) : "missing";
+    vpHIDEventChildren = dlsym(RTLD_DEFAULT, "IOHIDEventGetChildren");
+    vpHIDEventType = dlsym(RTLD_DEFAULT, "IOHIDEventGetType");
+    vpHIDEventGetFloat = dlsym(RTLD_DEFAULT, "IOHIDEventGetFloatValue");
+    vpHIDEventSetFloat = dlsym(RTLD_DEFAULT, "IOHIDEventSetFloatValue");
+    size_t length = strlen(encoding);
+    if (!vpHIDEventChildren || !vpHIDEventType || !vpHIDEventGetFloat || !vpHIDEventSetFloat ||
+        strncmp(encoding, "v32@0:8", 7) != 0 || length < 3 || strcmp(encoding + length - 3, "@24") != 0) {
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: digitizer turn ABI unavailable (%s)", encoding]);
+        return;
+    }
+    vpOriginalHandleDirectTouch = method_setImplementation(handle, (IMP)vpInnerHandleDirectTouch);
+    vpFoldDisplayLog([NSString stringWithFormat:@"inner display: digitizer turn installed (%s)", encoding]);
+}
+
 static void vpInstallInnerDigitizer(void) {
     Class processor = objc_getClass("BKHIDDirectTouchEventProcessor");
     Method uuid = class_getInstanceMethod(processor, sel_registerName("_queue_displayUUIDForDigitizerService:"));
@@ -131,6 +189,7 @@ static void vpInstallInnerDigitizer(void) {
     vpOriginalDigitizerDisplayUUID = method_setImplementation(uuid, (IMP)vpInnerDigitizerDisplayUUID);
     vpOriginalDigitizerState = method_setImplementation(state, (IMP)vpInnerDigitizerState);
     vpFoldDisplayLog(@"inner display: digitizer routing installed");
+    vpInstallInnerDigitizerTurn(processor);
 }
 
 // MARK: - SpringBoard: one scanout for two panels
@@ -140,11 +199,13 @@ static void vpInstallInnerDigitizer(void) {
 // display on; closed, the reverse. On this guest the primary is the only
 // scanout, and open it has to show the inner display, which SpringBoard
 // composites onto it (vpShowInnerDisplay). So the primary is kept on while
-// either panel wants it; a screen-off turns both off. The compositor
-// follows the inner display's own state.
+// either panel wants it; a screen-off turns both off. Closing does not turn
+// the inner display off, so the inner display is lit only while the cover is
+// not: the cover wins the shared panel. The compositor and backboardd's touch
+// routing follow the inner display's applied state.
 static IMP vpOriginalTransitionDisplayState;
-static __weak id vpPrimaryStateControl;
-static long long vpPrimaryWantedState = 1, vpPrimaryAppliedState = 1, vpInnerWantedState;
+static __weak id vpPrimaryStateControl, vpInnerStateControl;
+static long long vpPrimaryWantedState = 1, vpPrimaryAppliedState = 1, vpInnerWantedState, vpInnerAppliedState = -1;
 
 static unsigned int vpStateControlDisplayId(id control) {
     Ivar ivar = class_getInstanceVariable(object_getClass(control), "_display_id");
@@ -152,13 +213,20 @@ static unsigned int vpStateControlDisplayId(id control) {
     return *(unsigned int *)((uint8_t *)(__bridge void *)control + ivar_getOffset(ivar));
 }
 
-static void vpApplyPrimaryState(id completion) {
-    id primary = vpPrimaryStateControl;
-    long long state = vpPrimaryWantedState || vpInnerWantedState ? 1 : 0;
-    if (!primary || (state == vpPrimaryAppliedState && !completion)) return;
-    vpPrimaryAppliedState = state;
-    ((void (*)(id, SEL, long long, id))vpOriginalTransitionDisplayState)(primary,
+static void vpApplyPanelState(id control, long long state, long long *applied, id completion) {
+    if (!control || (state == *applied && !completion)) return;
+    *applied = state;
+    ((void (*)(id, SEL, long long, id))vpOriginalTransitionDisplayState)(control,
         sel_registerName("transitionToDisplayState:withCompletion:"), state, completion);
+}
+
+static void vpApplyPanelStates(id primaryCompletion, id innerCompletion) {
+    vpApplyPanelState(vpPrimaryStateControl, vpPrimaryWantedState || vpInnerWantedState ? 1 : 0,
+        &vpPrimaryAppliedState, primaryCompletion);
+    long long inner = vpInnerWantedState && !vpPrimaryWantedState ? 1 : 0;
+    BOOL changed = inner != vpInnerAppliedState;
+    vpApplyPanelState(vpInnerStateControl, inner, &vpInnerAppliedState, innerCompletion);
+    if (changed && vpInnerStateControl) dispatch_async(dispatch_get_main_queue(), ^{ vpShowInnerDisplay(inner != 0); });
 }
 
 static void vpSharedScanoutTransition(id self, SEL selector, long long state, id completion) {
@@ -167,17 +235,19 @@ static void vpSharedScanoutTransition(id self, SEL selector, long long state, id
     if (displayId == 1) {
         vpPrimaryStateControl = self;
         vpPrimaryWantedState = state;
-        vpApplyPrimaryState(completion);
+        vpApplyPanelStates(completion, nil);
         return;
     }
-    ((void (*)(id, SEL, long long, id))vpOriginalTransitionDisplayState)(self, selector, state, completion);
     id innerDisplay = nil;
     for (id display in vpReadObject(objc_getClass("CADisplay"), "displays") ?: @[])
         if ([[display valueForKey:@"displayId"] unsignedIntValue] == displayId && vpIsInnerDisplay(display)) innerDisplay = display;
-    if (!innerDisplay) return;
+    if (!innerDisplay) {
+        ((void (*)(id, SEL, long long, id))vpOriginalTransitionDisplayState)(self, selector, state, completion);
+        return;
+    }
+    vpInnerStateControl = self;
     vpInnerWantedState = state;
-    vpApplyPrimaryState(nil);
-    dispatch_async(dispatch_get_main_queue(), ^{ vpShowInnerDisplay(state != 0); });
+    vpApplyPanelStates(nil, completion);
 }
 
 static void vpInstallSharedScanout(void) {
@@ -213,6 +283,7 @@ void vpLogRenderDisplayState(void) {
 void vpInstallInnerRenderDisplay(void) {
     if (!vpInnerDisplayRequested()) return;
     vpInstallInnerDigitizer();
+    vpInstallInnerBootDisplay();
     dispatch_async(dispatch_get_main_queue(), ^{ vpAddInnerRenderDisplay(0); });
 }
 
@@ -226,6 +297,7 @@ void vpInstallInnerRenderDisplay(void) {
 // UIKit-main-like, so only the real Main claims the cloning source.
 static IMP vpOriginalDisplayType, vpOriginalPointScale, vpOriginalExternal, vpOriginalConfigurationInit;
 static _Thread_local BOOL vpClassifyingConfiguration;
+static id vpInnerIdentity;
 
 static BOOL vpIsInnerDisplay(id display) {
     @try {
@@ -247,7 +319,31 @@ static id vpInnerConfigurationInit(id self, SEL selector, id display, id origina
     vpClassifyingConfiguration = YES;
     id result = ((id (*)(id, SEL, id, id, BOOL, BOOL))vpOriginalConfigurationInit)(self, selector, display, original, isMain, assertIfInvalid);
     vpClassifyingConfiguration = NO;
+    if (vpIsInnerDisplay(display) && !vpInnerIdentity) vpInnerIdentity = vpReadObject(result, "identity");
     return result;
+}
+
+// Applications take the scene's display identity from SpringBoard. UIKit
+// gives a screen the device idiom only when that identity is UIKit-main-like
+// and leaves it unspecified (-1) otherwise; UIKit's Swift idiom switches
+// (sheet presentation, scroll edge effects) trap on -1. The identity
+// SpringBoard keeps stays as classified, so only Main claims the cloning
+// source; the copy an application decodes says main-like.
+static IMP vpOriginalIdentityEncode;
+
+static void vpInnerIdentityEncode(id self, SEL selector, xpc_object_t dictionary) {
+    ((void (*)(id, SEL, xpc_object_t))vpOriginalIdentityEncode)(self, selector, dictionary);
+    if (dictionary && vpInnerIdentity && [self isEqual:vpInnerIdentity])
+        xpc_dictionary_set_bool(dictionary, "mainLike", true);
+}
+
+static void vpInstallInnerIdentityEncode(void) {
+    Method encode = class_getInstanceMethod(objc_getClass("FBSDisplayIdentity"), sel_registerName("encodeWithXPCDictionary:"));
+    if (!encode || strcmp(method_getTypeEncoding(encode), "v24@0:8@16") != 0) {
+        vpFoldDisplayLog(@"inner display: identity encoding ABI unavailable");
+        return;
+    }
+    vpOriginalIdentityEncode = method_setImplementation(encode, (IMP)vpInnerIdentityEncode);
 }
 
 static NSUInteger vpInnerPointScale(id self, SEL selector) {
@@ -304,6 +400,7 @@ void vpInstallInnerDisplayAdapter(void) {
     if (!vpInnerDisplayRequested()) return;
     vpInstallSharedScanout();
     vpInstallInnerScreenIdiom();
+    vpInstallInnerIdentityEncode();
     // Type 0 without the FrontBoard scope is a second UIKit-main-like
     // display, so no scope means no adapter.
     Method configurationInit = class_getInstanceMethod(objc_getClass("FBSDisplayConfiguration"),
@@ -349,8 +446,28 @@ static id vpSpringBoardWindowScene(BOOL inner) {
 // SB-main, because open, SpringBoard gives the cover (Main) auxiliary
 // content and takes its scene's windows off screen. Touches on the hosted
 // windows reach their owners through backboardd's render-tree hit test.
-static id vpInnerHostContext, vpInnerHostContainer;
+//
+// The render server redraws a display for commits to its own contexts only;
+// a commit by an inner-display context (an application changing its pixels)
+// leaves the hosting primary display on its last frame. So while shown, the
+// container is touched once per primary frame: a near-1 opacity flip that
+// damages all of it, without an implicit animation.
+static id vpInnerHostContext, vpInnerHostContainer, vpInnerHostRefresh;
 static dispatch_source_t vpInnerHostTimer;
+
+@interface VPhoneInnerHostRefresh : NSObject
+@end
+
+@implementation VPhoneInnerHostRefresh
+- (void)refresh:(id)link {
+    Class transaction = objc_getClass("CATransaction");
+    ((void (*)(id, SEL))objc_msgSend)(transaction, sel_registerName("begin"));
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(transaction, sel_registerName("setDisableActions:"), YES);
+    float opacity = ((float (*)(id, SEL))objc_msgSend)(vpInnerHostContainer, sel_registerName("opacity"));
+    ((void (*)(id, SEL, float))objc_msgSend)(vpInnerHostContainer, sel_registerName("setOpacity:"), opacity < 1 ? 1 : 0.999f);
+    ((void (*)(id, SEL))objc_msgSend)(transaction, sel_registerName("commit"));
+}
+@end
 static NSMutableDictionary<NSNumber *, id> *vpInnerHostLayers;
 static CGSize vpInnerHostPanel;
 
@@ -432,6 +549,8 @@ void vpShowInnerDisplay(BOOL shown) {
             if (!vpInnerHostContext) return;
             dispatch_source_cancel(vpInnerHostTimer);
             vpInnerHostTimer = nil;
+            ((void (*)(id, SEL))objc_msgSend)(vpInnerHostRefresh, sel_registerName("invalidate"));
+            vpInnerHostRefresh = nil;
             ((void (*)(id, SEL))objc_msgSend)(vpInnerHostContext, sel_registerName("invalidate"));
             vpInnerHostContext = vpInnerHostContainer = nil;
             vpInnerHostLayers = nil;
@@ -470,6 +589,10 @@ void vpShowInnerDisplay(BOOL shown) {
         dispatch_source_set_timer(vpInnerHostTimer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), NSEC_PER_SEC / 4, NSEC_PER_SEC / 20);
         dispatch_source_set_event_handler(vpInnerHostTimer, ^{ vpSyncInnerHosts(); });
         dispatch_resume(vpInnerHostTimer);
+        vpInnerHostRefresh = ((id (*)(id, SEL, id, SEL))objc_msgSend)(objc_getClass("CADisplayLink"),
+            sel_registerName("displayLinkWithTarget:selector:"), [VPhoneInnerHostRefresh new], @selector(refresh:));
+        ((void (*)(id, SEL, id, id))objc_msgSend)(vpInnerHostRefresh, sel_registerName("addToRunLoop:forMode:"),
+            NSRunLoop.mainRunLoop, NSRunLoopCommonModes);
         vpFoldDisplayLog([NSString stringWithFormat:@"inner display: shown=1 context=%@ hosts=%lu",
             [context valueForKey:@"contextId"], (unsigned long)vpInnerHostLayers.count]);
     } @catch (NSException *exception) {
@@ -642,6 +765,36 @@ void vpInspectInnerDisplay(void) {
         if (deviceClass && supports && lockRole && *lockRole)
             vpFoldDisplayLog([NSString stringWithFormat:@"inner display: PFCurrentDeviceClass=%ld embedded-as-class-1=%d",
                 (long)deviceClass(), supports(*lockRole, @"DISPLAY_TYPE_EMBEDDED", 1)]);
+        // Each scene's status bar windows (frame, provider, the status bar's
+        // own frame) and its screen's inputs to the native provider lookup.
+        for (id scene in [vpReadObject(app, "connectedScenes") allObjects] ?: @[]) {
+            id screen = vpReadObject(scene, "screen");
+            NSMutableString *line = [NSMutableString stringWithFormat:@"inner display: screen of %@",
+                vpReadObject(vpReadObject(scene, "_FBSScene"), "identifier")];
+            for (NSString *key in @[@"_nativeDisplayBounds", @"_exclusionArea", @"_displayCornerRadius", @"_referenceBounds"]) {
+                id value = nil;
+                @try { value = [screen valueForKey:key]; } @catch (__unused NSException *exception) { value = @"-"; }
+                [line appendFormat:@" %@=%@", key, value];
+            }
+            for (id window in vpReadObject(scene, "windows") ?: @[]) {
+                if (![NSStringFromClass([window class]) containsString:@"StatusBar"]) continue;
+                id statusBar = nil;
+                NSMutableArray *pending = [NSMutableArray arrayWithObject:window];
+                while (pending.count && !statusBar) {
+                    id view = pending.lastObject;
+                    [pending removeLastObject];
+                    if ([view isKindOfClass:objc_getClass("STUIStatusBar")]) statusBar = view;
+                    else [pending addObjectsFromArray:[view valueForKey:@"subviews"] ?: @[]];
+                }
+                CGRect bounds = statusBar ? ((CGRect (*)(id, SEL))objc_msgSend)(statusBar, sel_registerName("bounds")) : CGRectZero;
+                id hit = statusBar ? ((id (*)(id, SEL, CGPoint, id))objc_msgSend)(statusBar, sel_registerName("hitTest:withEvent:"),
+                    CGPointMake(CGRectGetMidX(bounds), CGRectGetMidY(bounds)), nil) : nil;
+                [line appendFormat:@" | %@ frame=%@ STUIStatusBar=%@ provider=%@ middleHit=%@", NSStringFromClass([window class]),
+                    [window valueForKey:@"frame"], statusBar ? [statusBar valueForKey:@"frame"] : @"-",
+                    statusBar ? [statusBar valueForKey:@"_visualProviderClassName"] : @"-", NSStringFromClass([hit class])];
+            }
+            vpFoldDisplayLog(line);
+        }
         for (id scene in [vpReadObject(app, "connectedScenes") allObjects] ?: @[]) {
             id configuration = nil;
             @try { configuration = vpReadObject(vpReadObject(scene, "_FBSScene"), "settings"); configuration = vpReadObject(configuration, "displayConfiguration"); }

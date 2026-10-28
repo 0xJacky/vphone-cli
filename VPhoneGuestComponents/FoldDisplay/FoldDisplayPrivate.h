@@ -18,6 +18,7 @@
 #include <string.h>
 #include <stdatomic.h>
 #include <notify.h>
+#include <xpc/xpc.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <unistd.h>
@@ -128,6 +129,7 @@ void vpRefreshNativeClockSource(void);
 BOOL vpIsSingleMainStatusScene(id scene, BOOL constructing);
 void vpInstallSceneStatusPolicy(void);
 void vpInstallMainStatusLookup(void);
+void vpInstallDualStatusLookup(void);
 void vpRefreshMainStatusRenderer(void);
 void vpRestoreMainStatusProfile(void);
 void vpPulseMainStatusProfile(void);
@@ -184,11 +186,14 @@ void vpVirtualDisplayExperiment(BOOL create);
 BOOL vpInnerDisplayRequested(void);
 NSNumber *vpInnerDisplaySurfaceType(id deviceName);
 void vpInstallInnerRenderDisplay(void);
+BOOL vpAddInnerRenderDisplayToServer(id server);
+void vpInstallInnerBootDisplay(void);
 void vpLogRenderDisplayState(void);
 void vpShowInnerDisplay(BOOL shown);
 void vpToggleInnerPattern(void);
 void vpResolveInnerDisplay(void);
 void vpInstallInnerDisplayAdapter(void);
+void vpInstallInnerTouch(void);
 void vpInspectInnerDisplay(void);
 
 // MARK: - diagnostics
