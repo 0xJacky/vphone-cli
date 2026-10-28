@@ -20,6 +20,7 @@ struct VPhoneFirmwareCommand: ParsableCommand {
             VPhoneFirmwareKernelcacheCommand.self,
             VPhoneFirmwarePatchesCommand.self,
             VPhoneFirmwareSetPatchesCommand.self,
+            VPhoneFirmwareExportPresetCommand.self,
             VPhoneFirmwareManifestCommand.self,
             VPhoneFirmwareListCommand.self,
             VPhoneFirmwareResolveCommand.self,
@@ -666,6 +667,89 @@ struct VPhoneFirmwareSetPatchesCommand: ParsableCommand {
         ) {
             print(line)
         }
+    }
+}
+
+// MARK: - export-preset
+
+/// Writes a preset that is a VM's choice, or a choice not yet made into a VM,
+/// with its overrides folded into the selection: applied with none of its own,
+/// it resolves to the same patches.
+struct VPhoneFirmwareExportPresetCommand: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "export-preset",
+        abstract: "Write a preset plist from a VM's patch choice, or from a preset and overrides",
+        discussion: """
+        With a VM named and no other option, its recorded preset and overrides
+        are exported. Otherwise --preset (default the VM's, or standard),
+        --block and --allow name the whole choice, as for fw set-patches; with
+        a VM named, a preset of its own resolves.
+
+        The new preset keeps the original's patch sets, parameters and summary.
+        Its identifier is the output file's name without .plist, and its title
+        the original's with ", modified". Pass the file to --preset to use it.
+        """,
+    )
+
+    @OptionGroup var lib: VPhoneLibraryOption
+    @Argument(help: "VM name, to export its choice") var name: String?
+    @Option(name: .customLong("preset"), help: "Preset name or preset plist path the choice composes onto")
+    var preset: String?
+    @Option(name: .customLong("block"), help: ArgumentHelp("A patch the preset turns on, turned off", valueName: "patch"))
+    var block: [String] = []
+    @Option(name: .customLong("allow"), help: ArgumentHelp("A patch the preset leaves off, turned on", valueName: "patch"))
+    var allow: [String] = []
+    @Option(name: [.customShort("o"), .customLong("output")], help: "The preset plist to write")
+    var output: String
+
+    func run() throws {
+        var directory: URL?
+        var record = VPhoneVirtualMachinePatchSelection()
+        if let name {
+            let bundle = try lib.library.bundle(named: VPhoneVirtualMachineSelection.resolveExisting(name, in: lib.library))
+            directory = bundle.url
+            record = VPhonePatchPresetStore.selection(forVM: bundle.url)
+        }
+        let original: VPhonePatchPreset
+        let blocked: Set<String>
+        let allowed: Set<String>
+        if name != nil, preset == nil, block.isEmpty, allow.isEmpty {
+            original = try VPhonePatchPresetStore.resolve(record.presetIdentifier, forVM: directory).preset
+            blocked = Set(record.blockedPatches)
+            allowed = Set(record.allowedPatches)
+        } else {
+            // As fw set-patches: the options name the whole choice, and a VM
+            // named with them is where a preset of its own resolves.
+            original = try VPhonePatchPresetStore.resolve(preset ?? record.presetIdentifier, forVM: directory).preset
+            blocked = Set(block)
+            allowed = Set(allow)
+            // A typo would otherwise export a selection naming nothing.
+            let unknown = blocked.union(allowed).subtracting(FirmwarePatchSetCatalog.allDeclarations.map(\.identifier)).sorted()
+            guard unknown.isEmpty else {
+                throw ValidationError("No patch declares \(unknown.joined(separator: ", ")). Run `fw patches` for the identifiers.")
+            }
+            let contradictory = blocked.intersection(allowed).sorted()
+            guard contradictory.isEmpty else {
+                throw ValidationError("\(contradictory.joined(separator: ", ")) cannot be both blocked and allowed.")
+            }
+        }
+
+        let url = URL(fileURLWithPath: (output as NSString).expandingTildeInPath)
+        let identifier = url.deletingPathExtension().lastPathComponent
+        guard url.pathExtension == "plist", !identifier.isEmpty, !VPhonePatchPresetStore.isPresetFile(identifier) else {
+            throw ValidationError("The output is a .plist file whose name, without .plist, is the preset's identifier.")
+        }
+        guard !VPhonePatchPresetStore.shippedPresets().contains(where: { $0.identifier == identifier }) else {
+            throw ValidationError("'\(identifier)' is a shipped preset's identifier; name the file something else.")
+        }
+
+        var exported = original
+        exported.identifier = identifier
+        exported.title = "\(original.title), modified"
+        // As VPhonePatchPlan.resolve composes a VM's overrides.
+        exported.selection = original.selection.allowing(allowed).blocking(blocked)
+        try exported.encodedPlist().write(to: url, options: .atomic)
+        print("[fw export-preset] wrote \(identifier) to \(url.path) (from \(original.identifier), \(blocked.count) off, \(allowed.count) on)")
     }
 }
 
