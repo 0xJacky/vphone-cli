@@ -1,3 +1,188 @@
+// Status bar: native status registration, the clock source, the scene status
+// policy, and the visual provider profile lookup.
+
+#import "FoldDisplayPrivate.h"
+
+BOOL vpLogicalRoleExperiment;
+static IMP vpOriginalSceneIsMain, vpOriginalStatusManagerInit, vpOriginalStatusManagerEmbedded;
+static _Thread_local void *vpStatusManagerInitializingScene;
+static _Thread_local BOOL vpStatusManagerMainQueryConsumed;
+IMP vpOriginalTimeItemUpdate;
+IMP vpOriginalMachClockTick, vpOriginalMachClockObserve;
+static atomic_uint vpClockReferenceFallbackCount;
+static atomic_uint vpTimeItemTraceCount;
+static _Atomic(IMP) vpOriginalStatusProfileFactories[4];
+atomic_bool vpStatusProfileLookupEnabled;
+static unsigned int vpStatusProfileGeneration;
+static unsigned int vpStatusProfileCallCount;
+_Thread_local void *vpStatusProfileConstructionScene;
+static _Thread_local unsigned int vpStatusProfileFactoryDepth;
+static __weak id vpStatusProfileScene;
+static void *vpOriginalMainStatusClassLookup;
+static atomic_bool vpMainStatusProfileEnabled;
+static unsigned int vpMainStatusProfileGeneration, vpMainStatusProfileLogCount;
+static __weak id vpMainStatusProfileScene;
+static Class vpMainStatusOriginalProviderClass;
+
+// MARK: - status registration and clock
+
+void vpRefreshNativeStatusRegistration(void) {
+    if (!vpLogicalRoleExperiment) return;
+    id scene = vpMainInnerWindowScene();
+    id bar = vpReadObject(vpReadObject(scene, "statusBarManager"), "statusBar");
+    if (!bar || vpReadBoolValue(bar, "serverUpdatesDisabled").boolValue || vpReadBoolValue(bar, "isHidden").boolValue) return;
+    SEL toggle = sel_registerName("setServerUpdatesDisabled:");
+    SEL update = sel_registerName("forceUpdateData:");
+    Method tm = class_getInstanceMethod(object_getClass(bar), toggle);
+    Method um = class_getInstanceMethod(object_getClass(bar), update);
+    if (!tm || !um || strcmp(method_getTypeEncoding(tm), "v20@0:8B16") != 0 ||
+        strcmp(method_getTypeEncoding(um), "v20@0:8B16") != 0) return;
+    @try {
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(bar, toggle, YES);
+    } @finally {
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(bar, toggle, NO);
+    }
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(bar, update, YES);
+    vpFoldDisplayLog(@"native status registration: visible scene client re-registered and requested native data");
+}
+
+// Native minute scheduling already supports a nil reference view (zero
+// frame-phase adjustment). A detached but alive view instead follows the
+// nonnil path and divides by its absent screen's0 FPS. Use the native nil
+// branch only while the reference cannot supply a valid screen cadence.
+static id vpWithUsableClockReference(id provider, id (^operation)(void)) {
+    Ivar ivar = class_getInstanceVariable(object_getClass(provider), "_referenceView");
+    if (!vpLogicalRoleExperiment || ![NSThread isMainThread] || !ivar || ivar_getTypeEncoding(ivar)[0] != '@') return operation();
+    id reference = vpReadObjectIvar(provider, "_referenceView");
+    id screen = vpReadObject(vpReadObject(vpReadObject(reference, "window"), "windowScene"), "screen");
+    NSMethodSignature *fpsSignature = [screen methodSignatureForSelector:sel_registerName("maximumFramesPerSecond")];
+    NSInteger fps = 0;
+    if (fpsSignature && fpsSignature.numberOfArguments == 2 &&
+        (fpsSignature.methodReturnType[0] == 'q' || fpsSignature.methodReturnType[0] == 'Q'))
+        fps = ((NSInteger (*)(id, SEL))objc_msgSend)(screen, sel_registerName("maximumFramesPerSecond"));
+    if (!reference || fps > 0) return operation();
+    // initWithReferenceView: uses objc_storeWeak for this slot. The runtime
+    // setter preserves known weak memory management (objc/runtime.h).
+    object_setIvar(provider, ivar, nil);
+    @try {
+        if (atomic_fetch_add_explicit(&vpClockReferenceFallbackCount, 1, memory_order_relaxed) < 4)
+            vpFoldDisplayLog([NSString stringWithFormat:@"native clock reference fallback: class=%s screen=%p fps=%ld", object_getClassName(reference), screen, (long)fps]);
+        return operation();
+    } @finally {
+        if (!object_getIvar(provider, ivar)) object_setIvar(provider, ivar, reference);
+    }
+}
+void vpMachClockTick(id self, SEL selector) {
+    vpWithUsableClockReference(self, ^id {
+        ((void (*)(id, SEL))vpOriginalMachClockTick)(self, selector);
+        // A once-a-minute bounded walk re-scales glyph instances that a
+        // lock-screen rebuild created at the native factor.
+        if (vpAutomaticMainStatus) vpApplyQuickActionGlyphScale();
+        return nil;
+    });
+}
+id vpMachClockObserve(id self, SEL selector, id handler) {
+    return vpWithUsableClockReference(self, ^id {
+        return ((id (*)(id, SEL, id))vpOriginalMachClockObserve)(self, selector, handler);
+    });
+}
+
+void vpObserveNativeTimeUpdate(id self, SEL selector, id date) {
+    unsigned int count = atomic_fetch_add_explicit(&vpTimeItemTraceCount, 1, memory_order_relaxed);
+    NSString *before = count < 20 ? [vpReadObjectIvar(self, "_timeItemTimeString") copy] : nil;
+    ((void (*)(id, SEL, id))vpOriginalTimeItemUpdate)(self, selector, date);
+    if (count < 20) {
+        id current = vpReadObject(vpReadObjectIvar(self, "_dateTimeProvider"), "date");
+        id provider = vpReadObjectIvar(self, "_dateTimeProvider");
+        id underlying = vpReadObjectIvar(provider, "_underlyingProvider");
+        NSString *interval = [date isKindOfClass:NSDate.class] ? [NSString stringWithFormat:@"%.17g", [(NSDate *)date timeIntervalSinceReferenceDate]] : @"not-date";
+        vpFoldDisplayLog([NSString stringWithFormat:@"native clock update: input=%@ class=%s interval=%@ current=%@ underlying=%s underlyingDate=%@ before=%@ after=%@ caller=%p",
+            date, date ? object_getClassName(date) : "nil", interval, current,
+            underlying ? object_getClassName(underlying) : "nil", vpReadObject(underlying, "date"), before,
+            vpReadObjectIvar(self, "_timeItemTimeString"), __builtin_return_address(0)]);
+    }
+}
+
+void vpRefreshNativeClockSource(void) {
+    if (!vpLogicalRoleExperiment) return;
+    id app = vpReadObject(objc_getClass("UIApplication"), "sharedApplication");
+    id aggregator = vpReadObject(app, "statusBarStateAggregator");
+    SEL refresh = sel_registerName("_restartTimeItemTimer");
+    Method method = class_getInstanceMethod(object_getClass(aggregator), refresh);
+    if (!method || strcmp(method_getTypeEncoding(method), "v16@0:8") != 0) return;
+    ((void (*)(id, SEL))objc_msgSend)(aggregator, refresh);
+    vpFoldDisplayLog(@"native clock source: native time-item subscription restarted");
+}
+
+// MARK: - scene status policy
+
+BOOL vpIsSingleMainStatusScene(id scene, BOOL constructing) {
+    if (![vpReadObject(vpReadObject(scene, "_FBSScene"), "identifier") isEqual:@"SB-main"]) return NO;
+    NSInteger surface = [[scene valueForKey:@"surfaceType"] integerValue];
+    // During UIKit status-manager construction SB's surface property may
+    // still be default. This path is armed only for the explicit inner boot.
+    if (surface != 2 && !(constructing && surface == 0)) return NO;
+    id identity = vpReadObject(scene, "_fbsDisplayIdentity") ?: vpReadObject(scene, "displayIdentity");
+    id configuration = vpReadObject(objc_getClass("FBDisplayManager"), "mainConfiguration");
+    return [[identity valueForKey:@"isMainRootDisplay"] boolValue] &&
+        [identity isEqual:vpReadObject(configuration, "identity")] &&
+        [vpSnapshotRect(configuration, "bounds") isEqual:@[@0, @0, @669, @951]];
+}
+
+static BOOL vpSceneMainDuringStatusConstruction(id self, SEL selector) {
+if ((__bridge void *)self == vpStatusManagerInitializingScene && !vpStatusManagerMainQueryConsumed) {
+        vpStatusManagerMainQueryConsumed = YES;
+        vpFoldDisplayLog([NSString stringWithFormat:@"scene status construction: single Main query redirected caller=%p", __builtin_return_address(0)]);
+        return NO;
+    }
+    return ((BOOL (*)(id, SEL))vpOriginalSceneIsMain)(self, selector);
+}
+
+static id vpConstructSceneStatusManager(id self, SEL selector, id scene) {
+    void *previous = vpStatusManagerInitializingScene;
+    BOOL previousConsumed = vpStatusManagerMainQueryConsumed;
+    @try {
+        vpFoldDisplayLog([NSString stringWithFormat:@"scene status construction: scene=%@ identity=%@ surface=%@",
+            vpReadObject(vpReadObject(scene, "_FBSScene"), "identifier"),
+            vpReadObject(scene, "_fbsDisplayIdentity"), [scene valueForKey:@"surfaceType"]]);
+        if (vpIsSingleMainStatusScene(scene, YES)) {
+            vpStatusManagerInitializingScene = (__bridge void *)scene;
+            vpStatusManagerMainQueryConsumed = NO;
+            vpFoldDisplayLog(@"scene status policy: native per-scene construction for Main inner");
+        }
+        return ((id (*)(id, SEL, id))vpOriginalStatusManagerInit)(self, selector, scene);
+    } @finally { vpStatusManagerInitializingScene = previous; vpStatusManagerMainQueryConsumed = previousConsumed; }
+}
+
+static BOOL vpSceneStatusUsesEmbeddedLegacySlot(id self, SEL selector) {
+    if (vpIsSingleMainStatusScene(vpReadObjectIvar(self, "_windowScene"), NO)) return NO;
+    return ((BOOL (*)(id, SEL))vpOriginalStatusManagerEmbedded)(self, selector);
+}
+
+void vpInstallSceneStatusPolicy(void) {
+    Class sceneClass = objc_getClass("SBWindowScene");
+    Class managerClass = objc_getClass("SBWindowSceneStatusBarManager");
+    SEL mainSelector = sel_registerName("isMainDisplayWindowScene");
+    Method main = class_getInstanceMethod(sceneClass, mainSelector);
+    Method init = class_getInstanceMethod(managerClass, sel_registerName("initWithScene:"));
+    Method embedded = class_getInstanceMethod(managerClass, sel_registerName("_isEmbeddedDisplay"));
+    if (!main || strcmp(method_getTypeEncoding(main), "B16@0:8") != 0 ||
+        !init || strcmp(method_getTypeEncoding(init), "@24@0:8@16") != 0 ||
+        !embedded || strcmp(method_getTypeEncoding(embedded), "B16@0:8") != 0) {
+        vpFoldDisplayLog(@"scene status policy: native ABI unavailable"); return;
+    }
+    vpOriginalSceneIsMain = method_getImplementation(main);
+    // Add an override to SBWindowScene itself if the method is inherited;
+    // never replace UIWindowScene's implementation for all scene classes.
+    if (!class_addMethod(sceneClass, mainSelector, (IMP)vpSceneMainDuringStatusConstruction, method_getTypeEncoding(main)))
+        method_setImplementation(main, (IMP)vpSceneMainDuringStatusConstruction);
+    vpOriginalStatusManagerInit = method_setImplementation(init, (IMP)vpConstructSceneStatusManager);
+    vpOriginalStatusManagerEmbedded = method_setImplementation(embedded, (IMP)vpSceneStatusUsesEmbeddedLegacySlot);
+    vpFoldDisplayLog(@"scene status policy: one-instance native per-scene adapter installed");
+}
+
+// MARK: - Main status profile
+
 // Used only as an argument to the native, read-only provider factory. Never
 // register this proxy with UIKit or publish its reference bounds to a scene.
 @interface VPhoneStatusScreenPreview : NSProxy
@@ -53,7 +238,7 @@ static Class vpMainStatusClassLookup(id screen, id info) {
     return selected;
 }
 
-static void vpInstallMainStatusLookup(void) {
+void vpInstallMainStatusLookup(void) {
     void *target = dlsym(RTLD_DEFAULT, "STUIStatusBarGetVisualProviderClassForScreen");
     MISFixDetourResult (*install)(const char *, void *, void *, void **) = dlsym(RTLD_DEFAULT, "MISFixDetour");
     if (!target || !install) { vpFoldDisplayLog(@"Main status profile: native lookup/detour API unavailable"); return; }
@@ -62,7 +247,7 @@ static void vpInstallMainStatusLookup(void) {
     vpFoldDisplayLog([NSString stringWithFormat:@"Main status profile: constructor detour result=%d", result]);
 }
 
-static void vpRefreshMainStatusRenderer(void) {
+void vpRefreshMainStatusRenderer(void) {
     id scene = vpMainStatusProfileScene;
     if (!scene) return;
     id wrapper = vpReadObject(vpReadObject(scene, "statusBarManager"), "statusBar");
@@ -87,7 +272,7 @@ static void vpRefreshMainStatusRenderer(void) {
         ((void (*)(id, SEL, BOOL))objc_msgSend)(wrapper, sel_registerName("forceUpdate:"), YES);
 }
 
-static void vpRestoreMainStatusProfile(void) {
+void vpRestoreMainStatusProfile(void) {
     if (vpAutomaticMainStatus) { vpRefreshMainStatusRenderer(); return; }
     if (!vpMainStatusProfileEnabled && !vpMainStatusProfileScene) return;
     vpMainStatusProfileEnabled = NO;
@@ -104,7 +289,7 @@ static void vpRestoreMainStatusProfile(void) {
     vpFoldDisplayLog(@"Main status profile: native lookup behavior restored");
 }
 
-static void vpPulseMainStatusProfile(void) {
+void vpPulseMainStatusProfile(void) {
     if (!vpOriginalMainStatusClassLookup || vpUIConfigPublished) return;
     if (vpMainStatusProfileScene) {
         id wrapper = vpReadObject(vpReadObject(vpMainStatusProfileScene, "statusBarManager"), "statusBar");
@@ -134,6 +319,8 @@ static void vpPulseMainStatusProfile(void) {
         if (generation == vpMainStatusProfileGeneration) vpRestoreMainStatusProfile();
     });
 }
+
+// MARK: - visual provider profile lookup
 
 static Class vpStatusProfileFactoryAtIndex(NSUInteger index, id self, SEL selector, id screen, id info) {
     Class (*original)(id, SEL, id, id) = (void *)vpOriginalStatusProfileFactories[index];
@@ -186,7 +373,7 @@ static const char *vpStatusProfileFactoryClasses[] = {"STUIStatusBarVisualProvid
 static IMP vpStatusProfileFactoryReplacements[] = {(IMP)vpStatusProfileFactoryIOS, (IMP)vpStatusProfileFactoryPhone,
     (IMP)vpStatusProfileFactorySplit, (IMP)vpStatusProfileFactoryAxis};
 
-static void vpResetManagedStatusProvider(void) {
+void vpResetManagedStatusProvider(void) {
     id scene = vpStatusProfileScene;
     if (!scene || scene != vpUIConfigWindowScene) return;
     id renderer = vpReadObject(vpReadObject(vpReadObject(scene, "statusBarManager"), "statusBar"), "statusBar");
@@ -202,7 +389,7 @@ static void vpResetManagedStatusProvider(void) {
     } @finally { vpStatusProfileConstructionScene = previousScope; }
 }
 
-static void vpRestoreStatusProfileLookup(void) {
+void vpRestoreStatusProfileLookup(void) {
     if (!vpStatusProfileLookupEnabled) return;
     vpStatusProfileLookupEnabled = NO;
     vpStatusProfileGeneration++;
@@ -217,7 +404,7 @@ static void vpRestoreStatusProfileLookup(void) {
     vpFoldDisplayLog(@"status profile lookup: original factory restored");
 }
 
-static void vpPulseStatusProfileLookup(void) {
+void vpPulseStatusProfileLookup(void) {
     @try {
         if (vpStatusProfileLookupEnabled || !vpUIConfigPublished || vpMainInnerWindowScene() != vpUIConfigWindowScene) return;
         Method methods[4];
@@ -245,7 +432,3 @@ static void vpPulseStatusProfileLookup(void) {
         vpFoldDisplayLog([NSString stringWithFormat:@"status profile lookup exception: %@", exception.reason]);
     }
 }
-
-static void vpSetCoverViewport(BOOL enabled) {
-    unsigned int generation = atomic_fetch_add_explicit(&vpViewportRequestGeneration, 1, memory_order_relaxed) + 1;
-    atomic_store_explicit(&vpCoverViewportEnabled, enabled, memory_order_release);

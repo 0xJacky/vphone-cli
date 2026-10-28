@@ -4128,3 +4128,30 @@ preference domains between a working and a refusing machine — needs a
 working reference), or implement the rotation path through a channel
 that does not consult the windowing-mode gate (the layout-class override
 swizzle, or a SpringBoard-private rotation API).
+
+## 2026-10-28 evening: FoldDisplay split into modules
+
+`libvphonefolddisplay.m` (4,344 lines plus `StatusProfile.inc`, which ended
+inside an unclosed function body, and `WallpaperTraitsExperiment.inc`) is now
+one file per section:
+
+| File | Owns |
+|---|---|
+| `libvphonefolddisplay.m` | constructor: backboardd probes, SpringBoard hooks, notification registry, pipeline observation |
+| `FoldDisplayPrivate.h` | cross-file state and functions, hidden visibility |
+| `FoldDisplaySupport.m` | log, `.once` flags, KVC/ivar readers |
+| `FoldDisplayPipeline.m` | Main configuration transformer, monitors, pipeline observation install |
+| `FoldDisplayViewport.m` | cover/inner viewport, adoption, persistent viewport |
+| `FoldDisplayOrientationMap.m` | the map vphoned polls |
+| `FoldDisplayOrientation.m` | root scene orientation, arbitration/actuation, geometry requests, backboardd events |
+| `FoldDisplayStatusBar.m` | status registration, clock, scene status policy, profile lookup |
+| `FoldDisplayUIConfiguration.m` | UIKit configuration and screen traits |
+| `FoldDisplayWallpaper.m` | wallpaper pulse, scene hosts, bridge, traits, landscape gate |
+| `FoldDisplayQuickActions.m` | quick action inspection and glyph scale |
+| `FoldDisplayScreenFamily.m`, `FoldDisplaySurfaceProbe.m`, `FoldDisplayVirtualDisplay.m`, `FoldDisplayDiagnostics.m` | family lookups, backboardd surface probe, virtual display, inspection dumps |
+
+Symbols used by one file stay `static`; only cross-file ones lost it. The
+export table is unchanged. On duotest-m5 the split and the pre-split build
+gave the same install log and the same rotation and fold results: 90°
+settles, then 0° and 270° are refused ("did not settle"), and closed/open
+land 466×678 and 669×951. That refusal on this machine predates the split.
