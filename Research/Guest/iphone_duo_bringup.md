@@ -3956,3 +3956,17 @@ remaining edge: an explicit 270 rotation leaves the wallpaper view
 portrait-sized at the landscape interface (content upright-ish but
 letterboxed) — the 270-side native layout races the pulse's frame pass;
 chase separately if 270 matters on the hardware.
+
+Follow-up (QuickAction glyph sizes): the uniform 0.68 transform left the
+flashlight towering over the camera — the glyph frames are symbol metrics
+times one shared multiplier, so tall symbols (flashlight.off.fill,
+20x37pt) render twice the camera's height (camera.fill, 24x18pt) under
+any uniform factor. The walk now normalizes each glyph's LONG side to
+16pt (the accepted camera size: 23.57 x 0.68), computed per instance
+from its live frame and clamped to 0.2...1.0: the flashlight lands at
+~0.44, the camera keeps ~0.68, and any future glyph — including the
+lock-screen focus button (same CSQuickActionImageGlyphView class,
+created only while a Focus is active) — normalizes without a per-action
+table. Verified on the cover lock screen (both glyphs now matching
+extent, flashlight slim); the Control Center focus module icon measures
+consistent with its neighbours and is a different (CCUI) family.

@@ -1707,6 +1707,20 @@ static void vpPulseNativeWallpaperOrientation(void) {
         strcmp(method_getTypeEncoding(um), "v36@0:8q16d24B32") != 0 ||
         !bm || strcmp(method_getTypeEncoding(bm), "v24@0:8q16") != 0) return;
     NSInteger original = ((NSInteger (*)(id, SEL))objc_msgSend)(wallpaper, getter);
+    static BOOL vpLoggedWallpaperOrientationSelectors = NO;
+    if (!vpLoggedWallpaperOrientationSelectors) {
+        vpLoggedWallpaperOrientationSelectors = YES;
+        unsigned int methodCount = 0;
+        Method *methods = class_copyMethodList(object_getClass(wallpaper), &methodCount);
+        NSMutableArray *names = [NSMutableArray array];
+        for (unsigned int i = 0; i < methodCount; i++) {
+            NSString *name = NSStringFromSelector(method_getName(methods[i]));
+            if ([name rangeOfString:@"rientation"].location != NSNotFound ||
+                [name rangeOfString:@"otate"].location != NSNotFound) [names addObject:name];
+        }
+        free(methods);
+        vpFoldDisplayLog([NSString stringWithFormat:@"wallpaper orientation selectors: %@", names]);
+    }
     NSInteger target = [[vpReadObject(scene, "traitsPipelineManager") valueForKey:@"systemArbitratedInterfaceOrientation"] integerValue];
     // The wallpaper controller takes the device-side orientation, whose
     // landscape names mirror the UI ones (UI landscape-left 4 is device
@@ -2130,7 +2144,14 @@ static void vpInspectQuickActions(void) {
 // lock-screen rebuilds create fresh glyph instances.  The glyph class's
 // method list is never touched (round-12/13); a plain transform walk is
 // the only safe lever.
-static double const vpQuickActionGlyphScale = 0.68;
+// The glyph frames are the symbol metrics times one shared multiplier, so
+// a tall symbol (flashlight.off.fill, 20x37pt) towers over a wide one
+// (camera.fill, 24x18pt) under any uniform factor.  The accepted camera
+// size is a ~16pt long side (23.57 x 0.68), so each glyph is normalized
+// by its own long side: the flashlight lands at ~0.44, the camera keeps
+// ~0.68, and any future glyph (focus, camera-on) comes out consistent
+// without a per-action table.
+static double const vpQuickActionGlyphLongSide = 16.0;
 
 static void vpApplyQuickActionGlyphScale(void) {
     @try {
@@ -2144,12 +2165,19 @@ static void vpApplyQuickActionGlyphScale(void) {
                 [pending removeLastObject];
                 if ([view isKindOfClass:objc_getClass("CSQuickActionImageGlyphView")]) {
                     SEL transformSelector = sel_registerName("transform");
-                    if (![view respondsToSelector:transformSelector]) continue;
+                    SEL frameSelector = sel_registerName("frame");
+                    if (![view respondsToSelector:transformSelector] || ![view respondsToSelector:frameSelector]) continue;
                     CGAffineTransform current = ((CGAffineTransform (*)(id, SEL))objc_msgSend)(view, transformSelector);
+                    CGRect frame = ((CGRect (*)(id, SEL))objc_msgSend)(view, frameSelector);
                     touched++;
-                    if (fabs(current.a - vpQuickActionGlyphScale) < 0.001 &&
-                        fabs(current.d - vpQuickActionGlyphScale) < 0.001) continue;
-                    CGAffineTransform scaled = CGAffineTransformMakeScale(vpQuickActionGlyphScale, vpQuickActionGlyphScale);
+                    double longSide = fmax(frame.size.width, frame.size.height);
+                    if (longSide < 1) continue;
+                    double scale = vpQuickActionGlyphLongSide / longSide;
+                    if (scale > 1) scale = 1;
+                    if (scale < 0.2) scale = 0.2;
+                    if (fabs(current.a - scale) < 0.001 &&
+                        fabs(current.d - scale) < 0.001) continue;
+                    CGAffineTransform scaled = CGAffineTransformMakeScale(scale, scale);
                     NSValue *value = [NSValue value:&scaled withObjCType:@encode(CGAffineTransform)];
                     [view setValue:value forKey:@"transform"];
                     rescaled++;
@@ -2158,8 +2186,8 @@ static void vpApplyQuickActionGlyphScale(void) {
             }
         }
         if (rescaled)
-            vpFoldDisplayLog([NSString stringWithFormat:@"quick action glyph scale: %lu of %lu views at %.2f",
-                (unsigned long)rescaled, (unsigned long)touched, vpQuickActionGlyphScale]);
+            vpFoldDisplayLog([NSString stringWithFormat:@"quick action glyph scale: %lu of %lu views normalized to %.0fpt long side",
+                (unsigned long)rescaled, (unsigned long)touched, vpQuickActionGlyphLongSide]);
     } @catch (NSException *exception) {
         vpFoldDisplayLog([NSString stringWithFormat:@"quick action glyph scale exception: %@", exception.reason]);
     }
@@ -3006,10 +3034,65 @@ static void vpSetCanonicalOrientationProbe(BOOL enabled) {
     }
 }
 
+// The wallpaper layer converts the device orientation to its rendering
+// interface with the platform-default table; the Duo inner panel mounts
+// rotated, so on every landscape the wallpaper bitmap lands a quarter turn
+// off while the icons (which consult the scene's mounting table) stay
+// upright. Route the wallpaper's conversion through the live scene's own
+// device→system-space converter, the one table that is correct here.
+static NSInteger (*vpOriginalWallpaperInterfaceForDevice)(id, SEL, NSInteger);
+static atomic_uint vpWallpaperBridgeCallCount;
+static NSInteger vpWallpaperInterfaceForDevice(id self, SEL cmd, NSInteger device) {
+    id scene = vpMainInnerWindowScene();
+    SEL convert = sel_registerName("systemSpaceOrientationForDeviceOrientation:");
+    if (scene) {
+        Method method = class_getInstanceMethod(object_getClass(scene), convert);
+        if (method && strcmp(method_getTypeEncoding(method), "q24@0:8q16") == 0) {
+            NSInteger mapped = ((NSInteger (*)(id, SEL, NSInteger))objc_msgSend)(scene, convert, device);
+            if (mapped >= 1 && mapped <= 4) {
+                if (atomic_load_explicit(&vpWallpaperBridgeCallCount, memory_order_relaxed) < 12) {
+                    atomic_fetch_add_explicit(&vpWallpaperBridgeCallCount, 1, memory_order_relaxed);
+                    vpFoldDisplayLog([NSString stringWithFormat:@"wallpaper orientation bridge: device %ld -> interface %ld", (long)device, (long)mapped]);
+                }
+                return mapped;
+            }
+        }
+    }
+    return ((NSInteger (*)(id, SEL, NSInteger))vpOriginalWallpaperInterfaceForDevice)(self, cmd, device);
+}
+
+static BOOL vpInstallWallpaperOrientationBridge(void) {
+    id scene = vpMainInnerWindowScene();
+    id wallpaper = vpReadObject(scene, "wallpaperController");
+    SEL converter = sel_registerName("_interfaceOrientationForDeviceOrientation:");
+    Method method = wallpaper ? class_getInstanceMethod(object_getClass(wallpaper), converter) : NULL;
+    if (!wallpaper || !method || strcmp(method_getTypeEncoding(method), "q24@0:8q16") != 0) {
+        static unsigned int bridgeFailLogs = 0;
+        if (bridgeFailLogs < 6) {
+            bridgeFailLogs++;
+            vpFoldDisplayLog([NSString stringWithFormat:
+                @"wallpaper orientation bridge: unavailable scene=%@ wallpaper=%@ method=%@ types=%s",
+                scene ? @"yes" : @"no", wallpaper ? NSStringFromClass(object_getClass(wallpaper)) : @"nil",
+                method ? @"yes" : @"no", method ? method_getTypeEncoding(method) : "-"]);
+        }
+        return NO;
+    }
+    if (method_getImplementation(method) != (IMP)vpWallpaperInterfaceForDevice) {
+        vpOriginalWallpaperInterfaceForDevice = (NSInteger (*)(id, SEL, NSInteger))method_getImplementation(method);
+        method_setImplementation(method, (IMP)vpWallpaperInterfaceForDevice);
+        vpFoldDisplayLog(@"wallpaper orientation bridge: installed");
+    }
+    return YES;
+}
+
 static void vpRefreshNativeOrientationActuation(void) {
     @try {
         id scene = vpOrientationArbitrationScene();
         if (!scene) { vpFoldDisplayLog(@"orientation actuation: refused outside Main inner"); return; }
+        // The bridge must exist before the first rotation the wallpaper
+        // follows; installing on every actuation keeps it armed across
+        // wallpaper controller re-creation.
+        vpInstallWallpaperOrientationBridge();
         NSInteger direction = [[vpReadObject(scene, "traitsPipelineManager") valueForKey:@"systemArbitratedInterfaceOrientation"] integerValue];
         // The cover presentation is portrait-native, but the single-scene
         // emulation's arbiter carries the direction the mode swap computed
@@ -3910,6 +3993,7 @@ static int persistentCoverToken, persistentInnerToken;
         ^(int token) { vpInspectQuickActions(); });
     // Installed before SpringBoard builds its cover sheet, so the first
     // SBSDeviceDeterminedConfiguration construction is captured.
+    vpFoldDisplayLog(@"folddisplay build marker: bridge-diag-2");
     vpInstallConfigInitSwizzle();
     vpInstallLayoutClassSwizzle();
     static int windowsInspectToken;
