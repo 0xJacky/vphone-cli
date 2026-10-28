@@ -17,6 +17,7 @@
 static NSString *const vpInnerDisplayName = @"VPhone Duo Inner";
 static const char *vpInnerDisplayMarker = "/var/mobile/Library/Caches/vphone-duo-inner-display";
 static id vpInnerRenderDisplay;
+static BOOL vpIsInnerDisplay(id display);
 
 BOOL vpInnerDisplayRequested(void) {
     return access(vpInnerDisplayMarker, F_OK) == 0;
@@ -74,6 +75,66 @@ NSNumber *vpInnerDisplaySurfaceType(id deviceName) {
     if ([deviceName isEqual:@"primary"]) return @1;
     if ([deviceName isEqual:vpInnerDisplayName]) return @2;
     return nil;
+}
+
+// MARK: - SpringBoard: one scanout for two panels
+
+// SpringBoard powers each panel through its CADisplayStateControl (state 1
+// on, 0 off): open, the cover (primary, display 1) goes off and the inner
+// display on; closed, the reverse. On this guest the primary is the only
+// scanout, and open it has to show the inner display, which SpringBoard
+// composites onto it (vpShowInnerDisplay). So the primary is kept on while
+// either panel wants it; a screen-off turns both off. The compositor
+// follows the inner display's own state.
+static IMP vpOriginalTransitionDisplayState;
+static __weak id vpPrimaryStateControl;
+static long long vpPrimaryWantedState = 1, vpPrimaryAppliedState = 1, vpInnerWantedState;
+
+static unsigned int vpStateControlDisplayId(id control) {
+    Ivar ivar = class_getInstanceVariable(object_getClass(control), "_display_id");
+    if (!ivar || strcmp(ivar_getTypeEncoding(ivar), "I") != 0) return 0;
+    return *(unsigned int *)((uint8_t *)(__bridge void *)control + ivar_getOffset(ivar));
+}
+
+static void vpApplyPrimaryState(id completion) {
+    id primary = vpPrimaryStateControl;
+    long long state = vpPrimaryWantedState || vpInnerWantedState ? 1 : 0;
+    if (!primary || (state == vpPrimaryAppliedState && !completion)) return;
+    vpPrimaryAppliedState = state;
+    ((void (*)(id, SEL, long long, id))vpOriginalTransitionDisplayState)(primary,
+        sel_registerName("transitionToDisplayState:withCompletion:"), state, completion);
+}
+
+static void vpSharedScanoutTransition(id self, SEL selector, long long state, id completion) {
+    unsigned int displayId = vpStateControlDisplayId(self);
+    vpFoldDisplayLog([NSString stringWithFormat:@"inner display: display %u wants state %lld", displayId, state]);
+    if (displayId == 1) {
+        vpPrimaryStateControl = self;
+        vpPrimaryWantedState = state;
+        vpApplyPrimaryState(completion);
+        return;
+    }
+    ((void (*)(id, SEL, long long, id))vpOriginalTransitionDisplayState)(self, selector, state, completion);
+    id innerDisplay = nil;
+    for (id display in vpReadObject(objc_getClass("CADisplay"), "displays") ?: @[])
+        if ([[display valueForKey:@"displayId"] unsignedIntValue] == displayId && vpIsInnerDisplay(display)) innerDisplay = display;
+    if (!innerDisplay) return;
+    vpInnerWantedState = state;
+    vpApplyPrimaryState(nil);
+    dispatch_async(dispatch_get_main_queue(), ^{ vpShowInnerDisplay(state != 0); });
+}
+
+static void vpInstallSharedScanout(void) {
+    Method transition = class_getInstanceMethod(objc_getClass("CADisplayStateControl"),
+        sel_registerName("transitionToDisplayState:withCompletion:"));
+    const char *encoding = transition ? method_getTypeEncoding(transition) : "missing";
+    Ivar displayId = class_getInstanceVariable(objc_getClass("CADisplayStateControl"), "_display_id");
+    if (strcmp(encoding, "v32@0:8q16@?24") != 0 || !displayId || strcmp(ivar_getTypeEncoding(displayId), "I") != 0) {
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: shared scanout ABI unavailable (%s)", encoding]);
+        return;
+    }
+    vpOriginalTransitionDisplayState = method_setImplementation(transition, (IMP)vpSharedScanoutTransition);
+    vpFoldDisplayLog(@"inner display: shared scanout installed");
 }
 
 // Each render display's power and blanking, as backboardd holds them.
@@ -140,6 +201,35 @@ static BOOL vpInnerExternal(id self, SEL selector) {
     return vpIsInnerDisplay(self) ? NO : ((BOOL (*)(id, SEL))vpOriginalExternal)(self, selector);
 }
 
+// UIScreen takes the device idiom only for a UIKit-main-like screen and
+// leaves every other non-car screen unspecified (-1); UIKit's Swift idiom
+// switch (ScrollEdgeEffectView) traps on -1. The inner panel is a built-in
+// phone panel, so its screen takes the device idiom too.
+static IMP vpOriginalUpdateScreenIdiom;
+
+static void vpInnerUpdateScreenIdiom(id self, SEL selector) {
+    ((void (*)(id, SEL))vpOriginalUpdateScreenIdiom)(self, selector);
+    id identity = vpReadObject(vpReadObject(self, "displayConfiguration"), "identity");
+    if (!identity || [[identity description] isEqual:@"Main"]) return;
+    if (((long long (*)(id, SEL))objc_msgSend)(self, sel_registerName("_userInterfaceIdiom")) != -1) return;
+    long long idiom = ((long long (*)(id, SEL))objc_msgSend)(vpReadObject(objc_getClass("UIDevice"), "currentDevice"),
+        sel_registerName("userInterfaceIdiom"));
+    ((void (*)(id, SEL, long long))objc_msgSend)(self, sel_registerName("_setUserInterfaceIdiom:"), idiom);
+}
+
+static void vpInstallInnerScreenIdiom(void) {
+    Class screen = objc_getClass("UIScreen");
+    Method update = class_getInstanceMethod(screen, sel_registerName("_updateUserInterfaceIdiom"));
+    Method set = class_getInstanceMethod(screen, sel_registerName("_setUserInterfaceIdiom:"));
+    Method get = class_getInstanceMethod(screen, sel_registerName("_userInterfaceIdiom"));
+    if (!update || !set || !get || strcmp(method_getTypeEncoding(update), "v16@0:8") != 0 ||
+        strcmp(method_getTypeEncoding(set), "v24@0:8q16") != 0 || strcmp(method_getTypeEncoding(get), "q16@0:8") != 0) {
+        vpFoldDisplayLog(@"inner display: screen idiom ABI unavailable");
+        return;
+    }
+    vpOriginalUpdateScreenIdiom = method_setImplementation(update, (IMP)vpInnerUpdateScreenIdiom);
+}
+
 static IMP vpReplaceDisplayGetter(const char *name, const char *encoding, IMP replacement) {
     Method method = class_getInstanceMethod(objc_getClass("CADisplay"), sel_registerName(name));
     if (!method || strcmp(method_getTypeEncoding(method), encoding) != 0) {
@@ -155,6 +245,8 @@ static IMP vpReplaceDisplayGetter(const char *name, const char *encoding, IMP re
 // the type.
 void vpInstallInnerDisplayAdapter(void) {
     if (!vpInnerDisplayRequested()) return;
+    vpInstallSharedScanout();
+    vpInstallInnerScreenIdiom();
     // Type 0 without the FrontBoard scope is a second UIKit-main-like
     // display, so no scope means no adapter.
     Method configurationInit = class_getInstanceMethod(objc_getClass("FBSDisplayConfiguration"),
@@ -455,10 +547,12 @@ void vpInspectInnerDisplay(void) {
             }
             id surface = nil;
             @try { surface = [scene valueForKey:@"surfaceType"]; } @catch (__unused NSException *exception) {}
-            vpFoldDisplayLog([NSString stringWithFormat:@"inner display: scene %@ %@ display=%@ bounds=%@ posterType=%@ dynamicRotation=%d surfaceType=%@ delegate=%@%@",
+            vpFoldDisplayLog([NSString stringWithFormat:@"inner display: scene %@ %@ display=%@ bounds=%@ posterType=%@ dynamicRotation=%d surfaceType=%@ delegate=%@ idiom=%@ screenIdiom=%@%@",
                 NSStringFromClass([scene class]), vpReadObject(vpReadObject(scene, "_FBSScene"), "identifier"),
                 vpReadObject(configuration, "identity"), [configuration valueForKey:@"bounds"], type, rotates, surface,
-                NSStringFromClass([vpReadObject(scene, "delegate") class]), roles]);
+                NSStringFromClass([vpReadObject(scene, "delegate") class]),
+                [vpReadObject(scene, "traitCollection") valueForKey:@"userInterfaceIdiom"],
+                [vpReadObject(vpReadObject(scene, "screen"), "traitCollection") valueForKey:@"userInterfaceIdiom"], roles]);
         }
     } @catch (NSException *exception) {
         vpFoldDisplayLog([NSString stringWithFormat:@"inner display: inspect exception %@", exception.reason]);
