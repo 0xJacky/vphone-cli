@@ -117,7 +117,7 @@ void vpInstallSharedPanel(void) {
 // below 1 the container renders offscreen as a group, and hosted secure
 // windows come out as grey blocks on those frames.)
 static id vpInnerHostContext, vpInnerHostContainer, vpInnerHostDamage, vpInnerHostRefresh;
-static dispatch_source_t vpInnerHostTimer;
+static CFRunLoopObserverRef vpInnerHostObserver;
 static NSMutableDictionary<NSNumber *, id> *vpInnerHostLayers;
 static CGSize vpInnerHostPanel;
 
@@ -174,7 +174,13 @@ static void vpFitInnerHosts(CGRect inner) {
         panel.width, panel.height, inner.size.width, inner.size.height, turned, scale]);
 }
 
+// Runs just before Core Animation commits each main run loop turn, so a
+// window SpringBoard shows or hides and its host change in one transaction:
+// syncing later leaves a frame without the window's content.
 static void vpSyncInnerHosts(void) {
+    Class transaction = objc_getClass("CATransaction");
+    ((void (*)(id, SEL))objc_msgSend)(transaction, sel_registerName("begin"));
+    ((void (*)(id, SEL, BOOL))objc_msgSend)(transaction, sel_registerName("setDisableActions:"), YES);
     id app = vpReadObject(objc_getClass("UIApplication"), "sharedApplication");
     id innerScene = vpSpringBoardWindowScene(YES);
     if (innerScene)
@@ -203,23 +209,29 @@ static void vpSyncInnerHosts(void) {
             ((void (*)(id, SEL, id))objc_msgSend)(vpInnerHostContainer, sel_registerName("addSublayer:"), host);
             vpInnerHostLayers[key] = host;
         }
-        ((void (*)(id, SEL, CGRect))objc_msgSend)(host, sel_registerName("setFrame:"),
-            ((CGRect (*)(id, SEL))objc_msgSend)(window, sel_registerName("frame")));
-        ((void (*)(id, SEL, double))objc_msgSend)(host, sel_registerName("setZPosition:"), index);
+        // Re-setting an unchanged frame or zPosition makes the render server
+        // drop every hosted window for a frame.
+        CGRect frame = ((CGRect (*)(id, SEL))objc_msgSend)(window, sel_registerName("frame"));
+        if (!CGRectEqualToRect(((CGRect (*)(id, SEL))objc_msgSend)(host, sel_registerName("frame")), frame))
+            ((void (*)(id, SEL, CGRect))objc_msgSend)(host, sel_registerName("setFrame:"), frame);
+        if (((double (*)(id, SEL))objc_msgSend)(host, sel_registerName("zPosition")) != index)
+            ((void (*)(id, SEL, double))objc_msgSend)(host, sel_registerName("setZPosition:"), index);
     }
     for (NSNumber *key in vpInnerHostLayers.allKeys) {
         if ([live containsObject:key]) continue;
         ((void (*)(id, SEL))objc_msgSend)(vpInnerHostLayers[key], sel_registerName("removeFromSuperlayer"));
         [vpInnerHostLayers removeObjectForKey:key];
     }
+    ((void (*)(id, SEL))objc_msgSend)(transaction, sel_registerName("commit"));
 }
 
 static void vpShowInnerDisplay(BOOL shown) {
     @try {
         if (!shown) {
             if (!vpInnerHostContext) return;
-            dispatch_source_cancel(vpInnerHostTimer);
-            vpInnerHostTimer = nil;
+            CFRunLoopObserverInvalidate(vpInnerHostObserver);
+            CFRelease(vpInnerHostObserver);
+            vpInnerHostObserver = NULL;
             ((void (*)(id, SEL))objc_msgSend)(vpInnerHostRefresh, sel_registerName("invalidate"));
             vpInnerHostRefresh = nil;
             ((void (*)(id, SEL))objc_msgSend)(vpInnerHostContext, sel_registerName("invalidate"));
@@ -259,10 +271,10 @@ static void vpShowInnerDisplay(BOOL shown) {
         vpInnerHostLayers = [NSMutableDictionary dictionary];
         vpInnerHostPanel = CGSizeZero;
         vpSyncInnerHosts();
-        vpInnerHostTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
-        dispatch_source_set_timer(vpInnerHostTimer, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), NSEC_PER_SEC / 4, NSEC_PER_SEC / 20);
-        dispatch_source_set_event_handler(vpInnerHostTimer, ^{ vpSyncInnerHosts(); });
-        dispatch_resume(vpInnerHostTimer);
+        // Order 1999999: just before Core Animation's commit observer (2000000).
+        vpInnerHostObserver = CFRunLoopObserverCreateWithHandler(kCFAllocatorDefault, kCFRunLoopBeforeWaiting | kCFRunLoopExit, true,
+            1999999, ^(CFRunLoopObserverRef observer, CFRunLoopActivity activity) { vpSyncInnerHosts(); });
+        CFRunLoopAddObserver(CFRunLoopGetMain(), vpInnerHostObserver, kCFRunLoopCommonModes);
         vpInnerHostRefresh = ((id (*)(id, SEL, id, SEL))objc_msgSend)(objc_getClass("CADisplayLink"),
             sel_registerName("displayLinkWithTarget:selector:"), [VPhoneInnerHostRefresh new], @selector(refresh:));
         ((void (*)(id, SEL, id, id))objc_msgSend)(vpInnerHostRefresh, sel_registerName("addToRunLoop:forMode:"),
