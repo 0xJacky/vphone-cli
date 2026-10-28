@@ -8,29 +8,6 @@ import VphonedNative
 extension GuestAPI {
     private static let rotationLock = NSLock()
 
-    /// The interface orientation the fold last closed with; opening returns
-    /// to it so an explicit landscape survives a fold cycle. Session state
-    /// only — a reboot restores portrait through the boot pose ladder.
-    private nonisolated(unsafe) static var foldRotationMemory: Int?
-    private static let foldRotationLock = NSLock()
-
-    /// Records a landscape worth restoring; a portrait close clears it.
-    private static func rememberFoldRotation() {
-        let degrees = interfaceRotationDegrees()
-        foldRotationLock.lock()
-        foldRotationMemory = (degrees == 90 || degrees == 270) ? degrees : nil
-        foldRotationLock.unlock()
-    }
-
-    /// Consumes the remembered orientation; nil means portrait at rest.
-    private static func takeFoldRotation() -> Int? {
-        foldRotationLock.lock()
-        defer { foldRotationLock.unlock() }
-        let degrees = foldRotationMemory
-        foldRotationMemory = nil
-        return degrees
-    }
-
     static func executeDevice(_ method: String, _ params: [String: Any]) throws -> [String: Any]? {
         switch method {
         case "device.info":
@@ -403,14 +380,13 @@ extension GuestAPI {
             ? vp_hinge_sweep(angle!, durationMs, Int32(profile))
             : vp_hinge_set(angle!)
         if ((try? deviceSnapshot())?["model"] as? String) == "iPhone19,4" {
-            // A fold cycle returns to the orientation it started from:
-            // portrait at rest, an explicit landscape survives the close.
-            // The cover presents portrait either way; opening replays the
-            // remembered direction through the same resolve-and-confirm
-            // path. Session state only — a reboot restores portrait.
-            if angle! < 5 { rememberFoldRotation() }
-            let restoreDegrees = angle! < 5 ? nil : takeFoldRotation()
-            let desiredInterface = angle! < 5 ? "0" : restoreDegrees.map(String.init) ?? "0"
+            // The Duo state machine: the cover has no rotation state and
+            // always presents portrait; the inner panel rests landscape —
+            // its rotated mounting maps the natural device pose (accel 0°)
+            // to interface landscape-left (90°), so an unfold presents the
+            // inner default and portrait there stays an explicit rotation
+            // away.
+            let desiredInterface = angle! < 5 ? "0" : "90"
             // The cover arbiter derives its direction once, at the mode
             // swap, from the scene pipeline's cached device orientation.
             // The pose override above wrote portrait (device 1 on the
@@ -543,21 +519,11 @@ extension GuestAPI {
                     _ = try? setRotation(desiredInterface)
                 }
             }
-            // Real hardware blanks the inner panel when the fold closes and
-            // the cover presents the lock experience. The single-scene
-            // emulation cannot blank one panel, and an unlocked home layout
-            // in cover mode keeps whatever direction the mode swap computed
-            // from the inner pose — portrait arbitration does not settle
-            // there — while the cover lock screen arbitrates portrait
-            // natively (every folded boot presents its clock upright). Close
-            // through the lock: sleep a lit, unlocked display so the next
-            // wake presents the cover lock screen.
-            if angle! < 5,
-               let lock = ((try? collectDeviceSnapshot())?["lock"] as? [String: Any]),
-               (lock["locked"] as? Bool ?? true) == false,
-               (lock["screen_off"] as? Bool ?? true) == false {
-                _ = try? pressButton("power")
-            }
+            // Real hardware closes onto a lit cover screen; the lock
+            // presentation belongs to the sleep button, not to the fold.
+            // The cover arbiter override holds portrait there for both the
+            // unlocked home layout and the lock screen, so no sleep is
+            // needed to keep the folded presentation upright.
         }
         var hingeState = vp_hinge_get()
         hingeState["applied"] = published

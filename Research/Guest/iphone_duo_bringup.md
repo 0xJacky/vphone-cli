@@ -3897,3 +3897,20 @@ follow the target degrees. Verified: 90° and 270° both restore after a
 closed→open cycle with correct landscape re-flow; a portrait fold cycle
 stays portrait. The memory is session state: a reboot restores portrait
 through the boot ladder.
+
+Follow-up (state machine rework): the orientation model now matches the
+hardware. The cover has no rotation state — it always presents portrait
+(466×678), and the fold closes onto a LIT cover screen (the earlier
+sleep-on-close made the fold button look like "screen off" and is
+removed; the cover arbiter override keeps portrait upright there for both
+the unlocked layout and the lock screen). The inner panel rests
+LANDSCAPE: its rotated mounting maps the natural device pose (accel 0°)
+to interface landscape-left (90°), so an unfold — and a folded boot —
+presents the inner default directly, and portrait on the inner panel
+stays an explicit rotation. The session-scoped fold rotation memory from
+the previous entry is removed (the default owns the post-unfold state);
+the boot ladder resolves the desired interface per target viewport
+(cover "0", inner "90") and stops only when SpringBoard answers the
+target degrees. Verified: folded boot and every unfold land 90° with a
+correct landscape re-flow; every close lands a lit portrait cover;
+explicit rotations 0/90/270 still settle; 3× cycles green.

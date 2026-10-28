@@ -122,16 +122,18 @@ private static let restoration = RestoreState()
                 Thread.sleep(forTimeInterval: delay - waited)
                 waited = delay
                 let expectedHinge = hingeState(for: angle)
-                // Device 1 is the pose enum's portrait, not the mounted
-                // device value: the Duo inner panel presents portrait as
-                // device 3 under its rotated mounting.  Resolve against the
-                // live map; a later rung corrects an early read that still
-                // carries the identity fallback table.
-                let portraitDevice = (vp_display_orientation_mapping()["deviceOrientations"] as? [Int])
-                    .flatMap { GuestDisplayRotation.resolve("0", deviceOrientations: $0)?.deviceOrientation } ?? 1
+                // The cover is portrait-only; the inner panel rests
+                // landscape (its rotated mounting maps the natural pose to
+                // interface 90°).  Resolve the desired interface against
+                // the live map; a later rung corrects an early read that
+                // still carries the identity fallback table.
+                let desiredInterface = angle < 5 ? "0" : "90"
+                let desiredDevice = (vp_display_orientation_mapping()["deviceOrientations"] as? [Int])
+                    .flatMap { GuestDisplayRotation.resolve(desiredInterface, deviceOrientations: $0)?.deviceOrientation }
+                    ?? (angle < 5 ? 1 : 4)
                 let published = restoration.lock.withLock {
                     guard !restoration.cancelled else { return false }
-                    _ = vp_device_pose_set(Int32(portraitDevice), Int32(expectedHinge), 0)
+                    _ = vp_device_pose_set(Int32(desiredDevice), Int32(expectedHinge), 0)
                     _ = vp_hinge_set(angle)
                     requestViewport(for: angle)
                     restoration.latestPose = poseValues(vp_device_pose_get())
@@ -145,9 +147,10 @@ private static let restoration = RestoreState()
                 notify_post("com.vphone.display.orientation.arbitration.refresh")
                 notify_post("com.vphone.display.orientation.actuation.refresh")
                 let actual = vp_device_pose_get()
+                let targetDegrees = Int(desiredInterface) ?? 0
                 if actual["available"] as? Bool == true,
                    actual["hinge"] as? Int == expectedHinge,
-                   interfaceRotationDegrees() == 0 { return }
+                   interfaceRotationDegrees() == targetDegrees { return }
             }
         }
     }
