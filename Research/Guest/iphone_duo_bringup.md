@@ -4077,3 +4077,30 @@ wake); `display.posture open` revives it. Next round: create test
 machines with subsets of the standard preset (--block/--allow) to find
 the offending firmware patch; also make the rotation path clamp the
 persisted hinge to a sane state on refusal.
+
+Follow-up (corrected framing, per product knowledge): real iPhones never
+rotate SpringBoard — home-screen rotation is an iPad behavior, and on the
+Duo it is a foldable capability. The recreated machines refusing
+`display.rotation` are therefore showing STOCK iPhone semantics, not a
+broken arbiter; the original machine rotated because the dylib's
+orientation-actuation replay FORCED the pipeline, and its scene ACCEPTED
+programmatic orientation changes — the recreated machines' scenes refuse
+with UISceneErrorDomain 101 ("windowing mode does not allow programmatic
+changes to interface orientation"). The regression is thus narrowed to
+one question: what made the original's SB-main scene permissive to
+programmatic orientation while every machine created on the current
+chain refuses. Targeted eliminations on virgin machines: blocking
+system-springboard-cfw-fold_display (identity padding) does not restore
+rotation (duotest-m7); artwork-device-subtype 2556 predates both eras;
+the product-id patch is off in presets; scene-status policy is automatic
+on iPhone19,4; the ebed07c3 DSC hunks are structural. Remaining probe
+for the next session: instrument the SB-main scene's windowing-mode and
+activation-condition state at construction (the 101 check's input), and
+disassemble SB's programmatic-orientation gate to name the exact
+capability it consults — then either supply that capability for foldable
+guests or route the rotation path through the API that gate permits.
+Also recorded: a refused rotation persists a folded (angle-0) hinge
+preference — the next boot sleeps the inner screen; `display.posture
+open` revives it; the rotation path should clamp the persisted hinge on
+refusal. duotest-m6 and duotest-m7 exist for testing (m7 with
+fold_display blocked at creation).
