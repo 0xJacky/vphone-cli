@@ -164,6 +164,7 @@ extension GuestAPI {
                         result["physical_pose"] = actual
                         result["accelerometer_degrees"] = mappedRotation.accelerometerDegrees
                     }
+                    broadcastInterfaceOrientation()
                     return result
                 } catch {
                     // A refused rotation leaves the guest as it was. The pose
@@ -527,6 +528,7 @@ extension GuestAPI {
         }
         var hingeState = vp_hinge_get()
         hingeState["applied"] = published
+        broadcastInterfaceOrientation()
         var reply: [String: Any] = [
             "hinge": hinge, "orientation": orientation, "tabletop": tabletop,
             "angle": angle!, "hinge_hid": hingeState,
@@ -563,6 +565,20 @@ extension GuestAPI {
             throw GuestAPIError.invalidRequest("state must be an unsigned 64-bit integer")
         }
         return state
+    }
+
+    /// Publishes SpringBoard's live interface degrees for the wallpaper and
+    /// poster extension processes: their hosted scenes never see the host's
+    /// rotation (measured stuck at portrait across a landscape pass), and the
+    /// per-second orientation map can lag, so the settled value rides the
+    /// notify state where the extension followers read it.
+    static func broadcastInterfaceOrientation() {
+        // The extension followers read the interface code (1 portrait,
+        // 2 upside-down, 3 landscape-right, 4 landscape-left) off the
+        // notification state; degrees 0/180/270/90 map onto it directly.
+        guard let degrees = interfaceRotationDegrees() else { return }
+        let code = [0: 1, 180: 2, 270: 3, 90: 4][degrees] ?? 1
+        _ = try? postDarwinNotification("com.vphone.display.orientation.broadcast", state: UInt64(code))
     }
 }
 
