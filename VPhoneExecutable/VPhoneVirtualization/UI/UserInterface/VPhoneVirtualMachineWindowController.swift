@@ -561,10 +561,32 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         accessibilityDescription: VPhoneLocalization.text("Home"),
     ) ?? NSImage()
 
-    private static let foldImage = NSImage(
-        systemSymbolName: "rectangle.split.2x1",
-        accessibilityDescription: VPhoneLocalization.text("Duo Fold Posture"),
-    ) ?? NSImage()
+    /// The panel the guest shows in this posture: the cover alone when
+    /// closed, the inner panel otherwise.
+    private static func foldImage(for position: VPhoneFoldPosition?) -> NSImage {
+        NSImage(
+            systemSymbolName: position == .closed ? "rectangle.portrait" : "rectangle.split.2x1",
+            accessibilityDescription: VPhoneLocalization.text("Duo Fold Posture"),
+        ) ?? NSImage()
+    }
+
+    /// Both title bar buttons draw their symbol at one weight and size, and
+    /// sit in one square: a circle bezel otherwise grows to its symbol, so a
+    /// wide symbol made the fold button larger than Home.
+    private static let titlebarSymbol = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+
+    private func configureTitlebarButton(_ button: NSButton) {
+        if #available(macOS 26.0, *) {
+            button.bezelStyle = .glass
+            button.borderShape = .circle
+        } else {
+            button.bezelStyle = .toolbar
+        }
+        button.controlSize = .large
+        button.imagePosition = .imageOnly
+        button.symbolConfiguration = Self.titlebarSymbol
+        button.translatesAutoresizingMaskIntoConstraints = false
+    }
 
     /// `circle.circle` with a slash drawn across it; SF Symbols has no
     /// `circle.circle.slash`. The slash cuts a gap in the circles like the
@@ -593,15 +615,8 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
 
     private func makeHomeAccessory() -> NSTitlebarAccessoryViewController {
         let button = VPhoneHomeButton(image: Self.homeImage, target: self, action: #selector(homePressed))
-        if #available(macOS 26.0, *) {
-            button.bezelStyle = .glass
-            button.borderShape = .circle
-        } else {
-            button.bezelStyle = .toolbar
-        }
-        button.controlSize = .large
+        configureTitlebarButton(button)
         button.toolTip = VPhoneLocalization.text("Home Button")
-        button.translatesAutoresizingMaskIntoConstraints = false
         homeButton = button
         applyHomeButtonHold()
 
@@ -615,19 +630,20 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         let container = NSView()
         var buttons: [NSButton] = [button]
         if foldableGuest {
-            let fold = NSButton(image: Self.foldImage, target: self, action: #selector(foldPressed))
-            if #available(macOS 26.0, *) {
-                fold.bezelStyle = .glass
-                fold.borderShape = .circle
-            } else {
-                fold.bezelStyle = .toolbar
-            }
-            fold.controlSize = .large
+            let fold = NSButton(image: Self.foldImage(for: nil), target: self, action: #selector(foldPressed))
+            configureTitlebarButton(fold)
             fold.toolTip = VPhoneLocalization.text("Duo Fold Posture")
             fold.setAccessibilityLabel(VPhoneLocalization.text("Duo Fold Posture"))
-            fold.translatesAutoresizingMaskIntoConstraints = false
             foldButton = fold
             buttons.append(fold)
+        }
+        // The square a large circle bezel takes around Home's square symbol.
+        let side = button.fittingSize.height
+        for each in buttons {
+            NSLayoutConstraint.activate([
+                each.widthAnchor.constraint(equalToConstant: side),
+                each.heightAnchor.constraint(equalToConstant: side),
+            ])
         }
         let stack = NSStackView(views: buttons)
         stack.orientation = .horizontal
@@ -639,7 +655,6 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
             stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -trailingInset),
             stack.centerYAnchor.constraint(equalTo: container.centerYAnchor),
         ])
-        let side = button.fittingSize.height
         container.frame.size = NSSize(width: leadingInset + CGFloat(buttons.count) * side + CGFloat(max(0, buttons.count - 1) * 4) + trailingInset, height: side)
 
         let accessory = NSTitlebarAccessoryViewController()
@@ -660,6 +675,7 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
     private func updateFoldButton(position: VPhoneFoldPosition?, connected: Bool) {
         guard let foldButton else { return }
         foldButton.isEnabled = connected
+        foldButton.image = Self.foldImage(for: position)
         let title = position?.title ?? VPhoneLocalization.text("Duo Fold Posture")
         foldButton.toolTip = VPhoneLocalization.format("Duo Fold Posture: %@", title)
         foldButton.setAccessibilityValue(title)
