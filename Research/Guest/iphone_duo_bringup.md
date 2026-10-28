@@ -3943,3 +3943,16 @@ rotation or posture paths; the native wallpaper rotation owns the
 follow. Verified: boot-rest-90 wallpaper present and upright, rotations
 0/90/270/90 all correct, cover lock wallpaper intact, close→open cycle
 upright landscape. The dylib handler remains registered but idle.
+
+Follow-up (wallpaper direction, corrected): the wallpaper controller takes
+the device-side orientation code, whose landscape names mirror the UI ones
+(UI landscape-left 4 presents upright as 3; portrait stays 1) — passing the
+raw interface code quarter-turned the image on every landscape. The pulse
+posts removed earlier are restored and the pulse maps its target through
+that mirror before re-aiming the controller and sizing the views. Verified
+by brightest-pole measurements of the wallpaper across boot-rest 90,
+portrait, 90, and close→open cycles (pole at the top in each). Known
+remaining edge: an explicit 270 rotation leaves the wallpaper view
+portrait-sized at the landscape interface (content upright-ish but
+letterboxed) — the 270-side native layout races the pulse's frame pass;
+chase separately if 270 matters on the hardware.

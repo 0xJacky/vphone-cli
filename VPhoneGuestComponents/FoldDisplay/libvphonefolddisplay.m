@@ -1708,6 +1708,13 @@ static void vpPulseNativeWallpaperOrientation(void) {
         !bm || strcmp(method_getTypeEncoding(bm), "v24@0:8q16") != 0) return;
     NSInteger original = ((NSInteger (*)(id, SEL))objc_msgSend)(wallpaper, getter);
     NSInteger target = [[vpReadObject(scene, "traitsPipelineManager") valueForKey:@"systemArbitratedInterfaceOrientation"] integerValue];
+    // The wallpaper controller takes the device-side orientation, whose
+    // landscape names mirror the UI ones (UI landscape-left 4 is device
+    // landscape-right 3); passing the raw interface code lands the image
+    // a quarter turn off on every landscape. Measured on iPhone19,4:
+    // portrait stays 1, interface 4 renders upright as 3.
+    if (target == 3) target = 4;
+    else if (target == 4) target = 3;
     if (original < 1 || original > 4 || target < 1 || target > 4) return;
     vpWallpaperOrientationLeaseActive = YES;
     @try {
