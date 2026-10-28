@@ -113,7 +113,7 @@ final class VPhoneLaunchpadCreationPipeline {
 
         var patchOverrides: VPhoneLaunchpadPatchOverrides {
             VPhoneLaunchpadPatchOverrides(
-                preset: patches.preset,
+                preset: patches.presetArgument,
                 blocked: patches.blocked,
                 allowed: patches.allowed,
                 guestPatches: guestPatches,
@@ -126,7 +126,7 @@ final class VPhoneLaunchpadCreationPipeline {
                 iphoneSource: iphoneSource,
                 cloudOSSource: cloudOSSource,
                 device: device,
-                preset: patches.preset,
+                preset: patches.presetArgument,
                 blocked: patchOverrides.bootChainBlocked,
                 allowed: patchOverrides.bootChainAllowed,
                 diskSizeGB: diskSizeGB,

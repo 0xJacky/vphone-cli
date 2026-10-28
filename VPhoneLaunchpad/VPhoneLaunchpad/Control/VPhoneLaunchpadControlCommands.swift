@@ -667,18 +667,26 @@ struct VPhoneLaunchpadControlCommands {
         defaultPreset: String,
         emit: Emit,
     ) async throws -> (VPhoneLaunchpadPatchSelection, guest: Set<String>) {
-        var selection = VPhoneLaunchpadPatchSelection()
-        selection.preset = request.option("preset") ?? defaultPreset
+        let preset = request.option("preset") ?? defaultPreset
+        var selection = VPhoneLaunchpadPatchSelection.isPresetFile(preset)
+            ? VPhoneLaunchpadPatchSelection(presetFile: preset)
+            : VPhoneLaunchpadPatchSelection(preset: preset)
         let block = request.values("block")
         let allow = request.values("allow")
+        guard !block.isEmpty || !allow.isEmpty || selection.presetFile != nil else {
+            return (selection, [])
+        }
+        // A preset file is read here too: its identifier and whether it
+        // customises the system before the restore come from the bundle.
+        let catalog = try await VPhoneLaunchpadPatchCatalog.read(using: commandLine, machine: nil, preset: selection.presetArgument)
+        selection.adoptFile(from: catalog)
         guard !block.isEmpty || !allow.isEmpty else {
             return (selection, [])
         }
-        let catalog = try await VPhoneLaunchpadPatchCatalog.read(using: commandLine, machine: nil, preset: selection.preset)
         let overrides: VPhoneLaunchpadPatchOverrides
         do {
             overrides = try VPhoneLaunchpadPatchOverrides.requested(
-                preset: selection.preset,
+                preset: selection.presetArgument,
                 block: block,
                 allow: allow,
                 declared: Set(catalog.patches.map(\.identifier)),

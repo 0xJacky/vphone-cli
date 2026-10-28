@@ -45,6 +45,8 @@ struct VPhoneLaunchpadPatchSettingsView: View {
     /// The selected rows; the detail pane reads the summary of one.
     @State private var highlighted: Set<String> = []
     @State private var confirmsBootEssential = false
+    /// Why the preset file chosen with Other… could not be read.
+    @State private var presetFileError: String?
     /// What was on when the editor opened, so the status line can count what
     /// an edit to an existing machine changes. Taken from the first read.
     @State private var initiallyOn: Set<String>?
@@ -114,7 +116,15 @@ struct VPhoneLaunchpadPatchSettingsView: View {
         } message: {
             Text("The machine may not boot without \(essentialOff.map(\.identifier).joined(separator: ", ")).")
         }
-        .task { await load(preset: initial.preset) }
+        .alert(
+            "Unable to Use This Preset File",
+            isPresented: Binding(get: { presetFileError != nil }, set: { if !$0 { presetFileError = nil } }),
+        ) {
+            Button("OK") { presetFileError = nil }
+        } message: {
+            Text(verbatim: presetFileError ?? "")
+        }
+        .task { await load(preset: initial.presetArgument) }
     }
 
     // MARK: - Preset
@@ -127,6 +137,8 @@ struct VPhoneLaunchpadPatchSettingsView: View {
                     ForEach(catalog?.presets ?? []) { preset in
                         Text(verbatim: preset.displayTitle).tag(preset.identifier)
                     }
+                    Divider()
+                    Text("Other…").tag(VPhoneLaunchpadPatchSelection.otherPresetTag)
                 }
                 .fixedSize()
                 .disabled(catalog == nil || isLoading || isReadOnly)
@@ -149,6 +161,20 @@ struct VPhoneLaunchpadPatchSettingsView: View {
         Binding(
             get: { selection.preset },
             set: { identifier in
+                if identifier == VPhoneLaunchpadPatchSelection.otherPresetTag {
+                    VPhoneLaunchpadPresetFilePanel.choose { path in
+                        let previous = selection
+                        selection = VPhoneLaunchpadPatchSelection(presetFile: path)
+                        Task {
+                            // A file the bundle cannot read leaves the choice as it was.
+                            if let error = await load(preset: path, showsError: false), selection.presetFile == path {
+                                selection = previous
+                                presetFileError = error
+                            }
+                        }
+                    }
+                    return
+                }
                 guard identifier != selection.preset else {
                     return
                 }
@@ -338,7 +364,10 @@ struct VPhoneLaunchpadPatchSettingsView: View {
 
     // MARK: - Actions
 
-    private func load(preset: String) async {
+    /// Returns why the read failed. `showsError` false leaves that to the
+    /// caller instead of replacing the list with it.
+    @discardableResult
+    private func load(preset: String, showsError: Bool = true) async -> String? {
         isLoading = true
         defer { isLoading = false }
         do {
@@ -348,10 +377,14 @@ struct VPhoneLaunchpadPatchSettingsView: View {
                 preset: preset,
             )
             // A second switch of the picker may have overtaken this read.
-            guard preset == selection.preset else {
-                return
+            guard preset == selection.presetArgument else {
+                return nil
             }
-            selection.preset = catalog.activePreset
+            if selection.presetFile != nil {
+                selection.adoptFile(from: catalog)
+            } else {
+                selection.preset = catalog.activePreset
+            }
             selection.normalize(against: catalog)
             if initiallyOn == nil {
                 initiallyOn = Set(catalog.patches.filter { selection.isOn($0) }.map(\.identifier))
@@ -363,8 +396,13 @@ struct VPhoneLaunchpadPatchSettingsView: View {
                 highlighted = [first.identifier]
             }
             loadError = nil
+            return nil
         } catch {
-            loadError = VPhoneLaunchpadError.message(for: error)
+            let message = VPhoneLaunchpadError.message(for: error)
+            if showsError {
+                loadError = message
+            }
+            return message
         }
     }
 
