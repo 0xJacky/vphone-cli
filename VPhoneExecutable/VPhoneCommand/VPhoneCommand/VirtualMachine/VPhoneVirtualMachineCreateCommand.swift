@@ -64,7 +64,7 @@ struct VPhoneVirtualMachineCreateCommand: ParsableCommand {
     @Option(name: .shortAndLong, help: "Disk size (GB, default 64)") var diskSize: UInt64?
     @Option(
         name: .customLong("preset"),
-        help: "Patch preset for the new VM. Defaults to standard; run `fw patches` to see what each one applies.",
+        help: "Patch preset name, or path to a preset plist, for the new VM. Defaults to standard; run `fw patches` to see what each one applies.",
     )
     var preset: String?
     @Option(name: .long, help: "CPU cores (default 8)") var cpu: UInt?
@@ -114,8 +114,12 @@ struct VPhoneVirtualMachineCreateCommand: ParsableCommand {
     /// offline trim and the setup boot of a template write the System volume,
     /// which would break that system's seal.
     private var customisesRestoredSystem: Bool {
-        VPhonePatchPresetStore.preset(named: preset ?? defaultPreset)?.patchSets
+        (try? resolvedPreset().preset)?.patchSets
             .contains { $0.identifier == FirmwareRestoreImagePatchSet.identifier } ?? false
+    }
+
+    private func resolvedPreset() throws -> (preset: VPhonePatchPreset, file: VPhonePatchPreset?) {
+        try VPhonePatchPresetStore.resolve(preset ?? defaultPreset)
     }
 
     /// An Apple TV takes the TV preset; one whose userland comes from an OTA
@@ -195,6 +199,7 @@ struct VPhoneVirtualMachineCreateCommand: ParsableCommand {
         if let device, VPhoneGuestDevice.named(device) == nil {
             throw ValidationError("vphone runs \(VPhoneGuestDevice.known.map(\.productType).joined(separator: ", ")) guests, not \(device).")
         }
+        let patchPreset = try resolvedPreset()
         let networkMode = try network.map(VPhoneVirtualMachineConfigCommand.parseMode)
         let unlocks = try unlockAtStartup.map { try VPhoneVirtualMachineConfigCommand.parseSwitch($0, option: "--unlock-at-startup") }
         let templateUse: VPhoneVirtualMachineCreator.TemplateUse = if let template {
@@ -238,7 +243,8 @@ struct VPhoneVirtualMachineCreateCommand: ParsableCommand {
             device: selectedDevice,
             otaSource: otaSource,
             otaKey: otaKey,
-            patchPreset: preset ?? defaultPreset,
+            patchPreset: patchPreset.preset.identifier,
+            patchPresetFile: patchPreset.file,
             cpuCount: cpu ?? 8,
             memoryMB: memory ?? 8192,
             diskSizeGB: diskSize ?? 64,
@@ -249,7 +255,7 @@ struct VPhoneVirtualMachineCreateCommand: ParsableCommand {
             template: templateUse,
             templateRequest: VPhoneMachineTemplateRequest(
                 device: device,
-                patchPreset: preset,
+                patchPreset: preset == nil ? nil : patchPreset.preset.identifier,
                 diskSizeGB: diskSize,
                 slimming: slimming.request.isEmpty ? nil : slimming.resolve(),
             ),

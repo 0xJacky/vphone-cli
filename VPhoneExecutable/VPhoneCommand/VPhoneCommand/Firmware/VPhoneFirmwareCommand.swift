@@ -358,7 +358,7 @@ struct VPhoneFirmwarePatchCommand: ParsableCommand {
     @Argument(help: "VM name") var name: String?
     @Option(
         name: .customLong("preset"),
-        help: "Patch preset to apply. Defaults to the VM's recorded choice, or standard.",
+        help: "Patch preset name, or path to a preset plist, to apply. Defaults to the VM's recorded choice, or standard.",
     )
     var preset: String?
     @Flag(name: .shortAndLong, help: "Suppress per-component progress") var quiet = false
@@ -392,15 +392,8 @@ struct VPhoneFirmwarePatchCommand: ParsableCommand {
         // An explicit --preset wins and is remembered, so `cfw install` and a
         // later re-patch agree without the flag being repeated.
         var selection = VPhonePatchPresetStore.selection(forVM: directory)
-        if let preset {
-            selection.presetIdentifier = preset
-        }
-        guard let resolved = VPhonePatchPresetStore.preset(named: selection.presetIdentifier) else {
-            let available = VPhonePatchPresetStore.availablePresets().map(\.identifier)
-            throw ValidationError(
-                "Unknown patch preset '\(selection.presetIdentifier)'. Available: \(available.joined(separator: ", "))",
-            )
-        }
+        let (resolved, presetFile) = try VPhonePatchPresetStore.resolve(preset ?? selection.presetIdentifier, forVM: directory)
+        selection.presetIdentifier = resolved.identifier
 
         // The restore image patches merge and reseal the system image, which
         // needs root; nothing else here does.
@@ -445,6 +438,9 @@ struct VPhoneFirmwarePatchCommand: ParsableCommand {
         let records = try pipeline.patchAll()
 
         if let plan = pipeline.resolvedPlan {
+            if preset != nil {
+                try VPhonePatchPresetStore.writePresetFile(presetFile, forVM: directory)
+            }
             try VPhonePatchPresetStore.write(selection, forVM: directory)
             try VPhonePatchPresetStore.write(
                 VPhoneVirtualMachinePatchPlan(
@@ -479,7 +475,7 @@ struct VPhoneFirmwarePatchesCommand: ParsableCommand {
 
     @OptionGroup var lib: VPhoneLibraryOption
     @Argument(help: "VM name, to report what it is set to") var name: String?
-    @Option(name: .customLong("preset"), help: "Report against this preset instead of the VM's choice")
+    @Option(name: .customLong("preset"), help: "Report against this preset name or preset plist path instead of the VM's choice")
     var preset: String?
     @Flag(name: .customLong("json"), help: "Emit machine-readable output for a UI")
     var json = false
@@ -489,23 +485,22 @@ struct VPhoneFirmwarePatchesCommand: ParsableCommand {
         var selection = VPhoneVirtualMachinePatchSelection()
         var vmName: String?
         var machine: VPhonePatchCatalogReport.MachineRecords?
+        var directory: URL?
         if let name {
             let resolvedName = try VPhoneVirtualMachineSelection.resolveExisting(name, in: lib.library)
             let bundle = try lib.library.bundle(named: resolvedName)
             vmName = resolvedName
+            directory = bundle.url
             selection = VPhonePatchPresetStore.selection(forVM: bundle.url)
             machine = .read(bundle)
         }
-        if let preset {
-            selection.presetIdentifier = preset
-        }
+        let active = try VPhonePatchPresetStore.resolve(preset ?? selection.presetIdentifier, forVM: directory).preset
+        selection.presetIdentifier = active.identifier
 
-        let presets = VPhonePatchPresetStore.availablePresets()
-        guard let active = presets.first(where: { $0.identifier == selection.presetIdentifier }) else {
-            throw ValidationError(
-                "Unknown patch preset '\(selection.presetIdentifier)'."
-                    + " Available: \(presets.map(\.identifier).joined(separator: ", "))",
-            )
+        // A VM's own preset is listed too, so a picker can show what it is set to.
+        var presets = VPhonePatchPresetStore.availablePresets()
+        if !presets.contains(where: { $0.identifier == active.identifier }) {
+            presets.append(active)
         }
 
         let report = VPhonePatchCatalogReport(
@@ -570,7 +565,7 @@ struct VPhoneFirmwareSetPatchesCommand: ParsableCommand {
     @Argument(help: "VM name") var name: String?
     @Option(
         name: .customLong("preset"),
-        help: "Preset the choice composes onto. Defaults to the VM's recorded preset.",
+        help: "Preset name, or path to a preset plist, the choice composes onto. Defaults to the VM's recorded preset.",
     )
     var preset: String?
     @Option(
@@ -589,15 +584,8 @@ struct VPhoneFirmwareSetPatchesCommand: ParsableCommand {
         let bundle = try lib.library.bundle(named: name)
 
         var selection = VPhonePatchPresetStore.selection(forVM: bundle.url)
-        if let preset {
-            selection.presetIdentifier = preset
-        }
-        guard let resolved = VPhonePatchPresetStore.preset(named: selection.presetIdentifier) else {
-            let available = VPhonePatchPresetStore.availablePresets().map(\.identifier)
-            throw ValidationError(
-                "Unknown patch preset '\(selection.presetIdentifier)'. Available: \(available.joined(separator: ", "))",
-            )
-        }
+        let (resolved, presetFile) = try VPhonePatchPresetStore.resolve(preset ?? selection.presetIdentifier, forVM: bundle.url)
+        selection.presetIdentifier = resolved.identifier
 
         let declarations = FirmwarePatchSetCatalog.allDeclarations
         let declared = Set(declarations.map(\.identifier))
@@ -629,6 +617,9 @@ struct VPhoneFirmwareSetPatchesCommand: ParsableCommand {
             ))
         }
 
+        if preset != nil {
+            try VPhonePatchPresetStore.writePresetFile(presetFile, forVM: bundle.url)
+        }
         try VPhonePatchPresetStore.write(selection, forVM: bundle.url)
         try VPhoneHostFilePermissions.makeAccessible(at: bundle.url)
         print("[fw set-patches] \(name): preset \(selection.presetIdentifier)"
