@@ -3914,3 +3914,17 @@ the boot ladder resolves the desired interface per target viewport
 target degrees. Verified: folded boot and every unfold land 90° with a
 correct landscape re-flow; every close lands a lit portrait cover;
 explicit rotations 0/90/270 still settle; 3× cycles green.
+
+Follow-up (cover presentation band): the folded black band under the cover
+content traced to the host window, not the guest. The guest anchors the
+466x678 cover mode at the framebuffer's top-left and the window's layout
+crops exactly that region (1398x2034) full-bleed at the panel's scale —
+verified by pixel-brightness profiles of the raw framebuffer (content in
+rows 0–~2050, pure black only below the mode). The visible thick band was
+the inner-aspect window still showing the whole framebuffer for up to the
+orientation poll's one-second period after the fold: the cover content in
+the top 71 percent, black below. The fold action now runs the poll as soon
+as the posture RPC returns, so the window takes the cover crop immediately.
+(A guest-side experiment that centered the scene frames moved nothing —
+scene windows ignore the settings-frame origin — and was reverted; the
+top-left anchor is the load-bearing contract between the two sides.)

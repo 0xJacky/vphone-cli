@@ -653,6 +653,11 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
             } catch {
                 VPhoneAlert.present(title: VPhoneLocalization.text("Duo Fold Posture"), message: error.localizedDescription, style: .warning)
             }
+            // The window must take the new panel immediately: waiting for
+            // the orientation poll leaves the inner-aspect window showing
+            // the whole framebuffer for up to a second, with the folded
+            // state reading as a black band under the cover content.
+            self.pollOrientation()
             self.updateFoldButton(position: control.foldPosition, connected: control.isConnected)
         }
     }

@@ -301,6 +301,10 @@ static void vpApplyRootGeometry(void) {
         // whose block receives the mutable settings. The native geometry
         // callback then propagates: icon family switch and window resizes.
         CGRect frame = CGRectMake(0, 0, [bounds[2] doubleValue], [bounds[3] doubleValue]);
+        // The cover mode is smaller than the physical surface and the scene
+        // renders it at the surface's top-left; the host window crops that
+        // region and presents it full-bleed, so the origin stays at zero —
+        // centering here would desynchronize the two sides.
         for (id scene in vpRootServerScenes(app)) {
             id identifier = vpReadObject(scene, "identifier");
             if (![identifier isEqual:@"SB-main"] &&
