@@ -132,7 +132,6 @@ extension GuestAPI {
                         _ = try? postDarwinNotification("com.vphone.display.orientation.inputs.refresh", state: nil)
                         _ = try? postDarwinNotification("com.vphone.display.orientation.arbitration.refresh", state: nil)
                         _ = try? postDarwinNotification("com.vphone.display.orientation.actuation.refresh", state: nil)
-                        _ = try? postDarwinNotification("com.vphone.display.presentation.wallpaper.pulse", state: nil)
                         _ = try? postDarwinNotification("com.vphone.display.presentation.clock.refresh", state: nil)
                     }
                     var result: [String: Any]
@@ -510,7 +509,6 @@ extension GuestAPI {
                 _ = try? postDarwinNotification("com.vphone.display.orientation.pose.refresh", state: nil)
                 _ = try? postDarwinNotification("com.vphone.display.orientation.arbitration.refresh", state: nil)
                 _ = try? postDarwinNotification("com.vphone.display.orientation.actuation.refresh", state: nil)
-                _ = try? postDarwinNotification("com.vphone.display.presentation.wallpaper.pulse", state: nil)
                 _ = try? postDarwinNotification("com.vphone.display.presentation.clock.refresh", state: nil)
                 if !settled {
                     // Reuse the same public rotation path once the new panel

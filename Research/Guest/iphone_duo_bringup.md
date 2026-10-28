@@ -3928,3 +3928,18 @@ as the posture RPC returns, so the window takes the cover crop immediately.
 (A guest-side experiment that centered the scene frames moved nothing —
 scene windows ignore the settings-frame origin — and was reverted; the
 top-left anchor is the load-bearing contract between the two sides.)
+
+Follow-up (wallpaper on the landscape-rest inner panel): two symptoms
+after the state-machine rework — the wallpaper missing at a boot that
+rests landscape, and a ±90°-misrotated wallpaper after rotations. Both
+traced to the wallpaper orientation pulse
+(`presentation.wallpaper.pulse` → `vpPulseNativeWallpaperOrientation`),
+a portrait-era lease that re-aimed the wallpaper controller and force-set
+its view frames; with the coordinate-space machinery now delivering the
+rotated scene geometry natively, the lease fought it (interface-code
+rotation applied on a rotated mount = a net 90° error, direction
+following the rotation side). vphoned no longer posts the pulse from the
+rotation or posture paths; the native wallpaper rotation owns the
+follow. Verified: boot-rest-90 wallpaper present and upright, rotations
+0/90/270/90 all correct, cover lock wallpaper intact, close→open cycle
+upright landscape. The dylib handler remains registered but idle.
