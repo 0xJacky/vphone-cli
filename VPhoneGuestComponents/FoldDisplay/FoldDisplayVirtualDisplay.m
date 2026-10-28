@@ -71,31 +71,39 @@ void vpEnableVirtualDisplayProbe(void) {
     }
 }
 
-void vpTagVirtualDisplayProbe(void) {
+// Tags a render display with the BKS bit the guest itself describes as
+// `unknown`. FrontBoard drops an untagged source unless it is always
+// connected; this tag is what makes it publish one.
+BOOL vpTagUnknownDisplay(id display) {
     @try {
         NSString *(*describe)(NSUInteger) = dlsym(RTLD_DEFAULT, "NSStringFromBKSDisplayTags");
         SEL setter = sel_registerName("setTag:");
-        Method method = class_getInstanceMethod(object_getClass(vpVirtualDisplayProbe), setter);
+        Method method = class_getInstanceMethod(object_getClass(display), setter);
         if (!describe || !method || strcmp(method_getTypeEncoding(method), "v24@0:8q16") != 0) {
             vpFoldDisplayLog(@"virtual display tag: unavailable");
-            return;
+            return NO;
         }
         NSUInteger unknown = 0;
         for (unsigned int bit = 0; bit < 24; bit++) {
             NSUInteger candidate = (NSUInteger)1 << bit;
             NSString *label = describe(candidate);
             if (label && [label rangeOfString:@"unknown" options:NSCaseInsensitiveSearch].location != NSNotFound) {
-                if (unknown) { vpFoldDisplayLog(@"virtual display tag: ambiguous unknown bit"); return; }
+                if (unknown) { vpFoldDisplayLog(@"virtual display tag: ambiguous unknown bit"); return NO; }
                 unknown = candidate;
             }
         }
-        if (!unknown) { vpFoldDisplayLog(@"virtual display tag: no unknown bit"); return; }
-        ((void (*)(id, SEL, NSInteger))objc_msgSend)(vpVirtualDisplayProbe, setter, (NSInteger)unknown);
+        if (!unknown) { vpFoldDisplayLog(@"virtual display tag: no unknown bit"); return NO; }
+        ((void (*)(id, SEL, NSInteger))objc_msgSend)(display, setter, (NSInteger)unknown);
         vpFoldDisplayLog([NSString stringWithFormat:@"virtual display tag: %@ (%lu)", describe(unknown), (unsigned long)unknown]);
-        vpInspectRenderDisplays();
+        return YES;
     } @catch (NSException *exception) {
         vpFoldDisplayLog([NSString stringWithFormat:@"virtual display tag exception: %@", exception.reason]);
+        return NO;
     }
+}
+
+void vpTagVirtualDisplayProbe(void) {
+    if (vpTagUnknownDisplay(vpVirtualDisplayProbe)) vpInspectRenderDisplays();
 }
 
 void vpVirtualDisplayExperiment(BOOL create) {

@@ -4186,3 +4186,72 @@ device does not do. The tall/wide split (16pt long side, camera 0.82) is gone.
 
 Verified on duotest-m5: 14.2x25.7 and 24.3x18.4 on screen after two lock
 cycles, a rotation to 90°, folding closed, opening, and another lock cycle.
+
+## 2026-10-28 night: dual-display spike, Stage 0
+
+The landscape-wallpaper hooks kept patching consequences of one fact: this
+guest has one portrait main display, so PosterKit classifies every scene as
+`DISPLAY_TYPE_EMBEDDED` and `PFContextSupportsDynamicRotation` says NO. A
+real iPhone Duo has a second, always-connected, non-main, landscape-native
+inner panel that PosterKit classifies as `DISPLAY_TYPE_AUX`. The spike
+publishes such a display inside the guest instead
+(`FoldDisplay/FoldDisplayInnerDisplay.m`, opt-in through
+`/var/mobile/Library/Caches/vphone-duo-inner-display`).
+
+Stage 0 asked for: two always-connected displays, a stable SpringBoard
+without suppressing any assertion, an inner window scene, and
+`PFContextSupportsDynamicRotation` YES with no detour. On duospike-inner
+(iPhone19,4, 27.1 24A94425) it reads:
+
+| Check | Result |
+|---|---|
+| always-connected identities | `{Main, Unknown[7]}` |
+| SpringBoard | same pid across 80 s of polling, no new crash report |
+| inner scenes | `com.apple.springboard.bringup`, `SB-systemAperture`, `SB-systemApertureCurtain` on `Unknown[7]` |
+| PosterKit | `Unknown[7]`: `DISPLAY_TYPE_AUX`, dynamic rotation 1; Main: EMBEDDED, 0 |
+
+What the display needs, each found by the failure it caused:
+
+1. **backboardd**: a `CAWindowServerVirtualDisplay` (2853×2007, 60 Hz,
+   named `VPhone Duo Inner`), enabled and tagged with the bit
+   `NSStringFromBKSDisplayTags` calls `unknown` (65536). FrontBoard drops a
+   source that is neither always-connected nor tagged.
+2. **SpringBoard, CADisplay type**: every reader except one sees type 0,
+   built-in. `-[FBSDisplayConfiguration _initWithImmutableDisplay:
+   originalDisplay:isMainDisplay:assertIfInvalid:]` sees type 4, scoped by a
+   thread-local flag around the original. In `_FBSCADisplayToDisplayTypes`
+   type 4 is always-connected but UIKit-main-like only when it is the main
+   display, so only Main claims the cloning source (two claimants is
+   `ManagedDisplaysController` "Cloning source already exists",
+   `SpringBoard-2026-10-26-005058.ips`). `_FBSCADisplayAlwaysConnected`, the
+   classifier's other caller, gives always-connected for 0 and 4 alike.
+3. **Why not type 4 everywhere**:
+   - `BLSHBacklightOSInterfaceProvider initWithPlatformProvider:` builds the
+     backlight hosts once from `[CADisplay displays]` filtered to
+     `displayType == 0`. Without a host, `SBBacklightController
+     initWithWindowScene:` passes a nil backlight and
+     `-[SBDisplayLinkController initWithCADisplay:backlight:]` traps
+     (`.cold.2`, SIGTRAP).
+   - `-[SBEmbeddedScenesConnectionManager _reevaluateSceneConnection]` waits
+     for a scene on the `uniqueId` of every type-0 display and runs on every
+     arrival. With the inner display at type 4 the expected set is {Main},
+     so the inner scene's arrival completed startup a second time and
+     `-[SBMainWorkspace setPipCoordinator:]` asserted.
+4. **Getter ABI on 27.1**: `-[CADisplay pointScale]` is `Q16@0:8`;
+   CADisplay has no `isAlwaysConnected`. The adapter reports pointScale 3 and
+   `isExternal` NO for the inner display only.
+
+Open for Stage 1 and beyond:
+
+- The display only reaches SpringBoard after a SpringBoard-only restart:
+  backboardd adds it about a second after SpringBoard's first display
+  enumeration, and BacklightServices reads the list once.
+- The inner configuration reports 669×951 bounds, not the panel's 951×669.
+- Nothing composites the inner display onto the framebuffer and no touch is
+  routed to it.
+
+Test trap: a VM restart's environment sync rewrote
+`/usr/lib/libvphonefolddisplay.dylib` with the bundle's copy about a second
+into boot, after the first SpringBoard and backboardd had loaded the pushed
+build. Later SpringBoards ran stock code without any error. Re-push and
+check the on-disk hash after every VM restart.

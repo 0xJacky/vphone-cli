@@ -175,8 +175,16 @@ void vpBeginSurfaceProbe(unsigned int surfaceType, BOOL pair);
 void vpInspectServerClass(void);
 void vpInspectRenderDisplays(void);
 void vpEnableVirtualDisplayProbe(void);
+BOOL vpTagUnknownDisplay(id display);
 void vpTagVirtualDisplayProbe(void);
 void vpVirtualDisplayExperiment(BOOL create);
+
+// MARK: - inner display spike
+
+BOOL vpInnerDisplayRequested(void);
+void vpInstallInnerRenderDisplay(void);
+void vpInstallInnerDisplayAdapter(void);
+void vpInspectInnerDisplay(void);
 
 // MARK: - diagnostics
 

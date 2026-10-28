@@ -16,6 +16,7 @@ BOOL vpAutomaticMainStatus;
 // backboardd owns the render displays: the surface-type probe, the virtual
 // display experiments and the orientation-event probes run there.
 static void vpInstallBackboardProbes(void) {
+    vpInstallInnerRenderDisplay();
     Method extended = class_getInstanceMethod(objc_getClass("CAWindowServerDisplay"), sel_registerName("extendedProperties"));
     if (extended && strcmp(method_getTypeEncoding(extended), "@16@0:8") == 0) {
         vpOriginalExtendedProperties = method_setImplementation(extended, (IMP)vpSurfaceExtendedProperties);
@@ -51,6 +52,7 @@ static void vpInstallBackboardProbes(void) {
 // MARK: - SpringBoard hooks
 
 static void vpInstallSpringBoardHooks(void) {
+    vpInstallInnerDisplayAdapter();
     // The round-16 landscape wallpaper gate is now part of the Duo startup
     // path.  The one-shot marker remains accepted for older guests, but a
     // fresh boot must not silently fall back to the portrait wallpaper
@@ -161,6 +163,9 @@ static void vpInstallSpringBoardHooks(void) {
 // Every com.vphone.display.* request SpringBoard answers. Registration only
 // installs the handlers; none runs before the constructor returns.
 static void vpRegisterSpringBoardNotifications(void) {
+    static int innerDisplayInspectToken;
+    notify_register_dispatch("com.vphone.display.inner.inspect", &innerDisplayInspectToken, dispatch_get_main_queue(),
+        ^(int token) { vpInspectInnerDisplay(); });
     static int persistentCoverToken, persistentInnerToken;
     notify_register_dispatch("com.vphone.display.viewport.apply.cover", &persistentCoverToken, dispatch_get_main_queue(),
         ^(int token) { vpSetPersistentViewport(YES); });
