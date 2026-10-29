@@ -4697,3 +4697,64 @@ Likely, but not shown, it is SpringBoard's new scene host for the launching
 app drawing nothing for its first frame when the primary display renders
 it, the same first-frame blank the compositor's own hosts have; there is
 nothing to keep for a new host.
+
+## 2026-10-29 afternoon: the panel shows the inner display's own frames
+
+Zombification (above) hid most black frames; the user wanted the cause gone,
+and then also saw small red blocks beside a launching app's icon and ghosting
+Liquid Glass behind Notification Center (both with an intermediate portal
+build). The cause, found from data rather than screenshots:
+
+**A context has one host.** `CA::Render::LayerHost::retain_hosted_context`
+looks the hosted context up and, when it already has a host (its `+0x1d8`),
+detaches that host (clears its `+0x58`/`+0x60`, flags the old hosting
+context `0x2000` for re-resolution), takes the context, and rebinds it to the
+new host's display (`Context::set_display_mask`/`set_display_id` from the
+hosting context's `+0x2a8`/`+0x2ac`; `set_display_mask` also sends the owning
+client a Mach message). Every window of an inner scene is already hosted in
+the inner display's root scene window, so one `CALayerHost` per window on the
+primary display meant two hosts per context taking it from each other: on
+SpringBoard's commits during transitions the inner root took the windows
+back, and the panel showed those windows empty for a frame or two. A
+diagnostic build with a red compositor root showed exactly that: the holes
+were red and per window (only the Dock left, or icons without the wallpaper
+and widget contents), never SpringBoard's own layers of a window still held.
+It also explains why re-setting a host's frame or zPosition blanked hosted
+windows for a frame (the host commit re-ran the takeover).
+
+**Ruled out on the way:** host layer changes (traced: none at the flashes);
+SpringBoard fences (bursts do not align with flashes once both clocks are
+aligned by a white calibration frame); GPU load of the inner display (powered
+off, flashes stayed); `copyDisplayTimingsFromDisplay:`; asynchronous hosts.
+The inner display's update rate did move the rate (30 Hz 1/5 runs, 60 Hz ~5/7,
+120 Hz 5/5) because it paces the commits that trigger the takeovers. A
+cross-display `CAPortalLayer` of the inner root scene window takes nothing
+over and removed the window holes, but everything that depends on the display
+it is drawn for broke instead: SpringBoard's own portals (app zoom, switcher)
+left holes and a black first frame going home (setting `crossDisplay` on them
+helped only from `init`, which aborts SpringBoard when a portal is made off
+the main thread: `CA_ABORT_ON_NON_MAIN_THREAD_TRANSACTION_PUSH`; five aborts
+sent the next boot into Device Recovery), and backdrops sampled the primary
+display (ghosting glass). The render server's clone (`addClone:options:`, every
+option combination, with the LCD forced on) puts only black frames on this
+paravirtual panel; `CARenderServerCaptureDisplay` of the virtual display
+returns nothing.
+
+**The fix:** on each primary frame SpringBoard has the render server draw the
+inner display into a surface (`CARenderServerRenderDisplay(0, "VPhone Duo
+Inner", surface, 0, 0)` on a serial queue, about 3.5 ms) and shows it in a
+layer at the top of Main's root scene window, turned -90 degrees; three
+surfaces rotate so the render server never draws into the one shown or the
+one shown before. The panel shows the inner display's own frame, one primary
+frame late, with its backdrops, portals and hosts as the inner display draws
+them; nothing is hosted twice, so nothing is rebound. Measured over 12 launch
+sequences and 3 home/Dock runs: no black or partial frames, 0-6 transient
+tiles per run against 12-23 with the portal; scrolling updates at the same
+rate; taps on the inner display and the guest screenshot are unchanged.
+
+**Test trap, not a display bug:** after a SpringBoard or backboardd restart,
+touches vphoned injects (`input.touch`/`input.tap`, and so the host's clicks
+within 32 points of an edge: swipe home, Control Center, Notification Center,
+and the Dock at the usual window size) no longer reach SpringBoard until the
+guest reboots; the host's VZ taps keep working. Seen with the bundle's own
+build as well. Not yet explained.
