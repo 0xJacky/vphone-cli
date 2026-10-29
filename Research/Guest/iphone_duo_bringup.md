@@ -4758,3 +4758,31 @@ within 32 points of an edge: swipe home, Control Center, Notification Center,
 and the Dock at the usual window size) no longer reach SpringBoard until the
 guest reboots; the host's VZ taps keep working. Seen with the bundle's own
 build as well. Not yet explained.
+
+## 2026-10-29 evening: the panel is the cover's
+
+Main (the paravirtual panel) had been sized for the inner display,
+2007×2853 (669×951 points), since the single-display design, where SpringBoard
+laid the inner content out on Main itself (`VPhoneBootCommand` replaced the
+machine's 1398×2034 screen with `iPhone19_4InnerScreen` on every boot). With
+the two-display path that reason is gone: the inner display is its own
+2853×2007 virtual display, and Main is the cover. A cover laid out on
+669×951 points looked like a second inner display, not the Duo's outer one.
+
+vphone-vm now boots the machine's own screen, 1398×2034 at 3x: the cover is
+466×678 points with its native layout (the right-side Dock and status column
+are the Duo's outer-display design). Open, the compositor turns the inner
+display upright and fills the panel with it: 0.697 across and 0.713 along,
+about 2% tighter across than along. A first version kept the proportions and
+left 23 px black bars along the long sides, which the user did not want; with
+the fill, the digitizer (which spans the panel) maps onto the whole inner
+display, so backboardd's touch turn needs no rectangle of its own.
+
+Measured on the test VM (bundle built from this change):
+
+- Taps logged in SpringBoard land at the expected points: inner, panel pixel
+  (X, Y) of the landscape screenshot at (X × 951 / 2034, Y × 669 / 1398) points
+  for the centre and four corners (no bars); cover, at (X / 3, Y / 3).
+- Guest screenshots match the VM window at offset (0, 0) in all four inner and
+  three cover orientations (cover tested with Safari, which rotates on iPhone).
+- Three launch-sequence captures: no black frames, 2-5 transient tiles.
