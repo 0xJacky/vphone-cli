@@ -5,6 +5,12 @@
 
 static id vpInnerRenderDisplay;
 
+// Where the inner display's image lies on the panel, in the panel's normalized
+// portrait frame. The panel is the cover's; SpringBoard's compositor
+// (FoldDisplayPanel.m) fits the inner display onto it upright, centered and
+// shrunk to fit, so touches on the panel are mapped through this rectangle.
+static CGRect vpInnerPanelImage = {{0, 0}, {1, 1}};
+
 // MARK: - the render display
 
 @protocol VPhoneInnerDisplayInitialization
@@ -35,6 +41,29 @@ static void vpTagUnknownDisplay(id display) {
     vpFoldDisplayLog([NSString stringWithFormat:@"inner display: tag %@ (%lu)", describe(unknown), (unsigned long)unknown]);
 }
 
+static CGSize vpDisplayPixels(id display) {
+    CGRect bounds = CGRectZero;
+    id value = [display valueForKey:@"bounds"];
+    if ([value isKindOfClass:NSValue.class] && strcmp([value objCType], @encode(CGRect)) == 0) [value getValue:&bounds];
+    return bounds.size;
+}
+
+static void vpLocateInnerPanelImage(id server, id inner) {
+    CGSize panel = CGSizeZero, pixels = vpDisplayPixels(inner);
+    for (id display in [server valueForKey:@"displays"])
+        if ([[display valueForKey:@"name"] isEqual:@"LCD"]) panel = vpDisplayPixels(display);
+    if (panel.width < 1 || pixels.width < 1) {
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: panel size unknown ({%.0f, %.0f}), touches unfitted", panel.width, panel.height]);
+        return;
+    }
+    CGSize upright = pixels.width > pixels.height ? CGSizeMake(pixels.height, pixels.width) : pixels;
+    CGFloat scale = MIN(1, MIN(panel.width / upright.width, panel.height / upright.height));
+    CGSize image = CGSizeMake(upright.width * scale / panel.width, upright.height * scale / panel.height);
+    vpInnerPanelImage = CGRectMake((1 - image.width) / 2, (1 - image.height) / 2, image.width, image.height);
+    vpFoldDisplayLog([NSString stringWithFormat:@"inner display: on the {%.0f, %.0f} panel at {%.4f, %.4f, %.4f, %.4f}",
+        panel.width, panel.height, vpInnerPanelImage.origin.x, vpInnerPanelImage.origin.y, image.width, image.height]);
+}
+
 // Adds the inner panel's render display to a render server, once. It is
 // never removed: FrontBoard keeps identities for the life of the monitor.
 static BOOL vpAddInnerRenderDisplayToServer(id server) {
@@ -59,6 +88,7 @@ static BOOL vpAddInnerRenderDisplayToServer(id server) {
             ((void (*)(id, SEL, BOOL))objc_msgSend)(display, setEnabled, YES);
         vpTagUnknownDisplay(display);
         vpInnerRenderDisplay = display;
+        vpLocateInnerPanelImage(server, display);
         vpFoldDisplayLog([NSString stringWithFormat:@"inner display: render display added %@ uniqueId=%@", display,
             [display respondsToSelector:sel_registerName("uniqueId")] ? [display valueForKey:@"uniqueId"] : @"-"]);
         return YES;
@@ -160,6 +190,7 @@ static id vpInnerDigitizerState(id self, SEL selector, id service) {
 // reports positions on the portrait cover panel, which backboardd would
 // stretch onto the inner display's landscape space unturned; while the
 // inner display has the digitizer, each finger's normalized position is
+// taken into the inner display's image on the panel (vpInnerPanelImage) and
 // turned by the mount first.
 typedef struct __IOHIDEvent *VPHIDEventRef;
 static IMP vpOriginalHandleDirectTouch;
@@ -171,9 +202,11 @@ static void (*vpHIDEventSetFloat)(VPHIDEventRef, uint32_t, double);
 static void vpTurnDigitizerPosition(VPHIDEventRef event) {
     static const uint32_t digitizer = 11, x = 11 << 16, y = (11 << 16) | 1;
     if (vpHIDEventType(event) == digitizer) {
-        double nx = vpHIDEventGetFloat(event, x), ny = vpHIDEventGetFloat(event, y);
-        vpHIDEventSetFloat(event, x, 1 - ny);
-        vpHIDEventSetFloat(event, y, nx);
+        CGRect image = vpInnerPanelImage;
+        double u = MIN(1, MAX(0, (vpHIDEventGetFloat(event, x) - image.origin.x) / image.size.width));
+        double v = MIN(1, MAX(0, (vpHIDEventGetFloat(event, y) - image.origin.y) / image.size.height));
+        vpHIDEventSetFloat(event, x, 1 - v);
+        vpHIDEventSetFloat(event, y, u);
     }
     CFArrayRef children = vpHIDEventChildren(event);
     for (CFIndex index = 0; children && index < CFArrayGetCount(children); index++)
