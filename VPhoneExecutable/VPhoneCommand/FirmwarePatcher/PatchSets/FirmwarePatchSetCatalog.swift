@@ -70,6 +70,7 @@ public enum FirmwarePatchSetCatalog {
             .union(experimentalIdentityPatches)
             .union([FirmwareGuestSystemPatchSet.otaUserland, FirmwareGuestSystemPatchSet.homePodTopCap, FirmwareGuestSystemPatchSet.homePodSetupBypass, FirmwareGuestSystemPatchSet.homePodAudioProduct, FirmwareGuestSystemPatchSet.homePodWelcome, FirmwareGuestSystemPatchSet.homePodSiriSpeech, FirmwareGuestSystemPatchSet.homePodOTAUserland, FirmwareGuestSystemPatchSet.homePodSoundGlow, FirmwareGuestSystemPatchSet.homePodCryptexStaging, FirmwareGuestSystemPatchSet.homePodCryptexClass, FirmwareGuestSystemPatchSet.homePodAdHocInstall])
             .union([FirmwareKernelCustomFirmwarePatchSet.tvTPROPagers, misTrustAuthPatch, FirmwareGuestSystemPatchSet.settingsRootRows, FirmwareGuestSystemPatchSet.settingsSoftwareUpdate, FirmwareGuestSystemPatchSet.tvTPRO, FirmwareGuestSystemPatchSet.tvOTAUserland, FirmwareGuestSystemPatchSet.tvSetupDisplayLookup, FirmwareGuestSystemPatchSet.tvSetupFocus, FirmwareGuestSystemPatchSet.tvLocalActivation, FirmwareGuestSystemPatchSet.tvLegacySetup])
+            .union([FirmwareGuestSystemPatchSet.prebootFoldableProductId])
 
     /// ProMotion: the 120 Hz timing for the paravirtual display.
     ///
@@ -236,6 +237,7 @@ public enum FirmwarePatchSetCatalog {
     public static let tvOSBlockedPatches: Set<String> = [
         paravirtTask3Patch,
         FirmwareGuestSystemPatchSet.arm64eX1CacheBootstrap,
+        FirmwareGuestSystemPatchSet.arm64eX1CacheRemaining,
         "dyld-boot-iomfb_force_kern",
         "dyld-boot-iomfb_swapend",
         "dyld-boot-lockdown_mode",
@@ -248,6 +250,8 @@ public enum FirmwarePatchSetCatalog {
         "preboot-cfw-devicetree_board_audio",
         "preboot-cfw-devicetree_haptics",
         "preboot-cfw-devicetree_iphone_product",
+        "preboot-cfw-devicetree_foldable_vm_subtype",
+        "preboot-exp-devicetree_foldable_product_id",
         "preboot-cfw-devicetree_microphone_array",
         RestoreRamDiskSealPatcher.patchIdentifier,
         "system-apps-cfw-attitude",
@@ -255,6 +259,9 @@ public enum FirmwarePatchSetCatalog {
         FirmwareGuestSystemPatchSet.followUpGroups,
         "system-backboardd-cfw-gyroscope",
         "system-backboardd-cfw-accelerometer",
+        "system-backboardd-cfw-hinge",
+        "system-springboard-cfw-fold_guard",
+        "system-springboard-cfw-fold_display",
         "system-campo-cfw-entitlements",
         "system-debugserver-cfw-install",
         FirmwareGuestSystemPatchSet.arm64eX1DyldBootstrap,
@@ -273,6 +280,7 @@ public enum FirmwarePatchSetCatalog {
         "system-systemhook-cfw-metal_cache_reuse",
         "system-systemversion-cfw-build_version",
         "system-virtiosound-cfw-hal_plugin",
+        "system-virtualaudio-cfw-device_state_null_gate",
         "system-virtualaudio-cfw-microphone_graph_chains",
         "system-virtualaudio-cfw-mute_set_throw",
         "system-virtualaudio-cfw-speaker_graph_chains",
