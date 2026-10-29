@@ -158,7 +158,13 @@ void vpInstallSharedPanel(void) {
 // a visible change. (An opacity flip on the container does the same, but
 // below 1 the container renders offscreen as a group, and hosted secure
 // windows come out as grey blocks on those frames.)
+//
+// Each host keeps its context's last frame (zombification "always") when the
+// render server briefly finds nothing to draw for it, which it does while
+// applications launch and commit: without that, the primary display showed
+// one or two frames of the bare black root, about one in every app launch.
 static id vpInnerHostRoot, vpInnerHostContainer, vpInnerHostDamage, vpInnerHostRefresh;
+static NSString *vpInnerHostZombification;
 static CFRunLoopObserverRef vpInnerHostObserver;
 static NSMutableDictionary<NSNumber *, id> *vpInnerHostLayers;
 static CGSize vpInnerHostPanel;
@@ -248,6 +254,8 @@ static void vpSyncInnerHosts(void) {
         if (!host) {
             host = [objc_getClass("CALayerHost") new];
             ((void (*)(id, SEL, unsigned int))objc_msgSend)(host, sel_registerName("setContextId:"), contextId);
+            if (vpInnerHostZombification)
+                ((void (*)(id, SEL, id))objc_msgSend)(host, sel_registerName("setZombificationMode:"), vpInnerHostZombification);
             ((void (*)(id, SEL, id))objc_msgSend)(vpInnerHostContainer, sel_registerName("addSublayer:"), host);
             vpInnerHostLayers[key] = host;
         }
@@ -291,6 +299,11 @@ static void vpShowInnerDisplay(BOOL shown) {
                 hostContext ? method_getTypeEncoding(hostContext) : "missing"]);
             return;
         }
+        NSString *__unsafe_unretained *zombification =
+            (NSString *__unsafe_unretained *)dlsym(RTLD_DEFAULT, "kCALayerHostZombificationModeAlways");
+        Method zombify = class_getInstanceMethod(objc_getClass("CALayerHost"), sel_registerName("setZombificationMode:"));
+        vpInnerHostZombification = zombification && zombify && strcmp(method_getTypeEncoding(zombify), "v24@0:8@16") == 0 ? *zombification : nil;
+        if (!vpInnerHostZombification) vpFoldDisplayLog(@"inner display: host zombification unavailable");
         id root = [objc_getClass("CALayer") new];
         ((void (*)(id, SEL, CGColorRef))objc_msgSend)(root, sel_registerName("setBackgroundColor:"),
             ((CGColorRef (*)(id, SEL))objc_msgSend)(vpReadObject(objc_getClass("UIColor"), "blackColor"), sel_registerName("CGColor")));

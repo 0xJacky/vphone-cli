@@ -4653,3 +4653,47 @@ a fold, the Dock ignored taps until the next restart while the home screen's
 own icons kept working. Not yet explained; the next occurrence should be
 caught with `logs.syslog` for SpringBoard during a Dock tap ("Sending UIEvent
 ... to window" and "Allowing tap for icon view").
+
+## 2026-10-29: host zombification against app-launch black frames
+
+**Symptom.** After the fixes above the user still saw an occasional flicker.
+A 120 Hz ScreenCaptureKit capture of the VM window, with per-frame luma,
+found it: one or two frames in which the whole panel is black (luma 0, the
+compositor root's own black), sometimes alternating with a frame in which an
+app is only partly drawn, about 0.4 to 0.6 s after an app launch or on the
+way home. Same rate in portrait and landscape; never on the cover (no
+compositing there). Sequence used: launch Safari, home, Settings, home,
+Safari by `apps.launch`, 2.5 s apart; it flashed in about 18 of 26 runs.
+
+**Ruled out, each by the same measurement:**
+- Host layer changes: a trace of every `CALayerHost` add, remove, frame and
+  zPosition change logged nothing during a flash.
+- SpringBoard fences: `CAFenceHandle` / `-[CAContext addFence:]` bursts
+  (logged with a calibration mark, a one-frame white layer, to align the
+  guest clock with the capture) do not coincide with the flashes.
+- GPU load of the inner virtual display: with SpringBoard keeping the inner
+  display powered off while it owned the panel, content kept updating and the
+  flashes stayed (3 of 5 runs). The inner display's update rate does move the
+  rate (30 Hz 1/5, 60 Hz ~5/7, 120 Hz 5/5), which follows how often apps
+  commit, not load.
+- `copyDisplayTimingsFromDisplay:` (inner timed by Main): no change.
+- `rendersAsynchronously` with an `asynchronousRenderPeriod` of 1/120: the
+  hosts draw nothing at all, as before.
+- A render-server probe in SpringBoard (`CARenderServerRenderDisplay` of
+  both displays) sees Main and the inner display change together, but costs
+  15 to 80 ms a sample and misses one- and two-frame events.
+
+**Fix.** `CALayerHost.zombificationMode = kCALayerHostZombificationModeAlways`
+on the compositor's hosts: a host whose context the render server briefly
+finds nothing to draw for keeps that context's last frame. The same
+sequence then flashed in 3 of 19 runs (one event each). Setting it on every
+`CALayerHost` SpringBoard makes (its scene hosts too) was no better (4 of
+10), so only the compositor's hosts get it. Going home, the app switcher,
+rotation and folding show no stale content (the switcher's blank snapshot
+cards are the same without it).
+
+**Left.** The remaining flash is still a fully black frame at an app launch.
+Likely, but not shown, it is SpringBoard's new scene host for the launching
+app drawing nothing for its first frame when the primary display renders
+it, the same first-frame blank the compositor's own hosts have; there is
+nothing to keep for a new host.
