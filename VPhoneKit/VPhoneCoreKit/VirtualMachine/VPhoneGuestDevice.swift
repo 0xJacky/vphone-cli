@@ -243,7 +243,7 @@ public struct VPhoneGuestDevice: Sendable, Equatable {
         screen: .init(width: 320, height: 320, pixelsPerInch: 72, scale: 1.0),
     )
 
-    /// Apple Watch Series 11 (GPS), 46 mm: 416x496 at 330 ppi, 208x248 points.
+    /// Apple Watch Series 11 (GPS), 46 mm: 416x496 at 326 ppi, 208x248 points.
     /// The research board's kernel boots it with the watchOS kexts of its IPSW
     /// (the `watch` kernelcache recipe); N227b's device tree supplies the watch
     /// idiom and 2x identity.
@@ -252,7 +252,7 @@ public struct VPhoneGuestDevice: Sendable, Equatable {
         productType: "Watch7,18",
         deviceClass: "n227bap",
         productName: "Apple Watch Series 11 (GPS)",
-        screen: .init(width: 416, height: 496, pixelsPerInch: 330, scale: 2.0),
+        screen: .init(width: 416, height: 496, pixelsPerInch: 326, scale: 2.0),
     )
 
     /// Whether the guest's userland is plain arm64 rather than arm64e: only
