@@ -4268,6 +4268,81 @@ This enables transport testing; HomePod onboarding, Apple TV companion setup
 and Home/AirPlay pairing have not been validated. Existing machines need the
 updated Core Bundle and `cfw update-environment` while stopped, then a boot.
 
+## HomePod mini on the research board (2026-10-26)
+
+HomePod Software 26.5 (23L471, AudioAccessory5,1) on cloudOS 26.5 (23F75), which
+has no vphone600 components: the 26.5 research board kernel (`26.5_23F77`)
+rebuilt with the HomePod's own kexts, as the watch is. `homepod-mini` keeps its
+kernel and TXM patches and links this kernelcache. The firmware catalog
+pairs HomePod Software 26.5 with this cloudOS, so Launchpad offers it; 27.x
+keeps cloudOS 26.4.
+
+### The HomePod kernelcache
+
+`kernel-boot-vresearch101_kext_mix` with the recipe `homepod_26.5_23L471`
+(`guest: homePod`; `KernelCacheRecipes.ownRecipeGuests` now names it, so a
+HomePod no longer falls back to the iPhone recipe of the same kernel).
+
+| Source | Kexts |
+| --- | --- |
+| `b520_26.5_23L471`: `kernelcache.release.b520` of the HomePod IPSW, from the guest restore tree | 91: the kexts of the vresearch101 target built with `OSPRODUCT=AppleTVOS` (`b520.mk` includes `sub.AppleTV.mk`; the method reproduces 179 of the 180 shipped b520 bundles, the miss being AppleUSBHostDeviceSupport as on the watch) |
+| base: 23F75 `kernelcache.release.vresearch101` | 26: the kernel and its 7 KPI bundles, the virtual platform kexts (ARMGIC, PVPanic, ParavirtGPU, VPIOP, VirtIO, VirtualPlatform, ParavirtIOSurface, VirtIOStorage, the XHCI stack, M68Buttons, CallbackPowerSource, TypeCPhy, usb.cdc), and AMFI, corecrypto and AppleImage4 |
+| `vphone600_26.4_23E5207q` | 6: VideoToolboxParavirtualization, AvpFairPlayDriver, driverkit.serial, usb.cdc.acm, usb.serial, VirtIONeuralEngineDevice |
+
+AMFI, corecrypto and AppleImage4 are pinned to the base with the new recipe key
+`kextOverrides`: b520 ships them too, but the T8006 kernel has a PPL
+(`__PPLTEXT`, `__PPLDATA`) and their HomePod builds call into it; the
+VRESEARCH1 kernel is SPTM/TXM (`__DATA_SPTM`) and has none. The seven KPI
+symbol sets of the two kernels (xnu-12377.123.3 and .122.4) are identical.
+
+gPTP (2026-10-27): `kextOverrides` also takes `IOTimeSyncFamily` from the base
+and `IOgPTPPlugin` from `vphone600_26.4_23E5207q`, the pair of the iPhone 26.5
+mix (now 89 kexts from b520, 7 from vphone600). The b520 plugin's
+`IOTimeSyncgPTPManager` requires the PMU temperature sensor `PMU tdev1` and
+fails to start on a VM, which left `audioclocksyncd` waiting and AirPlay 2's
+PTP clock (`CM8021ASClockCreate`) hung. With Apple's VM build the manager
+starts and the HomePod plays AirPlay 2 from the Mac. The vphone600 family
+does not link against the 26.5 kernel (it imports an `IOPlatformExpert`
+private function the base lacks). No instruction patch. See
+[HomePod AirPlay](Guest/homepod_airplay.md).
+
+Both maps are research results: the b520 kernelcache symbolicated with BinDiff
+against the 23E5207i KDK, and the 26.5 recipe map with additions. The fixes
+(`HomePod/mix` in the research workspace, rebuilt by its `pipeline.sh`):
+
+- Kernel imports of the HomePod kexts, through the kernel alignment: 54 fixed,
+  15 kept after disassembly. One-instruction stubs (`mov w0,#k; ret`) lie
+  8 bytes apart in both kernels, so names drift there and identical-code folding
+  gives one stub many names: a `_kc.` placeholder binds to a byte-identical
+  base stub; a real name stays a name bind (checked against Apple's names in
+  macOS 25F80: `_t6000dart_vo_tte` and `_pmap_has_iofilter_protected_write`
+  sit on the wrong base stub, the config-specific `_ml_page_protection_type`,
+  `_secure_channel_shared_page` and `_ecc_log_memory_error_ce` stay the base's).
+  The base map has `_ml_set_reset_time` inside `_ml_get_conttime_offset`, as
+  23E244 had; the import binds to the `ret` the base PMGR calls.
+- Family names the base VM kexts import from b520 builds: PAC-diversity vtable
+  slots (`IOMobileFramebufferLegacy` slot 344 and
+  `IOGPUEventMachine::incrementStampNoRelease`, as on the watch;
+  `IOUSBHostPipe` slot 32), `kext_xfer_names`, and eleven IOSurface getters
+  whose b520 labels sat 0x14 (two 0x2c) before their entry, on the previous
+  function's `retab`, which fails PAC on return.
+- Class data labels of both maps from `ipsw kernel cpp`; none of the 40 the
+  donor kexts import moves.
+
+Checked on 2026-10-26: bindcheck reports no unresolved bind for the HomePod,
+base VM and donor kexts; the entry checks find no bind after a prologue (110
+family, 1052 kernel, 2 donor family binds); `vphone-cli`'s native staging of
+the recipe is byte-identical to the research mix (the kernel and all 119 kext
+executables). Relinking the HomePod's own extraction reproduces the shipped
+b520 kernelcache: the same size, and apart from the prelink `InfoPlistDigest`
+entries only two words of the shared `__LINKEDIT` differ, as on the watch.
+
+Checked on 2026-10-26 and 2026-10-27: `homepod-std` (Launchpad `vm create` with
+the HomePod 26.5 IPSW, cloudOS 26.5 23F75 and `--preset homepod-mini`; `fw
+kernelcache` staged as the user and linked as root) restores, boots, takes
+`cfw install` and answers vphoned as `AudioAccessory5,1`, iOS 26.5. Its plan
+holds `kernel-boot-vresearch101_kext_mix` beside `homepod-mini`'s kernel patches.
+
 ## iOS 18 guests on the research board (2026-10-21)
 
 iOS 18.1 to 18.7.2 run on their own release's research board kernel, rebuilt
