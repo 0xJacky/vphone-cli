@@ -42,16 +42,12 @@ enum VPhoneMachineTemplateKeys {
 
     /// Resolves the preset against the two versions the way `fw patch` will.
     static func plan(
-        preset identifier: String,
+        preset: VPhonePatchPreset,
         iOSVersion: String,
         cloudOSVersion: String,
         blocked: [String] = [],
         allowed: [String] = [],
     ) throws -> VPhonePatchPlan {
-        guard let preset = VPhonePatchPresetStore.preset(named: identifier) else {
-            let available = VPhonePatchPresetStore.availablePresets().map(\.identifier)
-            throw ValidationError("Unknown patch preset '\(identifier)'. Available: \(available.joined(separator: ", "))")
-        }
         let pipeline = FirmwarePipeline(
             vmDirectory: FileManager.default.temporaryDirectory,
             variant: .jb,
@@ -61,7 +57,7 @@ enum VPhoneMachineTemplateKeys {
             allowedPatches: Set(allowed),
         )
         guard let plan = try pipeline.resolvePlan(iOSBase: VPhoneVersion(iOSVersion), cloudOS: VPhoneVersion(cloudOSVersion)) else {
-            throw ValidationError("Patch preset '\(identifier)' did not resolve.")
+            throw ValidationError("Patch preset '\(preset.identifier)' did not resolve.")
         }
         return plan
     }
@@ -70,7 +66,7 @@ enum VPhoneMachineTemplateKeys {
         device: String,
         ios: VPhoneRestoreInfo.OSVersion,
         cloudOS: VPhoneRestoreInfo.OSVersion,
-        preset: String,
+        preset: VPhonePatchPreset,
         blocked: [String] = [],
         allowed: [String] = [],
         diskSizeGB: UInt64,
@@ -277,11 +273,14 @@ enum VPhoneMachineTemplateKeys {
     static func staleReasons(_ template: VPhoneMachineTemplate) -> [String] {
         let key = template.key
         let selection = VPhonePatchPresetStore.selection(forVM: template.url)
+        guard let preset = VPhonePatchPresetStore.preset(named: key.patchPreset, forVM: template.url) else {
+            return template.staleReasons(currentSeries: currentSeries, freshKey: nil)
+        }
         let fresh = try? self.key(
             device: key.device,
             ios: .init(version: key.iOSVersion, build: key.iOSBuild),
             cloudOS: .init(version: key.cloudOSVersion, build: key.cloudOSBuild),
-            preset: key.patchPreset,
+            preset: preset,
             blocked: selection.blockedPatches,
             allowed: selection.allowedPatches,
             diskSizeGB: key.diskSizeGB,
@@ -291,7 +290,7 @@ enum VPhoneMachineTemplateKeys {
         var drifted: [String] = []
         if let bundle = try? template.bundle(),
            let wanted = try? plan(
-               preset: key.patchPreset,
+               preset: preset,
                iOSVersion: key.iOSVersion,
                cloudOSVersion: key.cloudOSVersion,
                blocked: selection.blockedPatches,
