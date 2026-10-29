@@ -739,7 +739,7 @@ struct VPhoneFirmwareExportPresetCommand: ParsableCommand {
         guard url.pathExtension == "plist", !identifier.isEmpty, !VPhonePatchPresetStore.isPresetFile(identifier) else {
             throw ValidationError("The output is a .plist file whose name, without .plist, is the preset's identifier.")
         }
-        guard !VPhonePatchPresetStore.shippedPresets().contains(where: { $0.identifier == identifier }) else {
+        guard !VPhonePatchPresetStore.isShipped(identifier) else {
             throw ValidationError("'\(identifier)' is a shipped preset's identifier; name the file something else.")
         }
 

@@ -294,6 +294,13 @@ public enum VPhonePatchPresetStore {
         return FirmwarePatchSetCatalog.builtInPresets
     }
 
+    /// Whether the bundle ships a preset with this identifier. Only then does
+    /// the identifier alone say what the preset turns on: a user's preset or
+    /// a preset file can change under the same one.
+    static func isShipped(_ identifier: String) -> Bool {
+        shippedPresets().contains { $0.identifier == identifier }
+    }
+
     /// The preset with this identifier, or nil.
     public static func preset(named identifier: String) -> VPhonePatchPreset? {
         availablePresets().first { $0.identifier == identifier }
@@ -318,7 +325,7 @@ public enum VPhonePatchPresetStore {
     /// The VM's copy, when it is the preset named. Never a shipped identifier.
     private static func vmCopy(named identifier: String, data: Data?) -> VPhonePatchPreset? {
         guard let data, let copy = try? VPhonePatchPreset.decode(data), copy.identifier == identifier,
-              !shippedPresets().contains(where: { $0.identifier == identifier })
+              !isShipped(identifier)
         else { return nil }
         return copy
     }
@@ -391,7 +398,7 @@ public enum VPhonePatchPresetStore {
             throw ValidationError("Preset file \(url.path) has the identifier '\(preset.identifier)'; an identifier has no '/' and no .plist suffix.")
         }
         // As for ~/.vphone/patches_presets: nothing can redefine a shipped preset.
-        if shippedPresets().contains(where: { $0.identifier == preset.identifier }) {
+        if isShipped(preset.identifier) {
             throw ValidationError("Preset file \(url.path) uses the identifier '\(preset.identifier)' of a shipped preset; give it its own.")
         }
         return preset

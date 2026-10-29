@@ -40,6 +40,15 @@ enum VPhoneMachineTemplateKeys {
         }.sorted()
     }
 
+    /// The patches a key digests. A shipped preset's identifier fixes its
+    /// guest patches within a series, so the boot chain is enough. Any other
+    /// preset, a user's or a preset file's, can change them under the same
+    /// identifier, and a clone keeps its template's guest and preset copy, so
+    /// every patch counts.
+    static func keyedPatches(_ enabled: some Sequence<String>, preset identifier: String) -> [String] {
+        VPhonePatchPresetStore.isShipped(identifier) ? bootChainPatches(enabled) : Set(enabled).sorted()
+    }
+
     /// Resolves the preset against the two versions the way `fw patch` will.
     static func plan(
         preset: VPhonePatchPreset,
@@ -91,7 +100,7 @@ enum VPhoneMachineTemplateKeys {
             cloudOSBuild: cloudOS.build,
             patchPreset: plan.presetIdentifier,
             bootChainPlanDigest: VPhoneMachineTemplateKey.planDigest(
-                bootChainPatches: bootChainPatches(plan.enabled),
+                bootChainPatches: keyedPatches(plan.enabled, preset: plan.presetIdentifier),
                 parameters: plan.parameters,
             ),
             bundleSeries: series,
@@ -199,7 +208,7 @@ enum VPhoneMachineTemplateKeys {
             cloudOSBuild: info.cloudOS.build,
             patchPreset: plan.presetIdentifier,
             bootChainPlanDigest: VPhoneMachineTemplateKey.planDigest(
-                bootChainPatches: bootChainPatches(plan.selectedPatches),
+                bootChainPatches: keyedPatches(plan.selectedPatches, preset: plan.presetIdentifier),
                 parameters: plan.parameters,
             ),
             bundleSeries: series,

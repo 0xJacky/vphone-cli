@@ -362,6 +362,15 @@ nonisolated struct VPhoneLaunchpadPatchSelection: Hashable, Sendable {
         presetFile == nil && preset == Self.defaultPreset ? [] : ["--preset", presetArgument]
     }
 
+    /// The `--preset` flag for a step on a machine that already keeps the
+    /// preset: `fw set-patches` before `fw prepare` copies a file into it
+    /// with ``presetArguments``, and a clone has its template's copy. Once the
+    /// bundle has read the file, `preset` is its identifier, so a later step
+    /// or a retry does not need the file again.
+    var machinePresetArguments: [String] {
+        preset == Self.defaultPreset ? [] : ["--preset", preset]
+    }
+
     /// Takes what the bundle read from ``presetFile``: the identifier it
     /// declares, and whether it customises the system before the restore.
     mutating func adoptFile(from catalog: VPhoneLaunchpadPatchCatalog) {

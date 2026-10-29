@@ -33,14 +33,6 @@ final class VPhoneLaunchpadMaintenanceRun {
             }
         }
 
-        var finished: String {
-            switch self {
-            case .installCustomFirmware: String(localized: "Custom firmware installed.")
-            case .updateGuestEnvironment: String(localized: "Guest environment updated.")
-            case .updateKernel: String(localized: "Kernel updated.")
-            }
-        }
-
         var failure: String {
             switch self {
             case .installCustomFirmware: String(localized: "Unable to install custom firmware. Check the log for details.")
