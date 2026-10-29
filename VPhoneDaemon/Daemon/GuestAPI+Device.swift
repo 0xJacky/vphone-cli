@@ -203,10 +203,11 @@ extension GuestAPI {
     /// as on a device; elsewhere SpringBoard's test-automation override sets
     /// the pose beside the hinge. The official model is three screen states —
     /// `position` `closed`, `book` (~100°) or `open`, or a fraction 0–1 of
-    /// the hinge's 180° — changed by a sweep from the current angle
-    /// (`duration` seconds; default the per-direction hand-fold time, opening
-    /// faster than closing; 0 an instant swap; `profile` `continuous` or
-    /// `fade`). The older `hinge` names still work and set the pose at once.
+    /// the hinge's 180° — changed by a sweep from the current angle, which
+    /// SpringBoard's display tool service runs (`duration` seconds; default
+    /// the per-direction hand-fold time, opening faster than closing; 0 an
+    /// instant swap; `profile` `continuous` or `fade`, default SpringBoard's
+    /// own). The older `hinge` names still work and set the pose at once.
     private static func setDevicePose(_ params: [String: Any]) throws -> [String: Any] {
         func value(_ key: String, names: [String: Int], range: ClosedRange<Int>, default fallback: Int?) throws -> Int {
             if let name = params[key] as? String {
@@ -228,7 +229,7 @@ extension GuestAPI {
         var angle: Double?
         var sweep = false
         var durationMs = -1.0
-        var profile = 0
+        var profile: String?
         if let position = params["position"] {
             let target: Double
             switch position {
@@ -256,10 +257,8 @@ extension GuestAPI {
                 durationMs = seconds * 1000
             }
             if let name = params["profile"] as? String {
-                switch name.lowercased() {
-                case "continuous": profile = 0
-                case "fade": profile = 1
-                default:
+                profile = name.lowercased()
+                guard profile == "continuous" || profile == "fade" else {
                     throw GuestAPIError.invalidRequest("profile must be continuous or fade")
                 }
             }
@@ -282,28 +281,53 @@ extension GuestAPI {
             throw GuestAPIError.invalidRequest("the host controls have no upside-down orientation")
         }
         GuestFoldPose.cancelStartupRestore()
-        defer { GuestFoldPose.finishExplicitRequest() }
-        if !relayed {
-            guard vp_device_pose_set(Int32(orientation), Int32(hinge), Int32(tabletop)) else {
+        var springBoardSwept = false
+        defer { GuestFoldPose.finishExplicitRequest(settledHinge: springBoardSwept ? Int32(hinge) : nil) }
+        let published: Bool
+        if relayed {
+            if let current = vp_hinge_get()["angle"] as? Double, hingeState(for: current) == 1, hingeState(for: angle!) != 1 {
+                // Opening a closed device wakes it; the hinge sensor's own wake
+                // flag does that on hardware, and the host controls cannot set
+                // it. SpringBoard's pose provider publishes a pose in motion only
+                // on display frames, so with the cover asleep the new angle would
+                // sit unpublished until the next wake. The screen is lit before
+                // the sweep starts.
+                GuestScreenUnlock.wakeDisplay()
+            }
+            // With the relay, the hinge is the pose.
+            published = sweep
+                ? vp_hinge_sweep(angle!, durationMs, profile == "fade" ? 1 : 0, Int32(orientation))
+                : vp_hinge_set(angle!, Int32(orientation))
+            guard published else {
+                throw GuestAPIError.operationFailed("The virtual hinge did not take the pose")
+            }
+        } else {
+            // A sweep is SpringBoard's own, as Apple's tooling runs it: the
+            // display tool service moves SpringBoard's hinge pose and swaps
+            // displays on the way, keeping the device orientation unless one
+            // was asked for, and replies once the swap is done. The override is
+            // then left alone: it reaches SpringBoard even under the sweep's
+            // test lock and stands for 0, 90 or 180 degrees only, so book (100)
+            // would slide back to 90 and start a transition toward the cover.
+            // SpringBoard applies the next override against its current pose,
+            // so a later one still lands. The virtual hinge takes the end
+            // angle. Without the service the virtual hinge sweeps and the
+            // override jumps, as before.
+            if sweep {
+                let profileOverride: Int32 = profile == "fade" ? 1 : profile == "continuous" ? 2 : 0
+                let seconds = durationMs < 0 ? -1 : durationMs / 1000
+                springBoardSwept = vp_display_swap(angle! / 180, seconds, params["orientation"] == nil ? 0 : Int32(orientation),
+                                                   profileOverride, 10 + max(seconds, 0)) == 1
+            }
+            guard springBoardSwept || vp_device_pose_set(Int32(orientation), Int32(hinge), Int32(tabletop)) else {
                 throw GuestAPIError.operationFailed("SpringBoardServices has no device pose override on this guest")
             }
-        } else if let current = vp_hinge_get()["angle"] as? Double, hingeState(for: current) == 1, hingeState(for: angle!) != 1 {
-            // Opening a closed device wakes it; the hinge sensor's own wake
-            // flag does that on hardware, and the host controls cannot set
-            // it. SpringBoard's pose provider publishes a pose in motion only
-            // on display frames, so with the cover asleep the new angle would
-            // sit unpublished until the next wake. The screen is lit before
-            // the sweep starts.
-            GuestScreenUnlock.wakeDisplay()
-        }
-        // With the override, the pose has landed and the hinge half is
-        // published beside it; its absence (no virtual hinge service on this
-        // guest) does not undo the pose. With the relay, the hinge is the pose.
-        let published = sweep
-            ? vp_hinge_sweep(angle!, durationMs, Int32(profile), Int32(orientation))
-            : vp_hinge_set(angle!, Int32(orientation))
-        if relayed, !published {
-            throw GuestAPIError.operationFailed("The virtual hinge did not take the pose")
+            // The pose has landed; the hinge half is published beside it, and
+            // its absence (no virtual hinge service on this guest) does not
+            // undo the pose.
+            published = sweep && !springBoardSwept
+                ? vp_hinge_sweep(angle!, durationMs, profile == "fade" ? 1 : 0, 0)
+                : vp_hinge_set(angle!, 0)
         }
         var hingeHID = vp_hinge_get()
         hingeHID["applied"] = published
@@ -314,7 +338,8 @@ extension GuestAPI {
         if sweep {
             reply["sweep"] = [
                 "duration_ms": durationMs,
-                "profile": profile == 1 ? "fade" : "continuous",
+                "profile": profile ?? (springBoardSwept ? "springboard" : "continuous"),
+                "completed": springBoardSwept,
             ]
         }
         return reply

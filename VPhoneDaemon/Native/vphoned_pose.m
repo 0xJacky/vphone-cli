@@ -10,7 +10,13 @@
  * from the hinge state. The server checks the client for
  * com.apple.springboard.testautomation, which vphoned carries.
  *
- * The class is resolved at run time, so a base without it reports false.
+ * A fold to a position goes through SpringBoardServices' display tool
+ * client instead, the service behind Apple's suiatool swap: SpringBoard
+ * sweeps its pose itself and swaps displays on the way, as on hardware. The
+ * server checks for com.apple.springboard.sbdisplay.service.
+ *
+ * The classes are resolved at run time, so a base without them reports
+ * false (or -1).
  */
 
 #import "Include/VphonedNative.h"
@@ -48,6 +54,58 @@ bool vp_device_pose_set(int deviceOrientation, int hingeState, int tabletopPose)
     VPDevicePoseOverride pose = {deviceOrientation, deviceOrientation, hingeState, tabletopPose};
     ((void (*)(id, SEL, VPDevicePoseOverride))objc_msgSend)(client, selector, pose);
     return true;
+}
+
+/// The settings `-[SBSDisplayToolService swapDisplayWithSettings:completion:]`
+/// takes (iOS 27.1), the swap Apple's Duo tooling runs. The client sends the
+/// duration (seconds, < 0 the per-direction default, 0 an instant swap),
+/// device orientation (0 the current one), profile override (0 none, 1 fade,
+/// 2 continuous), whether to reply only once the swap has finished, the
+/// target mode (1 an absolute hinge position) and that position (0 closed, 1
+/// open flat); the first and last fields stay on the client.
+typedef struct {
+    int64_t state;
+    double duration;
+    int64_t deviceOrientation;
+    int64_t profileOverride;
+    bool waitForCompletion;
+    int64_t targetMode;
+    double targetHingePosition;
+    double reserved;
+} VPDisplaySwapSettings;
+
+int vp_display_swap(double position, double durationSeconds, int deviceOrientation, int profileOverride,
+                    double timeoutSeconds) {
+    static Class service;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices", RTLD_NOW);
+        service = NSClassFromString(@"SBSDisplayToolService");
+    });
+    SEL selector = NSSelectorFromString(@"swapDisplayWithSettings:completion:");
+    Method method = class_getInstanceMethod(service, selector);
+    if (!method || strcmp(method_getTypeEncoding(method), "v88@0:8{?=qdqqBqdd}16@?80") != 0) return -1;
+    // SpringBoard sweeps its own hinge pose to the position, with the display
+    // swap, transition style and lock screen handling of a real fold, and
+    // ignores the hinge for 10 s so the sweep is not undone. The reply comes
+    // on a BoardServices queue; its block arguments are not objects (reading
+    // them as an NSError faults), so the block takes none.
+    VPDisplaySwapSettings settings = {
+        .duration = durationSeconds,
+        .deviceOrientation = deviceOrientation,
+        .profileOverride = profileOverride,
+        .waitForCompletion = true,
+        .targetMode = 1,
+        .targetHingePosition = position,
+    };
+    dispatch_semaphore_t replied = dispatch_semaphore_create(0);
+    id client = [service new];
+    ((void (*)(id, SEL, VPDisplaySwapSettings, void (^)(void)))objc_msgSend)(client, selector, settings, ^{
+        dispatch_semaphore_signal(replied);
+    });
+    long waited = dispatch_semaphore_wait(replied, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeoutSeconds * NSEC_PER_SEC)));
+    ((void (*)(id, SEL))objc_msgSend)(client, NSSelectorFromString(@"invalidate"));
+    return waited == 0 ? 1 : 0;
 }
 
 NSDictionary<NSString *, id> *vp_device_pose_get(void) {

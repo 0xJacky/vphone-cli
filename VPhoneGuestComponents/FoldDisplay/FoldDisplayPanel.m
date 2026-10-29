@@ -98,12 +98,16 @@ static void vpSharedScanoutTransition(id self, SEL selector, long long state, id
 }
 
 // A fold moves the primary content to the other panel, which takes the
-// scanout over even when no power request comes with it.
-static IMP vpOriginalPerformContentModeTransition;
+// scanout over even when no power request comes with it. An instant or fading
+// transition has swapped the primary content by the time it is performed; an
+// interactive one (the continuous fold of a hinge sweep) swaps it as it
+// finishes, so the swap itself is followed too. SpringBoard keeps the panel it
+// left lit for 3 s after a swap, and without this the scanout went on showing
+// it (black) until then.
+static IMP vpOriginalPerformContentModeTransition, vpOriginalHandlePrimarySwap;
 static int vpInnerOwnedPanel = -1;
 
-static void vpFollowContentModeTransition(id self, SEL selector, id transitionCoordinator) {
-    ((void (*)(id, SEL, id))vpOriginalPerformContentModeTransition)(self, selector, transitionCoordinator);
+static void vpFollowPanelOwner(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         BOOL innerOwns = vpInnerOwnsPanel();
         if (innerOwns == vpInnerOwnedPanel) return;
@@ -111,6 +115,16 @@ static void vpFollowContentModeTransition(id self, SEL selector, id transitionCo
         vpFoldDisplayLog([NSString stringWithFormat:@"inner display: panel owned by the %@", innerOwns ? @"inner display" : @"cover"]);
         vpApplyPanelStates(nil, nil);
     });
+}
+
+static void vpFollowContentModeTransition(id self, SEL selector, id transitionCoordinator) {
+    ((void (*)(id, SEL, id))vpOriginalPerformContentModeTransition)(self, selector, transitionCoordinator);
+    vpFollowPanelOwner();
+}
+
+static void vpFollowPrimarySwap(id self, SEL selector, id coordinator, id from, id to, id lockProvider) {
+    ((void (*)(id, SEL, id, id, id, id))vpOriginalHandlePrimarySwap)(self, selector, coordinator, from, to, lockProvider);
+    vpFollowPanelOwner();
 }
 
 static void vpInstallContentModeOwnership(void) {
@@ -121,6 +135,14 @@ static void vpInstallContentModeOwnership(void) {
         return;
     }
     vpOriginalPerformContentModeTransition = method_setImplementation(perform, (IMP)vpFollowContentModeTransition);
+    // SpringBoard (the application) observes every primary swap, once each.
+    Method swap = class_getInstanceMethod(objc_getClass("SpringBoard"), sel_registerName(
+        "displayContentModeCoordinator:handleSwapTransitionFromPrimaryWindowScene:toPrimaryWindowScene:withContinuationLockProvider:"));
+    if (!swap || strcmp(method_getTypeEncoding(swap), "v48@0:8@16@24@32@40") != 0) {
+        vpFoldDisplayLog(@"inner display: primary swap ABI unavailable");
+        return;
+    }
+    vpOriginalHandlePrimarySwap = method_setImplementation(swap, (IMP)vpFollowPrimarySwap);
 }
 
 void vpInstallSharedPanel(void) {

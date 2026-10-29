@@ -1250,6 +1250,35 @@ upside-down, so with CoreMotion the cover's 180 and the inner panel's 270 are
 refused. The accelerometer and the AssistiveTouch rotation other iPhones use
 do not turn a foldable's panels.
 
+A `position` request is a fold, and SpringBoard runs it the way Apple's
+`suiatool swap` does: vphoned calls
+`-[SBSDisplayToolService swapDisplayWithSettings:completion:]` with the
+position as an absolute hinge target (0 closed, 1 open flat), the duration
+(−1 the per-direction default, measured 0.391 s opening and 0.420 s
+closing) and the profile (none, fade 1, continuous 2), and waits for the
+reply that comes once the swap has finished. SpringBoard
+(`SBDisplayToolServiceCoordinator`) takes a 10 s test lock that ignores the
+hinge, sweeps its own hinge pose from the current angle, and swaps displays
+when the sweep crosses the boundary, with the transition style, lock screen
+and backlight handling of a real fold (`book` from closed swaps to the inner
+panel; `book` from open does not). The swap keeps the device orientation
+unless `orientation` is given. vphoned then sets only the virtual hinge to
+the end angle and leaves the override alone: the override reaches
+SpringBoard even under the test lock and stands for 0, 90 or 180 degrees
+only, so setting it after a `book` sweep (100 degrees) slid the pose to 90
+and started a transition toward the cover. SpringBoard does not return to
+the old override when the lock ends, and applies the next override against
+its current pose, so a later `hinge` request lands even when its value
+equals the old one. `display.pose` does not follow SpringBoard's own sweeps
+(it kept reading `open-flat` after a sweep to closed), so the posture
+replayed after a SpringBoard restart takes its hinge state from a completed
+sweep's request. The server checks for
+`com.apple.springboard.sbdisplay.service`, which vphoned carries; a client
+without it is logged as having insufficient authorization and never
+answered. On a guest without the service (or one that does not answer
+within 10 s plus the duration) the virtual hinge sweeps and the override
+jumps, as before. Verified 2026-10-29 on iPhone19,4 27.1 (24A94425).
+
 | Param | Values |
 | --- | --- |
 | `hinge` (required) | `ambiguous` 0, `closed` 1, `partially-open` 2, `open-flat` 3, `open` 4 |
@@ -1258,17 +1287,20 @@ do not turn a foldable's panels.
 | `angle` | 0–180 (default: the hinge state's angle; partially open is book, 100°) |
 | `position` | `closed` 0°, `book` ~100°, `open` 180°, or a fraction 0–1 — Apple's three screen states; requests a sweep |
 | `duration` | sweep seconds; default the per-direction hand-fold time (opening faster), 0 instant |
-| `profile` | `continuous` (default) or `fade`, the two profiles suiatool names |
+| `profile` | `continuous` or `fade`, the two profiles suiatool names; default SpringBoard's own |
 
 The reply echoes the numeric values, the published `angle`, `source`, and
 `hinge_hid` (`applied`, `provider_running`, `provider`) describing the
 virtual hinge service, so a host can tell a live sensor from an absent one.
-With CoreMotion the hinge is the pose, so a hinge that did not take the
-request fails it; `tabletop` is CoreMotion's to compute and comes back null.
-With the override, a refused override fails the request and a missing hinge
-provider does not. The hinge's stored angle and orientation survive a reboot
-and the provider hands them to the relay when it enumerates; the override is
-state of the running SpringBoard, gone with it at shutdown. The VM sub-type's own
+For a `position` it carries `sweep` (`duration_ms` as requested, −1 the
+default; `profile`; `completed`, true when SpringBoard ran the fold and has
+finished it, so the host settles its chrome at once). With CoreMotion the
+hinge is the pose, so a hinge that did not take the request fails it;
+`tabletop` is CoreMotion's to compute and comes back null. With the override,
+a refused override fails the request and a missing hinge provider does not.
+The hinge's stored angle and orientation survive a reboot and the provider
+hands them to the relay when it enumerates; the override is state of the
+running SpringBoard, gone with it at shutdown. The VM sub-type's own
 restore path (`preboot-cfw-devicetree_foldable_vm_subtype`) does not stand
 in on a single display: its `SBFDevicePoseLastKnown*` defaults are written
 on display-mode transitions, which one display never makes (measured

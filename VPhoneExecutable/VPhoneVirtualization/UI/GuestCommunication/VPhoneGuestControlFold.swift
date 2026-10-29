@@ -21,13 +21,17 @@ extension VPhoneGuestControl {
               let hinge = result.int("hinge"), 0 ... 4 ~= hinge
         else { throw ControlError.protocolError("invalid fold posture reply") }
         let hingeHID = result.object("hinge_hid")
-        let sweepMilliseconds = result.object("sweep")?.double("duration_ms")
+        let sweep = result.object("sweep")
+        let sweepMilliseconds = sweep?.double("duration_ms")
         // Publish for the viewer's fold chrome: the angle the guest settled
         // on, and how long its sweep took so a window folds in step. The
         // guest's own default sweep answers -1 (its per-direction hand-fold
         // time, unknown here) — animate those over a similar beat; an
-        // absent sweep dictionary is the legacy instant pose.
-        foldSweepSeconds = sweepMilliseconds.map { $0 < 0 ? 1.2 : $0 / 1000 } ?? 0
+        // absent sweep dictionary is the legacy instant pose. A sweep
+        // SpringBoard ran answers only once it has finished, so the window
+        // is already behind it and settles at once.
+        let finished = sweep?.bool("completed") == true
+        foldSweepSeconds = finished ? 0 : sweepMilliseconds.map { $0 < 0 ? 1.2 : $0 / 1000 } ?? 0
         foldPosition = position
         foldAngle = angle
         return VPhoneFoldReply(

@@ -4787,6 +4787,54 @@ Measured on the test VM (bundle built from this change):
   three cover orientations (cover tested with Safari, which rotates on iPhone).
 - Three launch-sequence captures: no black frames, 2-5 transient tiles.
 
+## 2026-10-29 night: folds go through SpringBoard's display tool service
+
+Xcode 27's iPhone Duo simulator has no hinge: CoreSimulator gives it two real
+displays (screenID 1 cover, 3 inner), and SpringBoard folds itself through
+its display tool service, the one Apple's internal `sbdisplaytool` / `suiatool
+swap` drives. The device SpringBoard has the same service
+(`com.apple.springboard.sbdisplay` in `BSServiceDomains` under
+`com.apple.frontboard`), so `display.posture`'s `position` now uses it instead
+of the test-automation override plus a virtual hinge sweep. Measured on a
+test VM (iPhone19,4 27.1, 24A94425) with the two-display path:
+
+- `-[SBSDisplayToolService swapDisplayWithSettings:completion:]` takes
+  `{q; d duration; q deviceOrientation; q profileOverride; B wait; q
+  targetMode; d targetHingePosition; d}` (`v88@0:8{?=qdqqBqdd}16@?80`).
+  Target mode 1 sweeps to an absolute position (0 closed, 1 open flat);
+  duration < 0 is the per-direction default (0.391 s open, 0.420 s close);
+  profile 1 fade, 2 continuous (`.continuousLive`), 0 SpringBoard's own.
+  The server checks `com.apple.springboard.sbdisplay.service` (read from
+  the simulator SpringBoard's swap handler); without it SpringBoard logs
+  "Insufficient authorization" and never answers. The completion block's
+  arguments are not objects: the client forwards a raw register, and
+  retaining it as an `NSError` PAC-faults.
+- SpringBoard takes a 10 s test lock, sweeps its own pose (`absoluteSweeping
+  0.0 -> 180.0 over 0.39s`), resolves `FullyClosed→FoldingDual` (or back) as
+  the sweep crosses the boundary, and answers after `completed` / `idle`,
+  about 1.2–1.6 s after the request. Book (100°) from closed swaps to the
+  inner panel; book from open does not.
+- After the lock SpringBoard does not return to the override; it applies the
+  next override against its current pose, so a later `hinge` request equal
+  to the old override still lands. The override does reach SpringBoard under
+  the lock, and it only means 0, 90 or 180°: setting it after a book sweep
+  slid the pose from 100° to 90° and started a transition toward the cover,
+  so vphoned leaves it alone after a SpringBoard sweep.
+- `-[SBSTestAutomationService getDevicePose]` does not follow these sweeps
+  (it kept reading open-flat after a sweep to closed); the replayed posture
+  takes the hinge state from the completed request.
+- Closing with the continuous profile is an interactive transition: it is
+  performed while the inner display still holds the primary content and
+  swaps it as it finishes. FoldDisplay re-read the panel's owner only when a
+  transition was performed, so the panel kept showing the inner display,
+  which SpringBoard keeps lit (and black) for 3 s after a swap. Ownership is
+  now re-read on `-[SpringBoard displayContentModeCoordinator:
+  handleSwapTransitionFromPrimaryWindowScene:toPrimaryWindowScene:
+  withContinuationLockProvider:]` too.
+- Folding from the lock screen or sleep lights the arriving panel's lock
+  screen, which sleeps again after the lock screen's short idle time (about
+  7 s), as on hardware.
+
 ## 2026-10-29 night: the inner display at 120 Hz
 
 Open, the VM window counted 60 fps while the cover (the paravirtual panel,

@@ -125,6 +125,16 @@ bool vp_device_pose_set(int deviceOrientation, int hingeState, int tabletopPose)
 /// hinge's host controls into CoreMotion and SpringBoard reads its pose from
 /// there; otherwise only the test-automation pose override reaches it.
 bool vp_core_motion_hinge(void);
+/// Fold a foldable guest through SpringBoard's display tool service: sweep
+/// its hinge pose to `position` (0 closed, 1 open flat) and swap displays on
+/// the way. `durationSeconds` < 0 is the per-direction default, 0 an instant
+/// swap; `deviceOrientation` 0 keeps the current one; `profileOverride` 0
+/// keeps SpringBoard's profile, 1 fade, 2 continuous. Returns 1 once
+/// SpringBoard reports the swap finished, 0 when no reply came within
+/// `timeoutSeconds` (an unentitled client is never answered), -1 when this
+/// guest has no such service.
+int vp_display_swap(double position, double durationSeconds, int deviceOrientation, int profileOverride,
+                    double timeoutSeconds);
 
 /// Ask launchd to shut the guest down and halt. Returns 0 once the request is
 /// accepted, otherwise an errno value. Needs root.
