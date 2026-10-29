@@ -173,6 +173,8 @@ static int vpInnerPanelShown;
 static BOOL vpInnerPanelRendering; // main thread only
 static dispatch_queue_t vpInnerPanelQueue;
 static void (*vpRenderDisplay)(mach_port_t, CFStringRef, void *, int32_t, int32_t);
+// CAFrameRateRange: minimum, maximum, preferred.
+typedef struct { float minimum, maximum, preferred; } VPhoneFrameRateRange;
 
 @interface VPhoneInnerPanelRefresh : NSObject
 @end
@@ -292,11 +294,17 @@ static void vpShowInnerDisplay(BOOL shown) {
         vpInnerPanelImage = image;
         vpInnerPanelRefresh = ((id (*)(id, SEL, id, SEL))objc_msgSend)(objc_getClass("CADisplayLink"),
             sel_registerName("displayLinkWithTarget:selector:"), [VPhoneInnerPanelRefresh new], @selector(refresh:));
+        // The panel shows the inner display at the panel's top rate, asked for
+        // rather than left to the system's choice for a link with no range.
+        NSInteger fps = ((NSInteger (*)(id, SEL))objc_msgSend)(vpReadObject(rootWindow, "screen"), sel_registerName("maximumFramesPerSecond"));
+        SEL setRange = sel_registerName("setPreferredFrameRateRange:");
+        if (fps > 60 && [vpInnerPanelRefresh respondsToSelector:setRange])
+            ((void (*)(id, SEL, VPhoneFrameRateRange))objc_msgSend)(vpInnerPanelRefresh, setRange, (VPhoneFrameRateRange){fps, fps, fps});
         ((void (*)(id, SEL, id, id))objc_msgSend)(vpInnerPanelRefresh, sel_registerName("addToRunLoop:forMode:"),
             NSRunLoop.mainRunLoop, NSRunLoopCommonModes);
-        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: shown=1 panel={%.0f, %.0f} inner={%.0f, %.0f} turned=%d scale={%.3f, %.3f}",
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: shown=1 panel={%.0f, %.0f} inner={%.0f, %.0f} turned=%d scale={%.3f, %.3f} fps=%ld",
             panel.size.width, panel.size.height, inner.width, inner.height, turned,
-            panel.size.width / upright.width, panel.size.height / upright.height]);
+            panel.size.width / upright.width, panel.size.height / upright.height, (long)fps]);
     } @catch (NSException *exception) {
         vpFoldDisplayLog([NSString stringWithFormat:@"inner display: show exception %@", exception.reason]);
     }
