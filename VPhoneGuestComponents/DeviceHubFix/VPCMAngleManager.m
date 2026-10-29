@@ -1,4 +1,6 @@
-// VPCMAngleManager.m — the hinge-angle manager stand-in for dtdeviceinfod.
+// VPCMAngleManager.m — the hinge-angle manager stand-in for dtdeviceinfod,
+// and beside it the device state manager stand-in (see "The device state
+// stand-in" below).
 //
 // CoreDevice's hinge-angle stream (DeviceHub) ends, on the device, in the
 // DDI's dtdeviceinfod: CMAngleManager_Bridge resolves CoreMotion's
@@ -317,12 +319,152 @@ static void vpSwizzledSetAngleUpdateInterval(id self, SEL selector, double inter
         vpArmTimer(session);
 }
 
+// MARK: - The device state stand-in
+//
+// DeviceHub (Xcode 27.1's CoreDevicePop plugin) draws a foldable from its
+// device pose: which panel is active, the hinge state, the orientation and
+// the tabletop pose. Without it the model stays closed on the cover whatever
+// the hinge angle says. The pose is CoreDevice's device motion state stream,
+// which dtdeviceinfod's DeviceMotionStateManager answers from CoreMotion's
+// CMDeviceStateManager (isAvailable, startUpdatesToQueue:withHandler:,
+// stopUpdates), reading each CMDeviceStateEvent's propertyA, propertyB and
+// propertyC. Those are SpringBoard's magic pose: A the device orientation, B
+// the hinge state (1 closed, 2 partially open, 3 open flat, as
+// +propertyAForConfigType:… partitions them), C the tabletop pose. A guest's
+// CoreMotion reads them from a hardware HID device it skips on a VM, so the
+// manager answers unavailable. Here it answers from the provider's newest
+// sample instead, like the angle stand-in, with real CMDeviceStateEvents,
+// delivered once at start and then on every change.
+
+static IMP vpOriginalStateIsAvailableIMP;
+
+typedef struct {
+    long long orientation, hinge, tabletop;
+} VPDeviceState;
+
+static VPDeviceState vpDeviceStateFromSample(NSDictionary *latest) {
+    long long hinge = [latest[@"state"] longLongValue];
+    // The provider's state follows SpringBoard's table; open (4) is open
+    // flat to CoreMotion, which has no wider state.
+    return (VPDeviceState){1, MIN(MAX(hinge, 0), 3), 0};
+}
+
+static id vpDeviceStateEvent(VPDeviceState state) {
+    Class event = objc_getClass("CMDeviceStateEvent");
+    SEL init = sel_registerName(
+        "initWithDeviceStatePropertyAType:deviceStatePropertyBType:deviceStatePropertyCType:timestamp:continuousTimestamp:");
+    if (![event instancesRespondToSelector:init])
+        return nil;
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    return ((id (*)(id, SEL, long long, long long, long long, double, double))objc_msgSend)(
+        [event alloc], init, state.orientation, state.hinge, state.tabletop, now, now);
+}
+
+@interface VPDeviceStateSession : NSObject
+@property (nonatomic, strong) id deliveryQueue;
+@property (nonatomic, copy) void (^handler)(id event, NSError *error);
+@property (nonatomic, strong) dispatch_source_t timer;
+@property (nonatomic) VPDeviceState delivered;
+@property (nonatomic) BOOL hasDelivered;
+@end
+
+@implementation VPDeviceStateSession
+- (void)dealloc {
+    if (_timer)
+        dispatch_source_cancel(_timer);
+}
+@end
+
+static char vpStateSessionKey;
+
+static void vpDeliverDeviceState(VPDeviceStateSession *session) {
+    NSDictionary *latest = vpLatestSample();
+    if (!session.handler || !latest)
+        return;
+    VPDeviceState state = vpDeviceStateFromSample(latest);
+    VPDeviceState last = session.delivered;
+    if (session.hasDelivered && state.orientation == last.orientation && state.hinge == last.hinge &&
+        state.tabletop == last.tabletop)
+        return;
+    id event = vpDeviceStateEvent(state);
+    if (!event)
+        return;
+    session.delivered = state;
+    session.hasDelivered = YES;
+    vpMotionLog(@"device state: hinge %lld orientation %lld tabletop %lld", state.hinge, state.orientation,
+                state.tabletop);
+    void (^handler)(id, NSError *) = session.handler;
+    id queue = session.deliveryQueue;
+    if ([queue isKindOfClass:[NSOperationQueue class]])
+        [(NSOperationQueue *)queue addOperationWithBlock:^{ handler(event, nil); }];
+    else if (queue)
+        dispatch_async((dispatch_queue_t)queue, ^{ handler(event, nil); });
+    else
+        handler(event, nil);
+}
+
+static BOOL vpSwizzledStateIsAvailable(id self, SEL selector) {
+    if (vpProviderIsRunning())
+        return YES;
+    return ((BOOL (*)(id, SEL))vpOriginalStateIsAvailableIMP)(self, selector);
+}
+
+static void vpSwizzledStartStateUpdates(id self, SEL selector, id queue, id handler) {
+    VPDeviceStateSession *session = objc_getAssociatedObject(self, &vpStateSessionKey);
+    if (!session) {
+        session = [VPDeviceStateSession new];
+        objc_setAssociatedObject(self, &vpStateSessionKey, session, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    if (session.timer)
+        dispatch_source_cancel(session.timer);
+    session.deliveryQueue = queue;
+    session.handler = handler;
+    session.hasDelivered = NO;
+    dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, vpTimerQueue());
+    dispatch_source_set_timer(timer, DISPATCH_TIME_NOW, 100 * NSEC_PER_MSEC, 10 * NSEC_PER_MSEC);
+    __weak VPDeviceStateSession *weakSession = session;
+    dispatch_source_set_event_handler(timer, ^{
+        @autoreleasepool {
+            VPDeviceStateSession *alive = weakSession;
+            if (alive)
+                vpDeliverDeviceState(alive);
+        }
+    });
+    dispatch_resume(timer);
+    session.timer = timer;
+}
+
+static void vpSwizzledStopStateUpdates(id self, SEL selector) {
+    VPDeviceStateSession *session = objc_getAssociatedObject(self, &vpStateSessionKey);
+    session.handler = nil;
+    if (session.timer) {
+        dispatch_source_cancel(session.timer);
+        session.timer = nil;
+    }
+}
+
+static void vpInstallDeviceStateManagerStandIn(void) {
+    Class manager = objc_getClass("CMDeviceStateManager");
+    Method available = class_getClassMethod(manager, sel_registerName("isAvailable"));
+    Method start = class_getInstanceMethod(manager, sel_registerName("startUpdatesToQueue:withHandler:"));
+    Method stop = class_getInstanceMethod(manager, sel_registerName("stopUpdates"));
+    if (!available || !start || !stop || !vpDeviceStateEvent((VPDeviceState){1, 1, 0})) {
+        vpMotionLog(@"device state: CMDeviceStateManager surface not found, CoreDevice deviceMotionState stays off");
+        return;
+    }
+    vpOriginalStateIsAvailableIMP = method_setImplementation(available, (IMP)vpSwizzledStateIsAvailable);
+    method_setImplementation(start, (IMP)vpSwizzledStartStateUpdates);
+    method_setImplementation(stop, (IMP)vpSwizzledStopStateUpdates);
+    vpMotionLog(@"device state: stand-in installed");
+}
+
 // MARK: - Install
 
 __attribute__((constructor)) static void vpInstallAngleManagerStandIn(void) {
     if (strcmp(getprogname(), "dtdeviceinfod") != 0)
         return;
     dlopen("/System/Library/Frameworks/CoreMotion.framework/CoreMotion", RTLD_LAZY | RTLD_LOCAL);
+    vpInstallDeviceStateManagerStandIn();
     Class manager = objc_getClass("CMAngleManager");
     if (!manager) {
         vpMotionLog(@"hinge manager: CMAngleManager not found, CoreDevice hingeAngle stays off");

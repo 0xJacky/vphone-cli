@@ -4834,6 +4834,13 @@ test VM (iPhone19,4 27.1, 24A94425) with the two-display path:
 - Folding from the lock screen or sleep lights the arriving panel's lock
   screen, which sleeps again after the lock screen's short idle time (about
   7 s), as on hardware.
+- DeviceHub (Xcode 27.1) draws a Duo guest as a 3D V68 model from CoreDevice's
+  device motion state, which needed a `CMDeviceStateManager` stand-in in
+  `dtdeviceinfod`, and draws the open stream as the inner panel's native
+  portrait framebuffer, which needed every mirror clone kept on the panel
+  (backboardd moved it to the landscape inner render display). Closed and
+  open now look right there; book does not. Details:
+  `Research/Guest/devicehub_screen_viewing.md`, "iPhone Duo: the fold".
 
 ## 2026-10-29 night: the inner display at 120 Hz
 

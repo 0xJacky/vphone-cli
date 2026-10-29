@@ -15,7 +15,8 @@ Measured with Xcode 27.0 (27A266a) and CoreDevice 642.16 on macOS 27.0.1,
 against `iPad16,1` 26.6.2 (23G90) and 27.0.1 (24A446) and `iPhone17,3` 26.6.2
 and 27.0.1 guests over cloudOS 26.4, 2026-10-06 and 2026-10-07.
 
-Status: the live view works on iPadOS 26, iOS 26 and iOS 27; iPadOS 27 refuses
+Status: the live view works on iPadOS 26, iOS 26 and iOS 27 (an iPhone Duo
+follows its fold, see [iPhone Duo: the fold](#iphone-duo-the-fold)); iPadOS 27 refuses
 pairing and is untested. Known issue: under load (several VMs streaming, or the
 Mac busy restoring or downloading) the view can stall for seconds or fall
 seconds behind and stay there until the stream restarts. A single stream on a
@@ -542,6 +543,51 @@ intervals, 50 ms)` without one, re-encodes the last frame on its own timer;
 when the two interleave a real frame can land 1–28 ms behind an idle one and
 is dropped. The offsets do not accumulate, so this costs single frames, not
 seconds.
+
+## iPhone Duo: the fold
+
+Measured 2026-10-29 with Xcode 27.1 against `iPhone19,4` 27.1 (24A94425).
+
+Xcode 27.1 draws a foldable as a 3D V68 model
+(`DeviceKit.framework/PlugIns/CoreDevicePopDeviceKitExtension.devicekitplugin`,
+log subsystem `com.apple.dt.coredevicepop`, with the host CoreDevice plugin
+`CoreDevicePopCoreDeviceExtension.coredeviceplugin`). It picks the fold and
+the lit panel from the device's pose, which is CoreDevice's device motion
+state stream (`com.apple.coredevice.action.streamdevicemotionstate`). The
+DDI's `dtdeviceinfod` (`DeviceMotionStateManager`) answers it from
+CoreMotion's `CMDeviceStateManager`, reading each `CMDeviceStateEvent`'s
+`propertyA` (device orientation), `propertyB` (hinge state 1 closed, 2
+partially open, 3 open flat) and `propertyC`. On a guest the manager is
+unavailable, DeviceHub logs `Pose monitoring failed … Code=1001` every second,
+and draws the device closed whatever the hinge angle stream says.
+
+`libdevicehubfix` answers it in `dtdeviceinfod` (`VPCMAngleManager.m`, beside
+the hinge angle stand-in): `isAvailable` follows the hinge provider, and
+updates are real `CMDeviceStateEvent`s built from the provider's newest
+sample, sent at start and on every change. With it DeviceHub draws the folded
+device on the cover and the opened device on the inner panel, and follows
+live folds.
+
+The stream is the mirrored primary display (display ID 1) for both panels.
+DeviceHub draws it on the inner panel as that panel's native framebuffer,
+portrait and mounted a quarter turn. backboardd moves every clone to the
+display holding the primary content, which open is the guest's landscape
+inner render display, rotated upright; DeviceHub turned that a quarter more
+(sideways and pillarboxed). FoldDisplay keeps clones on the panel instead
+(`FoldDisplayBackboard.m`), which open shows the inner display turned a
+quarter, exactly the native framebuffer DeviceHub expects.
+
+Not done:
+
+- At book (100°) DeviceHub draws the cover. It takes the lit panel at that
+  angle from DisplayInfo's `active` integrated display, and the inner render
+  display is `virtual`. Reporting it as integrated gives DeviceHub the
+  evidence, but DeviceHub then wants a stream for that display ID, which
+  needs feature `0x100` and a capture path the mirror patch does not cover
+  (tried: the picture comes out small and centred).
+- DeviceHub's own pose controls (a hinge slider and closed / book / open
+  presets, which appear once an integrated inner display is reported) send
+  vendor-defined HID reports; nothing in the guest acts on them.
 
 ## Other open items
 

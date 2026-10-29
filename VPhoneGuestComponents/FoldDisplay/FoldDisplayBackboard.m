@@ -290,9 +290,62 @@ static void vpInstallInnerDigitizer(void) {
     vpInstallInnerDigitizerTurn(processor);
 }
 
+// MARK: - mirroring
+
+// A mirror of the screen (Xcode's DeviceHub stream, AirPlay, recording) is a
+// clone of a display, and backboardd moves it to whichever display holds the
+// primary content: open, the inner render display. A clone is rotated upright
+// by its master's orientation, so it carried the inner display upright and
+// letterboxed. DeviceHub draws an open Duo's stream on the inner panel as
+// that panel's native framebuffer, portrait and mounted a quarter turn
+// (2007x2853 at 270 degrees), and turned the upright picture a quarter more.
+// The panel itself (LCD) is that framebuffer: open, SpringBoard shows the
+// inner display on it turned a quarter (FoldDisplayPanel.m). So every clone
+// stays on the panel, as the VM window shows it. A clone is removed from the
+// master that really holds it: CoreAnimation aborts on removing a clone from
+// a display it is not cloned from.
+static IMP vpOriginalAddClone, vpOriginalRemoveClone;
+
+static id vpPanelDisplay(void) {
+    id server = ((id (*)(id, SEL))objc_msgSend)(objc_getClass("CAWindowServer"), sel_registerName("serverIfRunning"));
+    for (id display in [server valueForKey:@"displays"] ?: @[])
+        if ([[display valueForKey:@"displayId"] unsignedIntValue] == 1) return display;
+    return nil;
+}
+
+static void vpPanelAddClone(id self, SEL selector, id clone, id options) {
+    id panel = self == vpInnerRenderDisplay ? vpPanelDisplay() : nil;
+    if (panel && clone != panel) {
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: %@ mirrors the panel instead", [clone valueForKey:@"name"]]);
+        self = panel;
+    }
+    ((void (*)(id, SEL, id, id))vpOriginalAddClone)(self, selector, clone, options);
+}
+
+static void vpPanelRemoveClone(id self, SEL selector, id clone) {
+    id master = [clone valueForKey:@"cloneMaster"];
+    if (!master) return;
+    ((void (*)(id, SEL, id))vpOriginalRemoveClone)(master, selector, clone);
+}
+
+static void vpInstallPanelMirroring(void) {
+    Class display = objc_getClass("CAWindowServerDisplay");
+    Method add = class_getInstanceMethod(display, sel_registerName("addClone:options:"));
+    Method remove = class_getInstanceMethod(display, sel_registerName("removeClone:"));
+    if (!add || !remove || strcmp(method_getTypeEncoding(add), "v32@0:8@16@24") != 0 ||
+        strcmp(method_getTypeEncoding(remove), "v24@0:8@16") != 0 ||
+        ![display instancesRespondToSelector:sel_registerName("cloneMaster")]) {
+        vpFoldDisplayLog(@"inner display: clone ABI unavailable, mirrors follow the inner display");
+        return;
+    }
+    vpOriginalAddClone = method_setImplementation(add, (IMP)vpPanelAddClone);
+    vpOriginalRemoveClone = method_setImplementation(remove, (IMP)vpPanelRemoveClone);
+}
+
 // MARK: - installation
 
 void vpInstallInnerRenderDisplay(void) {
+    vpInstallPanelMirroring();
     vpInstallInnerDigitizer();
     Method extended = class_getInstanceMethod(objc_getClass("CAWindowServerDisplay"), sel_registerName("extendedProperties"));
     if (extended && strcmp(method_getTypeEncoding(extended), "@16@0:8") == 0)
