@@ -229,6 +229,9 @@ struct VPhoneCustomFirmwareInstaller {
         if effectiveEnabled.contains(FirmwareGuestSystemPatchSet.homePodSetupBypass), device.family != .homePod {
             throw ValidationError("The HomePod setup-completion patch is supported only for a HomePod guest.")
         }
+        if effectiveEnabled.contains(FirmwareGuestSystemPatchSet.homePodAirPlayVM), device.family != .homePod {
+            throw ValidationError("The HomePod AirPlay patch is supported only for a HomePod guest.")
+        }
         if effectiveEnabled.contains(FirmwareGuestSystemPatchSet.homePodAudioProduct), device.family != .homePod {
             throw ValidationError("The HomePod audio-product patch is supported only for a HomePod guest.")
         }
@@ -1586,6 +1589,21 @@ struct VPhoneCustomFirmwareInstaller {
             live.insert(setup)
         } else {
             try system.removeItem(setupPath)
+        }
+        // The same helper sets AirPlay's VM override as mobile and restarts the
+        // AirPlay daemons when the value changed; removing the marker restores it.
+        let airPlay = FirmwareGuestSystemPatchSet.homePodAirPlayVM
+        let airPlayPath = String(FirmwareGuestSystemPatchSet.homePodAirPlayVMPath.dropFirst())
+        if plan?.isEnabled(airPlay) == true {
+            guard guestDevice.family == .homePod else {
+                throw ValidationError("HomePod AirPlay on a VM requires a HomePod guest.")
+            }
+            _ = try system.directory("usr/share/vphone", create: true, mode: 0o755)
+            let policy = try PropertyListSerialization.data(fromPropertyList: ["Enabled": true], format: .binary, options: 0)
+            try system.writeFile(airPlayPath, contents: policy, mode: 0o644, owner: Self.guestOwner)
+            live.insert(airPlay)
+        } else {
+            try system.removeItem(airPlayPath)
         }
         let speech = FirmwareGuestSystemPatchSet.homePodSiriSpeech
         let speechPath = String(FirmwareGuestSystemPatchSet.homePodSiriSpeechPath.dropFirst())
