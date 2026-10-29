@@ -99,6 +99,13 @@ enum GuestFoldPose {
     static func startOnStartup() {
         let hinge = vp_hinge_get()
         guard hinge["enabled"] as? Bool == true, let angle = hinge["angle"] as? Double else { return }
+        // With CoreMotion's relay the hinge provider hands locationd the
+        // stored angle and orientation itself, and SpringBoard reads the pose
+        // from CoreMotion: there is no override to restore.
+        if vp_core_motion_hinge() {
+            NSLog("vphoned: fold pose at %.0f° comes through CoreMotion's relay", angle)
+            return
+        }
         observeSpringBoardStartup()
         NSLog("vphoned: fold pose restore: %.0f° over the boot ladder", angle)
         let expectedHinge = GuestAPI.hingeState(for: angle)
@@ -110,7 +117,7 @@ enum GuestFoldPose {
                 let published = restoration.lock.withLock {
                     guard !restoration.cancelled else { return false }
                     _ = vp_device_pose_set(1, Int32(expectedHinge), 0)
-                    _ = vp_hinge_set(angle)
+                    _ = vp_hinge_set(angle, 0)
                     restoration.latestPose = poseValues(vp_device_pose_get())
                     return true
                 }

@@ -4836,3 +4836,67 @@ Window captures (ScreenCaptureKit) cannot judge 120 Hz here: the cover, which
 is natively 120, measures the same 40-55 changes per second as the inner
 display, because the host composites the window at its own rate. Use guest
 display links, or the host's `lastSubmittedTime` poller from the vGPU notes.
+
+## 2026-10-30: CoreMotion, MobileGestalt displays and the book angle, against Apple's simulator
+
+Apple's iPhone Duo simulator (Xcode 27.1, iOS 27.1 24A94425, device type
+`iPhone-Duo`, two integrated displays: `LCD` 1398×2034 surface type 1 and
+`LCD-1` 2007×2853 rotation 270 surface type 2) was probed over lldb in every
+posture, through SpringBoard's own display-swap coordinator (the internal
+suiatool path), and the same calls were run on a two-display guest
+(`duobase-01`) through the guest's debugserver. The harness, the per-domain
+records and the table are in `Research/Guest/Evidence/duo-sim-baseline/`
+(`BASELINE.md`). Three of the differences had one cause each:
+
+- **MobileGestalt saw one display.** libMobileGestalt computes
+  `MGGetLogicalDeviceDisplayCount` and `DisplayExtendedProperties` live from
+  the children of `IODeviceTree:/product` that carry `surface-type`
+  (`display0`, `display1` in DeviceTree.v68ap); vphone600's tree has none, so
+  the count fell back to 1 and the answer to nil (its fallback needs
+  `MainScreenScale`, also nil). `preboot-cfw-devicetree_foldable_displays`
+  copies the board's two nodes. QuartzCore gives a hardware display its entry
+  when it builds it; the inner virtual display gets its own from FoldDisplay,
+  with a physical size (`kCAVirtualDisplayPhysicalWidth/Height`, 460 ppi) so
+  `pixelsPerInch` is no longer 0.
+- **CoreMotion had no pose managers.** CoreMotion picks its motion
+  capabilities from the product-id token (`MGIsDeviceOfType` in
+  `CLPlatformInfo::queryEmbeddedSystemHardware`; V68 → hardware 0xC6, angle
+  bit 38 and device-state bit 13). vphone600's token is no known product, and
+  with `IsVirtualDevice` the guest became hardware 1 with no capabilities.
+  SpringBoard's `SBFDevicePoseProvider` creates `_cmAngleManager` and
+  `_cmMagicPoseManager` only when both report available and FrontBoard has
+  two always-connected displays — the second condition the two-display path
+  already met. The product-id patch, kept off since the single-display crash
+  loop, is now on.
+- **Book read 90°.** The test-automation override derives the angle from the
+  hinge state. With the token, locationd starts `CLDeviceStateRelay`, Apple's
+  VM path: it subscribes to host controls (primary usage `0xFF61/0x5B`) and
+  turns `hinge-slider-control` / `orientation-picker-control` dictionaries
+  (vendor-defined events, `IOCFUnserializeWithSize`, at most 256 bytes) into
+  `CoreMotion_DeviceStateRelay_Crane` angle events (phase 2, private-data
+  progress) and `_DeviceState` reports. libvphonehinge now publishes those
+  host controls instead of its own `0xFF0C/0x21` service (whose phase-0 events
+  CoreMotion drops), and vphoned stops setting the override when CoreMotion
+  has the capability. SpringBoard then reads book at 99.444° (position
+  0.552; the simulator's synthetic 100° is 0.556).
+
+One trap on the way: after the cover had gone dark in closed, a closed→book
+sweep left the pose provider at 0° although CoreMotion delivered every angle
+(breakpoints: `CLAngleNotifier::onIoHidEvent` 21 hits, `_handleAngle:` 19).
+The provider commits a pose in motion only on ticks of its `UIUpdateLink`,
+bound to `SB-main`, and a dark display produces none. On hardware the hinge
+sensor's wake flag lights the screen on an unfold; the relay always sends 0
+there. vphoned lights the screen before a sweep out of closed
+(`SBSUndimScreen`, the side button when SpringBoard refuses it), 3/3 after.
+
+Limits: the host controls' orientation picker has no upside-down, so the
+cover's 180 and the inner panel's 270 are refused through CoreMotion. The
+cover's corner radii are Apple's tree value [5, 5, 59, 59]; the simulator's
+device type says [8, 8, 59, 59].
+
+Reveal and validation on a new guest: `device.input_devices` lists
+`VPhone Host Controls` and both `CoreMotion_DeviceStateRelay_*` services;
+`display.posture` replies `source: coremotion`; in SpringBoard,
+`MGGetLogicalDeviceDisplayCount()` is 2, `+[CMAngleManager isAvailable]` is
+YES and `SBFDevicePoseProvider`'s description reads `.partiallyOpen` at
+~99.4° six seconds after `{"hinge":"partially-open","position":"book"}`.

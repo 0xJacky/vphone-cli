@@ -28,6 +28,7 @@
 // addOperationWithBlock:.
 
 #import <Foundation/Foundation.h>
+#import <objc/message.h>
 #import <objc/runtime.h>
 #include <dlfcn.h>
 #include <string.h>
@@ -325,6 +326,13 @@ __attribute__((constructor)) static void vpInstallAngleManagerStandIn(void) {
     Class manager = objc_getClass("CMAngleManager");
     if (!manager) {
         vpMotionLog(@"hinge manager: CMAngleManager not found, CoreDevice hingeAngle stays off");
+        return;
+    }
+    // A guest with the foldable's product-id has CoreMotion's own capability
+    // bits, and locationd relays the virtual hinge into the real manager.
+    // The stand-in is only for a guest without them.
+    if (((BOOL (*)(id, SEL))objc_msgSend)(manager, sel_registerName("isAvailable"))) {
+        vpMotionLog(@"hinge manager: CoreMotion's own CMAngleManager is available, no stand-in");
         return;
     }
     vpRegisterAngleDataClass();

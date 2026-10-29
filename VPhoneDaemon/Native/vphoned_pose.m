@@ -116,16 +116,44 @@ static bool vp_hinge_publish(NSDictionary *configuration, double expectedAngle) 
     return true;
 }
 
-bool vp_hinge_set(double angleDegrees) {
-    if (!isfinite(angleDegrees) || angleDegrees < 0 || angleDegrees > 180)
-        return false;
-    return vp_hinge_publish(VPhoneHingeEncode((VPhoneHingeState){true, false, angleDegrees, 0, 0}), angleDegrees);
+/// The orientation to store: the requested one, or the stored one for 0, so
+/// a later angle-only request does not drop it.
+static int vp_hinge_orientation(int requested) {
+    if (requested)
+        return requested;
+    CFPreferencesSynchronize(CFSTR(VP_HINGE_DOMAIN), CFSTR("mobile"), kCFPreferencesAnyHost);
+    id stored = CFBridgingRelease(CFPreferencesCopyValue(CFSTR(VP_HINGE_CONFIGURATION),
+        CFSTR(VP_HINGE_DOMAIN), CFSTR("mobile"), kCFPreferencesAnyHost));
+    VPhoneHingeState state;
+    return VPhoneHingeDecode(stored, &state) ? state.orientation : 0;
 }
 
-bool vp_hinge_sweep(double targetDegrees, double durationMs, int profile) {
+bool vp_hinge_set(double angleDegrees, int orientation) {
+    if (!isfinite(angleDegrees) || angleDegrees < 0 || angleDegrees > 180 || orientation < 0 || orientation > 6)
+        return false;
+    VPhoneHingeState state = {true, false, angleDegrees, 0, 0, vp_hinge_orientation(orientation)};
+    return vp_hinge_publish(VPhoneHingeEncode(state), angleDegrees);
+}
+
+bool vp_hinge_sweep(double targetDegrees, double durationMs, int profile, int orientation) {
     if (!isfinite(targetDegrees) || targetDegrees < 0 || targetDegrees > 180 ||
         !isfinite(durationMs) || durationMs < -1 || durationMs > 10000 ||
-        (profile != VPhoneHingeProfileContinuous && profile != VPhoneHingeProfileFade))
+        (profile != VPhoneHingeProfileContinuous && profile != VPhoneHingeProfileFade) ||
+        orientation < 0 || orientation > 6)
         return false;
-    return vp_hinge_publish(VPhoneHingeEncode((VPhoneHingeState){true, true, targetDegrees, durationMs, profile}), targetDegrees);
+    VPhoneHingeState state = {true, true, targetDegrees, durationMs, profile, vp_hinge_orientation(orientation)};
+    return vp_hinge_publish(VPhoneHingeEncode(state), targetDegrees);
+}
+
+bool vp_core_motion_hinge(void) {
+    static bool available;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        dlopen("/System/Library/Frameworks/CoreMotion.framework/CoreMotion", RTLD_NOW);
+        SEL selector = sel_registerName("isAvailable");
+        Class angle = NSClassFromString(@"CMAngleManager"), deviceState = NSClassFromString(@"CMDeviceStateManager");
+        available = angle && deviceState && [angle respondsToSelector:selector] && [deviceState respondsToSelector:selector] &&
+            ((BOOL (*)(id, SEL))objc_msgSend)(angle, selector) && ((BOOL (*)(id, SEL))objc_msgSend)(deviceState, selector);
+    });
+    return available;
 }

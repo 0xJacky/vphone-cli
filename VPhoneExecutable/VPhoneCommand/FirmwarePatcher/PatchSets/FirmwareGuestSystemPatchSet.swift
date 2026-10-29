@@ -747,14 +747,27 @@ public enum FirmwareGuestSystemPatchSet {
                 identifier: prebootFoldableProductId,
                 title: "Foldable product identity",
                 summary: """
-                Research only, off in every preset. Replaces /product/product-id in a foldable \
-                guest's restored Preboot device tree with the board's own token, taken from the \
-                Duo's DeviceTree.v68ap. Measured on duotest-m5 (27.1, 24A94425): with the Duo \
-                token and one display, SpringBoard crash-loops and launchd reboots the guest into \
-                device-recovery — the Duo branches the token opens expect the second panel. \
-                CoreMotion's hinge capability therefore needs a narrower route than the device-tree \
-                token; Apple's Duo simulator satisfies it by registering two displays in its device \
-                type, not by the token alone.
+                Replaces /product/product-id in a foldable guest's restored Preboot device tree \
+                with the board's own token, taken from the Duo's DeviceTree.v68ap. CoreMotion \
+                picks its motion capabilities from that token: without it the guest is a generic \
+                virtual device with none, so the angle, device-state and magic-pose managers are \
+                unavailable and locationd starts no device-state relay for the virtual hinge. The \
+                Duo branches the token opens expect the second panel the fold display patch \
+                publishes; with one display SpringBoard crash-loops. Introduced, off, as \
+                preboot-exp-devicetree_foldable_product_id.
+                """,
+                target: .prebootDeviceTree,
+            ),
+            VPhonePatchDeclaration(
+                identifier: prebootFoldableDisplays,
+                title: "Foldable panel nodes",
+                summary: """
+                Copies a foldable board's panel nodes (/product/display0 and display1 on the \
+                Duo's V68AP) into the guest's restored Preboot device tree. MobileGestalt counts \
+                them for the logical display count and reads their rotation, scale, corner radii \
+                and chrome identifiers into DisplayExtendedProperties, which QuartzCore gives each \
+                display; without them the guest reports one display and no properties, where \
+                Apple's Duo simulator reports two.
                 """,
                 target: .prebootDeviceTree,
             ),
@@ -862,7 +875,9 @@ public enum FirmwareGuestSystemPatchSet {
     /// Apple's VM sub-type for a foldable board in the restored Preboot
     /// device tree.
     public static let prebootFoldableVMSubtype = "preboot-cfw-devicetree_foldable_vm_subtype"
-    public static let prebootFoldableProductId = "preboot-exp-devicetree_foldable_product_id"
+    public static let prebootFoldableProductId = "preboot-cfw-devicetree_foldable_product_id"
+    /// The foldable board's panel nodes under `/product`.
+    public static let prebootFoldableDisplays = "preboot-cfw-devicetree_foldable_displays"
 
     /// The haptics node removal in the restored Preboot device tree, for any
     /// VM patched before `fw patch` removed it from every guest's tree.

@@ -120,6 +120,11 @@ bool vp_screen_undim(void);
 /// touch controller reports as a wake gesture.
 void vp_tap_to_wake_start(void (* _Nonnull touched)(void));
 bool vp_device_pose_set(int deviceOrientation, int hingeState, int tabletopPose);
+/// Whether this guest's CoreMotion has a foldable's angle and device-state
+/// capabilities (the foldable product-id). Then locationd relays the virtual
+/// hinge's host controls into CoreMotion and SpringBoard reads its pose from
+/// there; otherwise only the test-automation pose override reaches it.
+bool vp_core_motion_hinge(void);
 
 /// Ask launchd to shut the guest down and halt. Returns 0 once the request is
 /// accepted, otherwise an errno value. Needs root.
@@ -206,12 +211,16 @@ NSArray * _Nonnull vp_display_probe(void);
 /// Read-only CoreAnimation display modes and capability surface.
 NSDictionary<NSString *, id> * _Nonnull vp_display_modes(void);
 NSDictionary<NSString *, id> * _Nonnull vp_device_pose_get(void);
-BOOL vp_hinge_set(double angleDegrees);
+/// Set the hinge to `angleDegrees` at once. `orientation` is CoreMotion's
+/// device orientation for the host controls (1 portrait … 6 face down), or 0
+/// to keep the stored one.
+BOOL vp_hinge_set(double angleDegrees, int orientation);
 /// Sweep the hinge to `targetDegrees` the way Apple's Duo tooling does: over
 /// a profiled transition (0 continuous fold, 1 fade-in-out), `durationMs` < 0
 /// the per-direction default (opening faster than closing), 0 an instant
-/// swap. Returns false on an out-of-range request.
-BOOL vp_hinge_sweep(double targetDegrees, double durationMs, int profile);
+/// swap. `orientation` as for `vp_hinge_set`. Returns false on an
+/// out-of-range request.
+BOOL vp_hinge_sweep(double targetDegrees, double durationMs, int profile, int orientation);
 NSDictionary * _Null_unspecified vp_attitude_get(void);
 BOOL vp_attitude_set(double roll, double pitch, double yaw, bool enabled);
 

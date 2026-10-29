@@ -186,18 +186,22 @@ extension GuestAPI {
         "landscape-right": 4, "face-up": 5, "face-down": 6,
     ]
 
-    /// SpringBoard's own hinge-angle table, one angle per hinge state, so the
-    /// virtual hinge reports what the pose override implies.
-    static let poseHingeAngles: [Double] = [0, 0, 90, 180, 180]
+    /// The angle a hinge state names, as Apple's screen states have it:
+    /// partially open is book (~100°). SpringBoard's own table for the pose
+    /// override says 90°, but with CoreMotion's relay it reads the hinge.
+    static let poseHingeAngles: [Double] = [0, 0, 100, 180, 180]
 
     /// Apple's screen-state positions, from suiatool's help text shipped in
     /// SpringBoardFoundation: closed, book (~100°) and open (a fraction of
     /// the 180° range, or a name).
     static let posePositions: [String: Double] = ["closed": 0, "book": 100, "open": 180]
 
-    /// Set a foldable guest's pose the way Apple's Duo tooling does, driving
-    /// SpringBoard's test-automation override and the virtual hinge HID
-    /// service from one request. The official model is three screen states —
+    /// Set a foldable guest's pose the way Apple's Duo tooling does. On a
+    /// guest whose CoreMotion has the foldable's capabilities the virtual
+    /// hinge's host controls carry the angle and orientation, locationd
+    /// relays them into CoreMotion, and SpringBoard reads its pose from there
+    /// as on a device; elsewhere SpringBoard's test-automation override sets
+    /// the pose beside the hinge. The official model is three screen states —
     /// `position` `closed`, `book` (~100°) or `open`, or a fraction 0–1 of
     /// the hinge's 180° — changed by a sweep from the current angle
     /// (`duration` seconds; default the per-direction hand-fold time, opening
@@ -273,22 +277,39 @@ extension GuestAPI {
                 angle = requested.doubleValue
             }
         }
+        let relayed = vp_core_motion_hinge()
+        if relayed, orientation == 2 {
+            throw GuestAPIError.invalidRequest("the host controls have no upside-down orientation")
+        }
         GuestFoldPose.cancelStartupRestore()
         defer { GuestFoldPose.finishExplicitRequest() }
-        guard vp_device_pose_set(Int32(orientation), Int32(hinge), Int32(tabletop)) else {
-            throw GuestAPIError.operationFailed("SpringBoardServices has no device pose override on this guest")
+        if !relayed {
+            guard vp_device_pose_set(Int32(orientation), Int32(hinge), Int32(tabletop)) else {
+                throw GuestAPIError.operationFailed("SpringBoardServices has no device pose override on this guest")
+            }
+        } else if let current = vp_hinge_get()["angle"] as? Double, hingeState(for: current) == 1, hingeState(for: angle!) != 1 {
+            // Opening a closed device wakes it; the hinge sensor's own wake
+            // flag does that on hardware, and the host controls cannot set
+            // it. SpringBoard's pose provider publishes a pose in motion only
+            // on display frames, so with the cover asleep the new angle would
+            // sit unpublished until the next wake. The screen is lit before
+            // the sweep starts.
+            GuestScreenUnlock.wakeDisplay()
         }
-        // The pose override has landed; the hinge half is published beside it,
-        // and its absence (no virtual hinge service on this guest) does not
-        // undo the pose.
+        // With the override, the pose has landed and the hinge half is
+        // published beside it; its absence (no virtual hinge service on this
+        // guest) does not undo the pose. With the relay, the hinge is the pose.
         let published = sweep
-            ? vp_hinge_sweep(angle!, durationMs, Int32(profile))
-            : vp_hinge_set(angle!)
+            ? vp_hinge_sweep(angle!, durationMs, Int32(profile), Int32(orientation))
+            : vp_hinge_set(angle!, Int32(orientation))
+        if relayed, !published {
+            throw GuestAPIError.operationFailed("The virtual hinge did not take the pose")
+        }
         var hingeHID = vp_hinge_get()
         hingeHID["applied"] = published
         var reply: [String: Any] = [
-            "hinge": hinge, "orientation": orientation, "tabletop": tabletop,
-            "angle": angle!, "hinge_hid": hingeHID,
+            "hinge": hinge, "orientation": orientation, "tabletop": relayed ? NSNull() : tabletop,
+            "angle": angle!, "hinge_hid": hingeHID, "source": relayed ? "coremotion" : "test-automation",
         ]
         if sweep {
             reply["sweep"] = [
@@ -321,12 +342,24 @@ extension GuestAPI {
         // on the cover (hinge closed) and on the inner panel (open).
         let cover: [Int: Int32] = [0: 1, 90: 4, 180: 2, 270: 3]
         let inner: [Int: Int32] = [0: 3, 90: 1, 180: 4, 270: 2]
+        let orientation = (hinge == 1 ? cover : inner)[degrees]!
         GuestFoldPose.cancelStartupRestore()
         defer { GuestFoldPose.finishExplicitRequest() }
-        guard vp_device_pose_set((hinge == 1 ? cover : inner)[degrees]!, hinge, tabletop) else {
-            throw GuestAPIError.operationFailed("SpringBoard refused the device pose")
+        if vp_core_motion_hinge() {
+            // The device orientation goes through the host controls with the
+            // angle the hinge holds; CoreMotion turns it into each panel's.
+            guard orientation != 2 else {
+                throw GuestAPIError.invalidRequest("the host controls have no upside-down orientation")
+            }
+            guard let angle = vp_hinge_get()["angle"] as? Double, vp_hinge_set(angle, orientation) else {
+                throw GuestAPIError.operationFailed("The virtual hinge did not take the orientation")
+            }
+        } else {
+            guard vp_device_pose_set(orientation, hinge, tabletop) else {
+                throw GuestAPIError.operationFailed("SpringBoard refused the device pose")
+            }
         }
-        for _ in 0 ..< 20 where interfaceRotationDegrees() != degrees {
+        for _ in 0 ..< 30 where interfaceRotationDegrees() != degrees {
             usleep(100_000)
         }
         guard interfaceRotationDegrees() == degrees else {

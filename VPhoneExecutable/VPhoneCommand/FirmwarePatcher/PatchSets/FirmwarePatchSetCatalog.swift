@@ -70,7 +70,6 @@ public enum FirmwarePatchSetCatalog {
             .union(experimentalIdentityPatches)
             .union([FirmwareGuestSystemPatchSet.otaUserland, FirmwareGuestSystemPatchSet.homePodTopCap, FirmwareGuestSystemPatchSet.homePodSetupBypass, FirmwareGuestSystemPatchSet.homePodAirPlayVM, FirmwareGuestSystemPatchSet.homePodAudioProduct, FirmwareGuestSystemPatchSet.homePodWelcome, FirmwareGuestSystemPatchSet.homePodSiriSpeech, FirmwareGuestSystemPatchSet.homePodOTAUserland, FirmwareGuestSystemPatchSet.homePodSoundGlow, FirmwareGuestSystemPatchSet.homePodCryptexStaging, FirmwareGuestSystemPatchSet.homePodCryptexClass, FirmwareGuestSystemPatchSet.homePodAdHocInstall])
             .union([FirmwareKernelCustomFirmwarePatchSet.tvTPROPagers, misTrustAuthPatch, FirmwareGuestSystemPatchSet.settingsRootRows, FirmwareGuestSystemPatchSet.settingsSoftwareUpdate, FirmwareGuestSystemPatchSet.tvTPRO, FirmwareGuestSystemPatchSet.tvOTAUserland, FirmwareGuestSystemPatchSet.tvSetupDisplayLookup, FirmwareGuestSystemPatchSet.tvSetupFocus, FirmwareGuestSystemPatchSet.tvLocalActivation, FirmwareGuestSystemPatchSet.tvLegacySetup])
-            .union([FirmwareGuestSystemPatchSet.prebootFoldableProductId])
 
     /// ProMotion: the 120 Hz timing for the paravirtual display.
     ///
@@ -104,6 +103,7 @@ public enum FirmwarePatchSetCatalog {
     public static let renamedPatches: [String: String] = [
         "kernel-exp-display_refresh_120hz": proMotionPatch,
         "kernel-exp-paravirt_gpu_task3": paravirtTask3Patch,
+        "preboot-exp-devicetree_foldable_product_id": FirmwareGuestSystemPatchSet.prebootFoldableProductId,
     ]
 
     /// The identifiers this bundle declares for ones a VM recorded, in order, each
@@ -252,7 +252,8 @@ public enum FirmwarePatchSetCatalog {
         "preboot-cfw-devicetree_haptics",
         "preboot-cfw-devicetree_iphone_product",
         "preboot-cfw-devicetree_foldable_vm_subtype",
-        "preboot-exp-devicetree_foldable_product_id",
+        "preboot-cfw-devicetree_foldable_product_id",
+        "preboot-cfw-devicetree_foldable_displays",
         "preboot-cfw-devicetree_microphone_array",
         RestoreRamDiskSealPatcher.patchIdentifier,
         "system-apps-cfw-attitude",
