@@ -296,8 +296,12 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         orientationPollInFlight = true
         Task {
             defer { orientationPollInFlight = false }
-            guard let result = try? await control.call("display.orientation"),
-                  !control.isChangingOrientation,
+            guard let result = try? await control.call("display.orientation") else { return }
+            // A foldable guest reports where its last fold settled.
+            if let foldAngle = (result["fold_angle"] as? NSNumber)?.doubleValue {
+                control.followGuestFold(angle: foldAngle)
+            }
+            guard !control.isChangingOrientation,
                   let degrees = (result["degrees"] as? NSNumber)?.intValue,
                   let orientation = VPhoneDisplayOrientation(degrees: degrees)
             else { return }

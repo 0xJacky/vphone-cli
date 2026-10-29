@@ -109,10 +109,15 @@ static BOOL vpProviderIsRunning(void) {
 
 // MARK: - The sample object
 
+// The angles are floats, as dtdeviceinfod's CMAngle_Bridge declares them
+// (Tf,R,N,V_angleDegrees): it reads s0, the low half of a double's d0, so a
+// double getter handed it 0° for every whole angle. Open and closed hid that
+// (their hinge states pin 180° and 0°); in book DeviceHub took the stream's
+// 0°, drew the device nearly closed and focused the cover.
 typedef struct {
-    double angle;
-    double mechanical;
-    double velocity;
+    float angle;
+    float mechanical;
+    float velocity;
     double timestamp;
     BOOL angleValid;
     BOOL velocityValid;
@@ -147,9 +152,9 @@ static void vpRegisterAngleDataClass(void) {
     VPAngleDataOffset = ivar_getOffset(class_getInstanceVariable(VPAngleDataClass, "fields"));
     // The fields CMAngleManager_Bridge maps into DeviceHingeAngleSnapshot,
     // with both spellings of the two flags.
-    VP_SAMPLE_GETTER("angleDegrees", angle, "d16@0:8");
-    VP_SAMPLE_GETTER("mechanicalAngleDegrees", mechanical, "d16@0:8");
-    VP_SAMPLE_GETTER("velocityDegreesPerSeconds", velocity, "d16@0:8");
+    VP_SAMPLE_GETTER("angleDegrees", angle, "f16@0:8");
+    VP_SAMPLE_GETTER("mechanicalAngleDegrees", mechanical, "f16@0:8");
+    VP_SAMPLE_GETTER("velocityDegreesPerSeconds", velocity, "f16@0:8");
     VP_SAMPLE_GETTER("timestamp", timestamp, "d16@0:8");
     VP_SAMPLE_GETTER("isAngleValid", angleValid, "B16@0:8");
     VP_SAMPLE_GETTER("angleValid", angleValid, "B16@0:8");
@@ -164,9 +169,9 @@ static id vpAngleDataFromSample(NSDictionary *latest) {
         return nil;
     id data = [VPAngleDataClass new];
     VPAngleSampleFields *fields = (VPAngleSampleFields *)((char *)(__bridge void *)data + VPAngleDataOffset);
-    fields->angle = [latest[@"angle"] doubleValue];
-    fields->mechanical = [latest[@"mechanical_angle"] doubleValue];
-    fields->velocity = [latest[@"velocity"] doubleValue];
+    fields->angle = [latest[@"angle"] floatValue];
+    fields->mechanical = [latest[@"mechanical_angle"] floatValue];
+    fields->velocity = [latest[@"velocity"] floatValue];
     fields->timestamp = [latest[@"timestamp"] doubleValue];
     fields->angleValid = latest[@"angle"] != nil;
     fields->velocityValid = latest[@"velocity"] != nil;
@@ -344,9 +349,15 @@ typedef struct {
 
 static VPDeviceState vpDeviceStateFromSample(NSDictionary *latest) {
     long long hinge = [latest[@"state"] longLongValue];
+    // vphoned publishes the device orientation beside the sample (portrait
+    // until a rotation or DeviceHub's orientation picker sets one); the
+    // domain was just synchronized by vpLatestSample.
+    id published = CFBridgingRelease(CFPreferencesCopyValue(CFSTR("VPhoneDeviceOrientation"),
+        CFSTR("com.apple.backboardd"), CFSTR("mobile"), kCFPreferencesAnyHost));
+    long long orientation = [published isKindOfClass:NSNumber.class] ? [published longLongValue] : 1;
     // The provider's state follows SpringBoard's table; open (4) is open
     // flat to CoreMotion, which has no wider state.
-    return (VPDeviceState){1, MIN(MAX(hinge, 0), 3), 0};
+    return (VPDeviceState){MIN(MAX(orientation, 1), 6), MIN(MAX(hinge, 0), 3), 0};
 }
 
 static id vpDeviceStateEvent(VPDeviceState state) {
@@ -452,10 +463,53 @@ static void vpInstallDeviceStateManagerStandIn(void) {
         vpMotionLog(@"device state: CMDeviceStateManager surface not found, CoreDevice deviceMotionState stays off");
         return;
     }
+    // As for the angle manager: with the foldable's product-id locationd
+    // relays the virtual hinge into the real one.
+    if (((BOOL (*)(id, SEL))objc_msgSend)(manager, sel_registerName("isAvailable"))) {
+        vpMotionLog(@"device state: CoreMotion's own CMDeviceStateManager is available, no stand-in");
+        return;
+    }
     vpOriginalStateIsAvailableIMP = method_setImplementation(available, (IMP)vpSwizzledStateIsAvailable);
     method_setImplementation(start, (IMP)vpSwizzledStartStateUpdates);
     method_setImplementation(stop, (IMP)vpSwizzledStopStateUpdates);
     vpMotionLog(@"device state: stand-in installed");
+}
+
+// MARK: - The inner display, as DeviceHub sees it
+//
+// DeviceHub draws a Duo's inner panel, and offers its pose controls, only for
+// an integrated display in DisplayInfo, which dtdeviceinfod builds from
+// CADisplay. The Duo's inner render display (libvphonefolddisplay) is a
+// virtual display at point scale 1 to every process but backboardd and
+// SpringBoard, where FoldDisplay presents it as the built-in 3x panel it
+// stands for; here it is presented the same way. DeviceHub then streams it
+// by display ID (libdevicehubfix.c answers that feature).
+static IMP vpOriginalDisplayType, vpOriginalPointScale;
+
+static BOOL vpIsInnerDisplay(id display) {
+    return [[display valueForKey:@"name"] isEqual:@"VPhone Duo Inner"];
+}
+
+static long long vpInnerDisplayType(id self, SEL selector) {
+    return vpIsInnerDisplay(self) ? 0 : ((long long (*)(id, SEL))vpOriginalDisplayType)(self, selector);
+}
+
+static unsigned long vpInnerPointScale(id self, SEL selector) {
+    return vpIsInnerDisplay(self) ? 3 : ((unsigned long (*)(id, SEL))vpOriginalPointScale)(self, selector);
+}
+
+static void vpInstallInnerDisplayPresentation(void) {
+    dlopen("/System/Library/Frameworks/QuartzCore.framework/QuartzCore", RTLD_LAZY | RTLD_LOCAL);
+    Class display = objc_getClass("CADisplay");
+    Method type = class_getInstanceMethod(display, sel_registerName("displayType"));
+    Method scale = class_getInstanceMethod(display, sel_registerName("pointScale"));
+    if (!type || !scale || strcmp(method_getTypeEncoding(type), "q16@0:8") != 0 ||
+        strcmp(method_getTypeEncoding(scale), "Q16@0:8") != 0) {
+        vpMotionLog(@"inner display: CADisplay ABI unavailable, DeviceHub sees it as virtual");
+        return;
+    }
+    vpOriginalDisplayType = method_setImplementation(type, (IMP)vpInnerDisplayType);
+    vpOriginalPointScale = method_setImplementation(scale, (IMP)vpInnerPointScale);
 }
 
 // MARK: - Install
@@ -465,6 +519,7 @@ __attribute__((constructor)) static void vpInstallAngleManagerStandIn(void) {
         return;
     dlopen("/System/Library/Frameworks/CoreMotion.framework/CoreMotion", RTLD_LAZY | RTLD_LOCAL);
     vpInstallDeviceStateManagerStandIn();
+    vpInstallInnerDisplayPresentation();
     Class manager = objc_getClass("CMAngleManager");
     if (!manager) {
         vpMotionLog(@"hinge manager: CMAngleManager not found, CoreDevice hingeAngle stays off");

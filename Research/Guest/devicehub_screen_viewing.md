@@ -185,8 +185,10 @@ processes only (`vpIsDeviceHubFixTarget` in `Shared/InjectionEnvironment.h`):
   filesystem without protection classes. Every other call and failure is
   untouched.
 - **`dtremotedisplayd`**: interposes `MediaStreamSupportedFeatures.current`,
-  which answers `0x8c` (what a Mac host reports for itself; the host
-  intersects it with its own), and `CurrentDevice.isCustomerRestricted`, which
+  which answers `0x18c`: `0x8c`, what a Mac host reports for itself (the host
+  intersects it with its own), plus video output by display ID `0x100`, which
+  an iPhone Duo's inner panel streams through (see
+  [iPhone Duo](#iphone-duo-the-fold)); and `CurrentDevice.isCustomerRestricted`, which
   answers false. The struct is resilient (the framework is built for library
   evolution), so the getter returns it indirectly through `x8`; the
   replacement is three instructions of assembly.
@@ -195,6 +197,9 @@ processes only (`vpIsDeviceHubFixTarget` in `Shared/InjectionEnvironment.h`):
   `phone11`, it answers with Xcode's matching mask `4E5532ED-…`, retained under
   the Copy ownership rule. Existing answers and other chromes are unchanged.
   This is display metadata, not a change to the guest's hardware identity.
+  On an iPhone Duo it also stands in for CoreMotion's hinge angle and device
+  state managers and reports the inner display as integrated (see
+  [iPhone Duo](#iphone-duo-the-fold)).
 - **`avconferenced`**: replaces `VCPSideCarMetal`'s two band reads and runs
   one synchronous scaler transform before the first read of each frame (see
   [Banded streams](#banded-streams-deadlock-the-host-gpu)).
@@ -564,30 +569,101 @@ and draws the device closed whatever the hinge angle stream says.
 `libdevicehubfix` answers it in `dtdeviceinfod` (`VPCMAngleManager.m`, beside
 the hinge angle stand-in): `isAvailable` follows the hinge provider, and
 updates are real `CMDeviceStateEvent`s built from the provider's newest
-sample, sent at start and on every change. With it DeviceHub draws the folded
-device on the cover and the opened device on the inner panel, and follows
-live folds.
+sample, sent at start and on every change. `propertyA` is the device
+orientation vphoned publishes (`VPhoneDeviceOrientation` in
+`com.apple.backboardd`, portrait until a rotation or DeviceHub's orientation
+picker sets one), `propertyB` the provider's hinge state.
 
-The stream is the mirrored primary display (display ID 1) for both panels.
-DeviceHub draws it on the inner panel as that panel's native framebuffer,
-portrait and mounted a quarter turn. backboardd moves every clone to the
-display holding the primary content, which open is the guest's landscape
-inner render display, rotated upright; DeviceHub turned that a quarter more
-(sideways and pillarboxed). FoldDisplay keeps clones on the panel instead
-(`FoldDisplayBackboard.m`), which open shows the inner display turned a
-quarter, exactly the native framebuffer DeviceHub expects.
+DeviceHub's model (decompiled, `CoreDevicePopDeviceKitExtension`):
 
-Not done:
+- `PhysicalState.update` reads only `propertyA`, `propertyB` and `propertyC`
+  (each a `CodableValue.int`). Closed pins the angle at 0°, open flat at
+  180°; partially open keeps the angle from the hinge angle stream
+  (`streamhingeangle`, samples with `isAngleValid`, a `Measurement` in
+  degrees).
+- The focused panel (the face the model shows, and whose stream it draws) is,
+  in order: the panel a command is heading for, cover when closed, the active
+  display DisplayInfo reports (accepted only fully open or closed), then the
+  hinge: partially open at 55° or more is the inner panel, 45° or less the
+  cover.
+- The model's rotation comes from the pose orientation and the focused panel,
+  not the hinge state; `DisplayInfo.orientation.currentDeviceOrientation`
+  stands in only while the device lies face up or down. The pose buttons'
+  icons turn with `propertyA`.
+- The presets are closed 0°, partially open **130°** and open 180°.
 
-- At book (100°) DeviceHub draws the cover. It takes the lit panel at that
-  angle from DisplayInfo's `active` integrated display, and the inner render
-  display is `virtual`. Reporting it as integrated gives DeviceHub the
-  evidence, but DeviceHub then wants a stream for that display ID, which
-  needs feature `0x100` and a capture path the mirror patch does not cover
-  (tried: the picture comes out small and centred).
-- DeviceHub's own pose controls (a hinge slider and closed / book / open
-  presets, which appear once an integrated inner display is reported) send
-  vendor-defined HID reports; nothing in the guest acts on them.
+The hinge angle stand-in's three angles are **floats**: `dtdeviceinfod`'s
+`CMAngle_Bridge` declares `angleDegrees`, `mechanicalAngleDegrees` and
+`velocityDegreesPerSeconds` as `Tf` and reads `s0`. The first stand-in
+returned doubles, whose low half is zero for every whole angle, so DeviceHub
+read 0° throughout. Open and closed hid it (their hinge states pin the
+angle); in book DeviceHub drew the device nearly shut and focused the cover,
+whose stream is the composited portrait output, so the inner picture looked a
+quarter turned. Reporting landscape right made that picture upright only by
+rolling the whole model.
+
+Each panel streams on its own. DeviceHub shows its pose controls only when
+DisplayInfo lists the inner display as `integrated` with its own ID, and then
+draws that panel from that display's stream (feature `0x100`) and geometry.
+FoldDisplay publishes the inner display with the hardware's shape: a portrait
+2007×2853 framebuffer at 3×, mounted at 270° (`DisplayRotation`, as the
+simulator's inner `CADisplay`), into which SpringBoard lays the inner UI out
+at interface orientation 90. In `dtdeviceinfod` the library reports that
+display as integrated at point scale 3 (`displayType`, `pointScale` on the
+`CADisplay` named `VPhone Duo Inner`). An earlier landscape inner display
+streamed pillarboxed with black bars, and with the mirror of display 1 the
+picture came out turned a quarter.
+
+DeviceHub's controls reach the guest as vendor-defined HID events (usage
+page `0xFF61`, usage `0x5B`) from the DDI's `dtuhidd` virtual service
+`CoreDevice avpCustom`. The payload is an IOKit binary-serialized dictionary
+(`IOCFUnserializeBinary`): `provider` `com.apple.Virtualization.VirtualMachines`,
+`source` `hinge-slider-control` (`type` range, `value` degrees, sent every
+frame of DeviceHub's own animation) or `orientation-picker-control` (`type`
+enum, `value` `portrait`, `portraitUpsideDown`, `landscapeLeft` or
+`landscapeRight`). vphoned watches for them on an iPhone Duo
+(`vphoned_devicehub.m`, an unmatched HID event monitor; matching by usage
+missed them) and acts through the `display.posture` paths
+(`GuestDeviceHubControl`): a run of slider values is folded once it has been
+quiet for 200 ms, to where it ended, and a picker value sets the pose
+orientation with the hinge where it is, as `display.rotation` does. The
+orientation DeviceHub reads back changes only once SpringBoard's interface
+has turned, and a refused turn gets the old pose orientation back (SpringBoard
+keeps a refused one, and later folds carry it). Book is left alone: the
+override means 90° there and slides the fold toward the cover. Measured with
+`display.rotation` on the open inner panel: 0, 90, 180 and 270 all turn, and
+DeviceHub turns its model with each, picture upright. The picker itself was
+not pressed.
+DeviceHub then waits for its hinge
+reading to agree; vphoned moves the virtual hinge to the target as
+SpringBoard's sweep starts, since a stale angle through the sweep made
+DeviceHub's slider send the old angle back and fold the guest again.
+Restarting backboardd breaks `dtuhidd`'s HID connection and DeviceHub keeps
+the dead one: restart DeviceHub after a respring.
+
+Measured on the same guest, portrait: closed and open from DeviceHub's
+buttons settle without bouncing and the guest follows; book at 130° (folded
+by `display.posture`) draws the inner face upright with the crease vertical,
+as DeviceHub draws a simulator Duo in book. Not yet repeated from DeviceHub's
+own book button since the float fix. Once, after DeviceHub's close from book,
+the cover came up in landscape (interface 90°); it did not recur in 48
+scripted folds over every path, and the guest's device orientation had been
+left non-portrait by rotation experiments just before, which the swap keeps.
+
+With the foldable's product-id (`preboot-cfw-devicetree_foldable_product_id`,
+on in standard since Lakr233/vphone-cli#778) CoreMotion has its own angle and device-state
+managers, and locationd's device-state relay reads the virtual hinge's host
+controls, the same `0xFF61/0x5B` dictionaries DeviceHub sends. Both
+`dtdeviceinfod` stand-ins then step aside, and DeviceHub reads the real
+managers. vphoned's handling splits the same way: on such a guest a DeviceHub
+slider run sets the virtual hinge to where it ended at once (keeping its
+orientation) and the picker sets the hinge's orientation, so the hinge,
+which resends its stored values every 5 s, agrees with DeviceHub and
+SpringBoard folds from the hinge; the SpringBoard display-swap path above is
+for guests without the relay. The provider check keeps vphoned from
+following the hinge's own dictionaries, which carry none. The relay path was
+not measured with DeviceHub: the test VM above predates the product-id
+patch.
 
 ## Other open items
 

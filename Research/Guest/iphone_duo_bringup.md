@@ -4787,6 +4787,58 @@ Measured on the test VM (bundle built from this change):
   three cover orientations (cover tested with Safari, which rotates on iPhone).
 - Three launch-sequence captures: no black frames, 2-5 transient tiles.
 
+## 2026-10-29 night: the inner display at 120 Hz
+
+Open, the VM window counted 60 fps while the cover (the paravirtual panel,
+with the ProMotion patch) runs at 120. Two caps, one in each process:
+
+- **backboardd.** A `CAWindowServerVirtualDisplay` gets one 60 Hz mode whatever
+  `kCAVirtualDisplayUpdateRate` says. `VirtualDisplay::refresh_rate()` uses the
+  update rate only while the display has no current mode; with one, it takes
+  the mode's 16.16 rate. `heartbeat_rate()` is that mode's period divided by
+  the integer `kCAVirtualDisplayMinimumFrameDuration` (default 1). Clients read
+  `CADisplay.refreshRate` (the mode), and `UIScreen.maximumFramesPerSecond`
+  is its inverse, so every app on the inner display was capped at 60
+  (UpdateRate 120: the display ticked faster, apps still saw 60; UpdateRate
+  60 + MinimumFrameDuration 2: heartbeat 1/120, refresh still 1/60).
+  The display's modes can be replaced with `-[CAWindowServerDisplay
+  setDigitalModes:withTimings:]` (`VirtualDisplay::set_digital_modes`), which
+  takes the framebuffer timing format: timings with `HorizontalAttributes` /
+  `VerticalAttributes` `{Active}` and `VerticalAttributes.PreciseSyncRate`
+  (16.16, default `0x3c0000` = 60), optional `Score`, and color modes
+  (`PixelEncoding` 0, `Depth` ≤ 8, `Colorimetry` 1/10/16, `EOTF` 0,
+  `DynamicRange` 0). A mode is preferred only when its score is above 0
+  (Colorimetry 16 adds 2, plain RGB nothing); with no preferred mode the
+  display comes up 0×0 and SpringBoard aborts in
+  `-[SBMainDisplayConfigurationTransformer transformDisplayConfiguration:]`.
+  FoldDisplay now sets one timing at 120 (2853×2007 when this was measured,
+  2007×2853 since the inner display took the hardware's shape, below), with
+  Colorimetry 1 and Score 1: the inner mode reads `RGB_8bit` like the
+  panel's.
+- **SpringBoard.** The compositor's display link asks for the panel's
+  `maximumFramesPerSecond` (120 with the ProMotion patch, else 60).
+
+backboardd cannot read the panel's rate while it adds the inner display: the
+primary's rate is not set yet during display detection, and asking
+`CADisplay` there blocks backboardd (the inner display never appeared).
+
+Measured on duospike-inner (iOS 27.1, Settings open, 3 s windows):
+
+| | panel (LCD) | inner |
+|---|---|---|
+| `UIScreen.maximumFramesPerSecond` | 120 | 120 (was 60) |
+| `CADisplay.refreshRate` / heartbeat | 1/120 / 1/120 | 1/120 / 1/120 (was 1/60) |
+| default `CADisplayLink`, ticks in 3 s | 377 | 377 |
+| compositor renders in 3 s | | 375-378 |
+
+Idle CPU on the home screen, three 10 s samples each: 60 Hz build SpringBoard
+6.9-7.9%, backboardd 37.8-45.6%; 120 Hz build 9.3-10.4% and 50.3-51.3%.
+
+Window captures (ScreenCaptureKit) cannot judge 120 Hz here: the cover, which
+is natively 120, measures the same 40-55 changes per second as the inner
+display, because the host composites the window at its own rate. Use guest
+display links, or the host's `lastSubmittedTime` poller from the vGPU notes.
+
 ## 2026-10-29 night: folds go through SpringBoard's display tool service
 
 Xcode 27's iPhone Duo simulator has no hinge: CoreSimulator gives it two real
@@ -4836,61 +4888,39 @@ test VM (iPhone19,4 27.1, 24A94425) with the two-display path:
   7 s), as on hardware.
 - DeviceHub (Xcode 27.1) draws a Duo guest as a 3D V68 model from CoreDevice's
   device motion state, which needed a `CMDeviceStateManager` stand-in in
-  `dtdeviceinfod`, and draws the open stream as the inner panel's native
-  portrait framebuffer, which needed every mirror clone kept on the panel
-  (backboardd moved it to the landscape inner render display). Closed and
-  open now look right there; book does not. Details:
-  `Research/Guest/devicehub_screen_viewing.md`, "iPhone Duo: the fold".
+  `dtdeviceinfod`. Details: `Research/Guest/devicehub_screen_viewing.md`,
+  "iPhone Duo: the fold".
+- One posture request runs at a time. SpringBoard answers a swap it refuses
+  ("rejecting swap request — system is not idle") at once and the same way
+  as a finished one, so a reply under 0.3 s for a sweep that had to move
+  counts as a refusal and is retried every 0.25 s for 10 s plus the
+  duration.
 
-## 2026-10-29 night: the inner display at 120 Hz
+## 2026-10-29 late: the inner display takes the hardware's shape
 
-Open, the VM window counted 60 fps while the cover (the paravirtual panel,
-with the ProMotion patch) runs at 120. Two caps, one in each process:
+DeviceHub shows its pose controls only for an integrated inner display with
+its own stream, and draws that stream on the inner panel as the panel's
+native framebuffer. The landscape 2853×2007 inner render display therefore
+came out pillarboxed through the mirror and sideways through a per-display
+stream. FoldDisplay now publishes it the way the simulator's inner
+`CADisplay` is: a portrait 2007×2853 framebuffer at 3×, with
+`DisplayRotation` 270, `DeviceSurfaceType` 2, chrome `phone14` and corner
+radius 55 in its extended properties. SpringBoard lays the inner UI out at
+interface orientation 90 and rotates it into the framebuffer, the
+compositor draws the inner display's frames onto the panel without a turn,
+and the 120 Hz timing is 2007×2853. The digitizer needs no turn either. The
+clone redirect from the first DeviceHub fix is gone.
 
-- **backboardd.** A `CAWindowServerVirtualDisplay` gets one 60 Hz mode whatever
-  `kCAVirtualDisplayUpdateRate` says. `VirtualDisplay::refresh_rate()` uses the
-  update rate only while the display has no current mode; with one, it takes
-  the mode's 16.16 rate. `heartbeat_rate()` is that mode's period divided by
-  the integer `kCAVirtualDisplayMinimumFrameDuration` (default 1). Clients read
-  `CADisplay.refreshRate` (the mode), and `UIScreen.maximumFramesPerSecond`
-  is its inverse, so every app on the inner display was capped at 60
-  (UpdateRate 120: the display ticked faster, apps still saw 60; UpdateRate
-  60 + MinimumFrameDuration 2: heartbeat 1/120, refresh still 1/60).
-  The display's modes can be replaced with `-[CAWindowServerDisplay
-  setDigitalModes:withTimings:]` (`VirtualDisplay::set_digital_modes`), which
-  takes the framebuffer timing format: timings with `HorizontalAttributes` /
-  `VerticalAttributes` `{Active}` and `VerticalAttributes.PreciseSyncRate`
-  (16.16, default `0x3c0000` = 60), optional `Score`, and color modes
-  (`PixelEncoding` 0, `Depth` ≤ 8, `Colorimetry` 1/10/16, `EOTF` 0,
-  `DynamicRange` 0). A mode is preferred only when its score is above 0
-  (Colorimetry 16 adds 2, plain RGB nothing); with no preferred mode the
-  display comes up 0×0 and SpringBoard aborts in
-  `-[SBMainDisplayConfigurationTransformer transformDisplayConfiguration:]`.
-  FoldDisplay now sets one timing, 2853×2007 at 120, with Colorimetry 1 and
-  Score 1: the inner mode reads `RGB_8bit` like the panel's.
-- **SpringBoard.** The compositor's display link asks for the panel's
-  `maximumFramesPerSecond` (120 with the ProMotion patch, else 60).
+`display.rotation`'s inner map (0 landscape-left, 90 portrait, 180
+landscape-right, from pose orientations 3, 1, 4) still holds on the portrait
+framebuffer: measured on sbdisplay-duo, pose orientation 1 gives interface
+90, 3 gives 0 and 4 gives 180.
 
-backboardd cannot read the panel's rate while it adds the inner display: the
-primary's rate is not set yet during display detection, and asking
-`CADisplay` there blocks backboardd (the inner display never appeared).
-
-Measured on duospike-inner (iOS 27.1, Settings open, 3 s windows):
-
-| | panel (LCD) | inner |
-|---|---|---|
-| `UIScreen.maximumFramesPerSecond` | 120 | 120 (was 60) |
-| `CADisplay.refreshRate` / heartbeat | 1/120 / 1/120 | 1/120 / 1/120 (was 1/60) |
-| default `CADisplayLink`, ticks in 3 s | 377 | 377 |
-| compositor renders in 3 s | | 375-378 |
-
-Idle CPU on the home screen, three 10 s samples each: 60 Hz build SpringBoard
-6.9-7.9%, backboardd 37.8-45.6%; 120 Hz build 9.3-10.4% and 50.3-51.3%.
-
-Window captures (ScreenCaptureKit) cannot judge 120 Hz here: the cover, which
-is natively 120, measures the same 40-55 changes per second as the inner
-display, because the host composites the window at its own rate. Use guest
-display links, or the host's `lastSubmittedTime` poller from the vGPU notes.
+The host window follows folds it did not ask for (DeviceHub's, another
+client's): `display.orientation` carries `fold_angle`, the virtual hinge's
+settled angle, and the window's once-a-second orientation poll moves its
+fold chrome to the nearest of closed, book and open while none of its own
+fold requests is in flight.
 
 ## 2026-10-30: CoreMotion, MobileGestalt displays and the book angle, against Apple's simulator
 

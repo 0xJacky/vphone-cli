@@ -497,7 +497,7 @@ request carries `"force": true`.
 | Area | Methods |
 | --- | --- |
 | Device | `device.snapshot`, `device.info` (snapshot plus network, screen, rotation, brightness, volume, low power, Developer Mode, agent, `device_name` `{name, own_name}`: the pinned name and the guest's own ComputerName), `device.screen`, `device.network`, `device.displays` (a flat IOService probe of every display-ish object with its small properties — what the display stack bound; built for the foldable display work: `AppleParavirtGPU` `DisplayPortCount`, and each `AppleParavirtDisplay` width/height/`primary`), `device.ioreg {plane}`, `device.environment`, `device.basebin {archive?}` |
-| Display, audio | `display.pose` (read-only SpringBoard pose snapshot: orientation, device_orientation, hinge, tabletop; reports unavailable for an unsupported ABI), `display.modes` (read-only CoreAnimation display bounds, native size, current/available modes, and virtual-mode selector availability; availability does not prove a mode change is supported), `display.brightness {value?}`, `display.rotation {orientation?}`, `display.posture {hinge, orientation?, tabletop?}` (a foldable guest's pose through SpringBoard's test-automation override, see below; capability `device_pose`), `display.orientation` (`{degrees, source}`: SpringBoard's interface orientation without a screen capture, for polling; `degrees` is null while SpringBoard has no answer; capability `display_orientation`), `display.rotation_lock {locked}`, `display.auto_lock` (`{auto_lock_seconds, never, lock_screen_minimum_seconds}`), `display.auto_lock.set {seconds}` (writes the mobile UserSettings input through cfprefsd, posts profiled's effective-settings notification, and returns an immediate readback; the caller must verify the effective value), `screen.unlock {passcode?, timeout?}` (`{locked, screen_off, was_locked, was_screen_off}`: the display on and the Lock Screen passed, see below; capability `screen_unlock`), `audio.volume {value?, category?}`, `audio.state` |
+| Display, audio | `display.pose` (read-only SpringBoard pose snapshot: orientation, device_orientation, hinge, tabletop; reports unavailable for an unsupported ABI), `display.modes` (read-only CoreAnimation display bounds, native size, current/available modes, and virtual-mode selector availability; availability does not prove a mode change is supported), `display.brightness {value?}`, `display.rotation {orientation?}`, `display.posture {hinge, orientation?, tabletop?}` (a foldable guest's pose through SpringBoard's test-automation override, see below; capability `device_pose`), `display.orientation` (`{degrees, source, fold_angle?}`: SpringBoard's interface orientation without a screen capture, for polling; `degrees` is null while SpringBoard has no answer; on a foldable `fold_angle` is the virtual hinge's settled angle, which every fold leaves it at, so a host can follow folds it did not ask for; capability `display_orientation`), `display.rotation_lock {locked}`, `display.auto_lock` (`{auto_lock_seconds, never, lock_screen_minimum_seconds}`), `display.auto_lock.set {seconds}` (writes the mobile UserSettings input through cfprefsd, posts profiled's effective-settings notification, and returns an immediate readback; the caller must verify the effective value), `screen.unlock {passcode?, timeout?}` (`{locked, screen_off, was_locked, was_screen_off}`: the display on and the Lock Screen passed, see below; capability `screen_unlock`), `audio.volume {value?, category?}`, `audio.state` |
 | Input | `input.touch`, `input.hid {page, usage, down?, long_press?}`, `input.button {name}`, `input.key {name}`, `input.type {text, delay_ms?}`, `input.paste {text}`, `input.tap`, `input.double_tap`, `input.long_press`, `input.swipe`, `input.drag {points}`, `input.touch_sequence {events}` — gesture coordinates are screen points; `input.pointer {x, y, seq?, buttons?}`, `input.scroll {phase, dx?, dy?, x?, y?}` (capabilities `pointer_scroll` and `pointer_buttons`, see below) |
 | UI | `ui.tree` (alias `accessibility.tree`), `ui.element_at`, `ui.tap_element`, `ui.wait`, `ui.wait_gone`, `ui.ocr {languages?, min_confidence?}`, `ui.describe`, `screen.screenshot` |
 | Processes | `processes.list {filter?}`, `processes.kill {pid, signal?}` **force**, `process.spawn {executable, arguments?, timeout_seconds?}`, `memory.jetsam`, `memory.pressure` (only the three kernel memory sysctls, for polling) |
@@ -1247,11 +1247,15 @@ upside-down, 270 landscape-left; inner panel, mounted a quarter turn from the
 cover: 0 landscape-left, 90 portrait, 180 landscape-right, 270 upside-down)
 and reads the interface back. The host controls' orientation picker has no
 upside-down, so with CoreMotion the cover's 180 and the inner panel's 270 are
-refused. The accelerometer and the AssistiveTouch rotation other iPhones use
-do not turn a foldable's panels.
+refused. With the override, a turn that does not land gets the old pose
+orientation back, since SpringBoard keeps a refused one and later folds carry
+it, and partially open the request is refused, because the override means 90°
+there and slides the fold toward the cover. The accelerometer and the
+AssistiveTouch rotation other iPhones use do not turn a foldable's panels.
 
-A `position` request is a fold, and SpringBoard runs it the way Apple's
-`suiatool swap` does: vphoned calls
+Without CoreMotion's relay a `position` request is a fold that SpringBoard
+runs the way Apple's `suiatool swap` does (with the relay the virtual hinge
+sweeps and SpringBoard folds from the hinge): vphoned calls
 `-[SBSDisplayToolService swapDisplayWithSettings:completion:]` with the
 position as an absolute hinge target (0 closed, 1 open flat), the duration
 (−1 the per-direction default, measured 0.391 s opening and 0.420 s
@@ -1278,6 +1282,19 @@ without it is logged as having insufficient authorization and never
 answered. On a guest without the service (or one that does not answer
 within 10 s plus the duration) the virtual hinge sweeps and the override
 jumps, as before. Verified 2026-10-29 on iPhone19,4 27.1 (24A94425).
+
+Posture requests run one at a time. SpringBoard answers a swap it refuses
+("system is not idle") at once and exactly like a finished one, so a reply
+under 0.3 s for a sweep that had to move is treated as a refusal and retried
+every 0.25 s until 10 s plus the duration have passed; then the request
+fails with "SpringBoard kept refusing the fold". The virtual hinge takes the
+target angle as SpringBoard's sweep starts, and the old angle again if the
+fold does not run: Xcode's DeviceHub reads it and, with the old angle
+lingering through the sweep, sent its slider back there. DeviceHub's own fold
+and orientation controls arrive in the guest as vendor-defined HID events,
+and vphoned runs them through this request on an iPhone Duo; with the relay
+a DeviceHub fold sets the hinge at once and keeps its orientation (see
+`Guest/devicehub_screen_viewing.md`, "iPhone Duo: the fold").
 
 | Param | Values |
 | --- | --- |

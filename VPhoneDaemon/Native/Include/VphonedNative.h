@@ -120,11 +120,6 @@ bool vp_screen_undim(void);
 /// touch controller reports as a wake gesture.
 void vp_tap_to_wake_start(void (* _Nonnull touched)(void));
 bool vp_device_pose_set(int deviceOrientation, int hingeState, int tabletopPose);
-/// Whether this guest's CoreMotion has a foldable's angle and device-state
-/// capabilities (the foldable product-id). Then locationd relays the virtual
-/// hinge's host controls into CoreMotion and SpringBoard reads its pose from
-/// there; otherwise only the test-automation pose override reaches it.
-bool vp_core_motion_hinge(void);
 /// Fold a foldable guest through SpringBoard's display tool service: sweep
 /// its hinge pose to `position` (0 closed, 1 open flat) and swap displays on
 /// the way. `durationSeconds` < 0 is the per-direction default, 0 an instant
@@ -135,6 +130,14 @@ bool vp_core_motion_hinge(void);
 /// guest has no such service.
 int vp_display_swap(double position, double durationSeconds, int deviceOrientation, int profileOverride,
                     double timeoutSeconds);
+/// Publish the device orientation (1 portrait … 4 landscape-right) for the
+/// device state DeviceHub reads (libdevicehubfix in dtdeviceinfod).
+void vp_device_orientation_publish(int deviceOrientation);
+/// Whether this guest's CoreMotion has a foldable's angle and device-state
+/// capabilities (the foldable product-id). Then locationd relays the virtual
+/// hinge's host controls into CoreMotion and SpringBoard reads its pose from
+/// there; otherwise only the test-automation pose override reaches it.
+bool vp_core_motion_hinge(void);
 
 /// Ask launchd to shut the guest down and halt. Returns 0 once the request is
 /// accepted, otherwise an errno value. Needs root.
@@ -215,6 +218,10 @@ BOOL vp_accelerometer_set_orientation(NSString * _Nonnull spec);
 /// (degrees, closed 0) and whether the provider in backboardd is enumerated
 /// and current.
 NSDictionary * _Nonnull vp_hinge_get(void);
+/// On an iPhone Duo, hand every control Xcode's DeviceHub sends (a decoded
+/// dictionary with `source`, `type` and `value`) to `handler`, on a serial
+/// queue of its own. False on any other device or without the HID API.
+bool vp_devicehub_controls_start(void (^_Nonnull handler)(NSDictionary * _Nonnull control));
 /// Every display-ish IOService object the guest published, with its small
 /// properties: what the display stack bound, for the foldable display work.
 NSArray * _Nonnull vp_display_probe(void);

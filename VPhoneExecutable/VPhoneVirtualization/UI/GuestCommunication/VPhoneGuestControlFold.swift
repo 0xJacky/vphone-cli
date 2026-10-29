@@ -16,6 +16,8 @@ extension VPhoneGuestControl {
         if let duration {
             params["duration"] = duration
         }
+        foldRequestsInFlight += 1
+        defer { foldRequestsInFlight -= 1 }
         let result = try await call("display.posture", params: params)
         guard let angle = result.double("angle"), angle.isFinite, 0 ... 180 ~= angle,
               let hinge = result.int("hinge"), 0 ... 4 ~= hinge
@@ -42,5 +44,17 @@ extension VPhoneGuestControl {
             applied: hingeHID?.bool("applied") ?? false,
             sweepMilliseconds: sweepMilliseconds,
         )
+    }
+
+    /// The angle the guest's last fold settled at, which the orientation poll
+    /// reads (`display.orientation`'s `fold_angle`), so the window follows
+    /// folds it did not ask for, such as Xcode DeviceHub's. A fold this window
+    /// has in flight answers for itself; the guest publishes the angle only
+    /// once a fold has finished.
+    func followGuestFold(angle: Double) {
+        guard foldRequestsInFlight == 0, angle.isFinite, 0 ... 180 ~= angle, foldAngle != angle else { return }
+        foldSweepSeconds = 0
+        foldPosition = VPhoneFoldPosition.allCases.min { abs($0.angle - angle) < abs($1.angle - angle) }
+        foldAngle = angle
     }
 }

@@ -304,12 +304,12 @@ static void vpShowInnerDisplay(BOOL shown) {
             }
         }
         if (!vpInnerPanelQueue) vpInnerPanelQueue = dispatch_queue_create("com.vphone.folddisplay.inner-panel", DISPATCH_QUEUE_SERIAL);
-        // The inner display fills the panel, turned a quarter (-90 degrees)
-        // when it reads landscape on the portrait panel. The panel is the
-        // cover's, a little narrower than the inner display (1398x2034
-        // against 2007x2853), so the fill is about 2% tighter across than
-        // along; it leaves no bars, and the digitizer, which spans the panel,
-        // maps onto the whole inner display as it is.
+        // The inner display is portrait like the panel and fills it as it is
+        // (one that read landscape would be turned a quarter, -90 degrees).
+        // The panel is the cover's, a little narrower than the inner display
+        // (1398x2034 against 2007x2853), so the fill is about 2% tighter
+        // across than along; it leaves no bars, and the digitizer, which
+        // spans the panel, maps onto the whole inner display as it is.
         id rootLayer = vpReadObject(rootWindow, "layer");
         CGRect panel = ((CGRect (*)(id, SEL))objc_msgSend)(rootLayer, sel_registerName("bounds"));
         CGFloat pointScale = ((double (*)(id, SEL))objc_msgSend)(vpReadObject(rootWindow, "screen"), sel_registerName("scale"));

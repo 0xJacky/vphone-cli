@@ -50,10 +50,9 @@
 // capture inside the guest, which does not ask either of them.
 //
 // The getter is interposed to answer with the features a Mac host offers
-// (primary display mirrored video, system audio and display information), and
-// `isCustomerRestricted`, which dtremotedisplayd also reads, answers no. The
-// host still intersects the answer with its own features, so asking for more
-// than the Mac can take changes nothing.
+// (primary display mirrored video, system audio and display information) plus
+// video by display ID, which an iPhone Duo's inner panel is streamed through,
+// and `isCustomerRestricted`, which dtremotedisplayd also reads, answers no.
 //
 // ## dtdeviceinfod: missing framebuffer mask
 //
@@ -142,8 +141,10 @@
 extern CFTypeRef MGCopyAnswer(CFStringRef key, CFDictionaryRef options);
 
 // The features a Mac host reports for itself (raw 0x8c): primary display
-// mirrored output 0x4, system audio output 0x8, display information 0x80.
-#define VP_DEVICEHUB_FEATURES 0x8c
+// mirrored output 0x4, system audio output 0x8, display information 0x80;
+// and video output by display ID 0x100, which an iPhone Duo's inner panel
+// streams through (DeviceHub draws each integrated panel from its own display).
+#define VP_DEVICEHUB_FEATURES 0x18c
 
 #define VP_STRINGIFY_(value) #value
 #define VP_STRINGIFY(value) VP_STRINGIFY_(value)
