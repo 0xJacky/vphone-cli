@@ -893,7 +893,7 @@ struct VPhoneLaunchpadControlCommands {
     }
 
     /// A maintenance command for a client: it shows in the app as a run of
-    /// Launchpad's own would, without opening its sheet, and its output
+    /// Launchpad's own would, and its output
     /// streams to the client too.
     private func maintenance(
         _ kind: VPhoneLaunchpadMaintenanceRun.Kind,
@@ -903,7 +903,6 @@ struct VPhoneLaunchpadControlCommands {
     ) async throws -> Int32 {
         try await library.runMaintenance(
             VPhoneLaunchpadMaintenanceRun(kind: kind, machine: machine),
-            presents: false,
             forward: emit,
             command,
         )
