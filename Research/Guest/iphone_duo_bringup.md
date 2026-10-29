@@ -4771,18 +4771,18 @@ the two-display path that reason is gone: the inner display is its own
 
 vphone-vm now boots the machine's own screen, 1398×2034 at 3x: the cover is
 466×678 points with its native layout (the right-side Dock and status column
-are the Duo's outer-display design). Open, the compositor fits the inner
-display onto the panel turned upright and shrunk to 0.697, which leaves 23 px
-bars along the panel's long sides. backboardd computes the same rectangle when
-it adds the inner display (`vpLocateInnerPanelImage`, from the LCD's and the
-inner display's pixel sizes) and maps each touch through it before turning it
-by the mount; a touch in a bar lands on the inner display's edge.
+are the Duo's outer-display design). Open, the compositor turns the inner
+display upright and fills the panel with it: 0.697 across and 0.713 along,
+about 2% tighter across than along. A first version kept the proportions and
+left 23 px black bars along the long sides, which the user did not want; with
+the fill, the digitizer (which spans the panel) maps onto the whole inner
+display, so backboardd's touch turn needs no rectangle of its own.
 
 Measured on the test VM (bundle built from this change):
 
 - Taps logged in SpringBoard land at the expected points: inner, panel pixel
-  (X, Y) of the landscape screenshot at ((X - 23.3) / 2.09, Y / 2.09) points
-  for the centre and four corners; cover, at (X / 3, Y / 3).
+  (X, Y) of the landscape screenshot at (X × 951 / 2034, Y × 669 / 1398) points
+  for the centre and four corners (no bars); cover, at (X / 3, Y / 3).
 - Guest screenshots match the VM window at offset (0, 0) in all four inner and
   three cover orientations (cover tested with Safari, which rotates on iPhone).
 - Three launch-sequence captures: no black frames, 2-5 transient tiles.

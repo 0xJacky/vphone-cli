@@ -262,18 +262,21 @@ static void vpShowInnerDisplay(BOOL shown) {
             }
         }
         if (!vpInnerPanelQueue) vpInnerPanelQueue = dispatch_queue_create("com.vphone.folddisplay.inner-panel", DISPATCH_QUEUE_SERIAL);
-        // The inner display's points fill the panel's, turned a quarter (-90
-        // degrees) when they read landscape on the portrait panel, centered,
-        // shrunk only if they do not fit.
+        // The inner display fills the panel, turned a quarter (-90 degrees)
+        // when it reads landscape on the portrait panel. The panel is the
+        // cover's, a little narrower than the inner display (1398x2034
+        // against 2007x2853), so the fill is about 2% tighter across than
+        // along; it leaves no bars, and the digitizer, which spans the panel,
+        // maps onto the whole inner display as it is.
         id rootLayer = vpReadObject(rootWindow, "layer");
         CGRect panel = ((CGRect (*)(id, SEL))objc_msgSend)(rootLayer, sel_registerName("bounds"));
         CGFloat pointScale = ((double (*)(id, SEL))objc_msgSend)(vpReadObject(rootWindow, "screen"), sel_registerName("scale"));
         CGSize inner = CGSizeMake(pixels.width / pointScale, pixels.height / pointScale);
         BOOL turned = inner.width > inner.height;
         CGSize upright = turned ? CGSizeMake(inner.height, inner.width) : inner;
-        CGFloat scale = MIN(1, MIN(panel.size.width / upright.width, panel.size.height / upright.height));
-        CGAffineTransform transform = CGAffineTransformMakeScale(scale, scale);
-        if (turned) transform = CGAffineTransformRotate(transform, -M_PI_2);
+        CGAffineTransform transform = CGAffineTransformConcat(
+            turned ? CGAffineTransformMakeRotation(-M_PI_2) : CGAffineTransformIdentity,
+            CGAffineTransformMakeScale(panel.size.width / upright.width, panel.size.height / upright.height));
         id root = [objc_getClass("CALayer") new];
         ((void (*)(id, SEL, CGRect))objc_msgSend)(root, sel_registerName("setFrame:"), panel);
         ((void (*)(id, SEL, CGColorRef))objc_msgSend)(root, sel_registerName("setBackgroundColor:"),
@@ -291,8 +294,9 @@ static void vpShowInnerDisplay(BOOL shown) {
             sel_registerName("displayLinkWithTarget:selector:"), [VPhoneInnerPanelRefresh new], @selector(refresh:));
         ((void (*)(id, SEL, id, id))objc_msgSend)(vpInnerPanelRefresh, sel_registerName("addToRunLoop:forMode:"),
             NSRunLoop.mainRunLoop, NSRunLoopCommonModes);
-        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: shown=1 panel={%.0f, %.0f} inner={%.0f, %.0f} turned=%d scale=%.3f",
-            panel.size.width, panel.size.height, inner.width, inner.height, turned, scale]);
+        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: shown=1 panel={%.0f, %.0f} inner={%.0f, %.0f} turned=%d scale={%.3f, %.3f}",
+            panel.size.width, panel.size.height, inner.width, inner.height, turned,
+            panel.size.width / upright.width, panel.size.height / upright.height]);
     } @catch (NSException *exception) {
         vpFoldDisplayLog([NSString stringWithFormat:@"inner display: show exception %@", exception.reason]);
     }
