@@ -5,10 +5,12 @@ import VphonedNative
 /// (vphoned_devicehub.m decodes its controls). A closed / book / open button
 /// animates DeviceHub's hinge from the current angle to the target, sending a
 /// value every frame, and DeviceHub then waits for the device's hinge to
-/// agree. SpringBoard folds itself in one sweep, so a run of values is folded
-/// once it settles, to where it ended. The orientation picker sets the device
-/// orientation. Both go through the paths `display.posture` uses, so the host
-/// window, which polls the fold angle, follows too.
+/// agree. With CoreMotion's relay, locationd takes those values itself and
+/// the virtual hinge follows them. Without it SpringBoard folds itself in one
+/// sweep, so a run of values is folded once it settles, to where it ended.
+/// The orientation picker sets the device orientation. Both go through the
+/// paths `display.posture` uses, so the host window, which polls the fold
+/// angle, follows too.
 enum GuestDeviceHubControl {
     private final class Pending: @unchecked Sendable {
         /// Owned by `queue`.
@@ -17,6 +19,7 @@ enum GuestDeviceHubControl {
 
     private static let pending = Pending()
     private static let queue = DispatchQueue(label: "vphoned.devicehub-fold", qos: .userInitiated)
+    private static let wake = DispatchQueue(label: "vphoned.devicehub-wake", qos: .userInitiated)
     /// Longer than DeviceHub's frame interval, short enough to feel direct.
     private static let settle: DispatchTimeInterval = .milliseconds(200)
     /// Apple's DeviceOrientation names, as the picker sends them.
@@ -36,25 +39,27 @@ enum GuestDeviceHubControl {
             guard let angle = (value as? NSNumber)?.doubleValue ?? (value as? String).flatMap(Double.init),
                   angle.isFinite
             else { return }
+            let reading = min(max(angle, 0), 180)
+            if vp_core_motion_hinge() {
+                follow(reading)
+                return
+            }
             // DeviceHub draws a closed or open hinge state at 0 or 180 degrees
             // whatever its own animation shows, so a reading still at the old
             // pose pulled its model back there between the end of the run and
             // the fold. The reading follows the run; the fold then sets the
             // hinge to where it ended, or back if it does not run.
-            if !vp_core_motion_hinge() {
-                let reading = min(max(angle, 0), 180)
-                vp_hinge_reading_publish(reading, Int32(GuestAPI.hingeState(for: reading)))
-            }
+            vp_hinge_reading_publish(reading, Int32(GuestAPI.hingeState(for: reading)))
             queue.async {
                 pending.generation &+= 1
                 let generation = pending.generation
                 queue.asyncAfter(deadline: .now() + settle) {
                     guard pending.generation == generation else { return }
                     do {
-                        try GuestAPI.foldFromDeviceHub(angle: angle)
+                        try GuestAPI.foldFromDeviceHub(angle: reading)
                     } catch {
-                        NSLog("vphoned: DeviceHub fold to %.0f° failed: %@", angle, "\(error)")
-                        if !vp_core_motion_hinge(), let held = (vp_hinge_get()["angle"] as? NSNumber)?.doubleValue {
+                        NSLog("vphoned: DeviceHub fold to %.0f° failed: %@", reading, "\(error)")
+                        if let held = (vp_hinge_get()["angle"] as? NSNumber)?.doubleValue {
                             vp_hinge_reading_publish(held, Int32(GuestAPI.hingeState(for: held)))
                         }
                     }
@@ -72,5 +77,22 @@ enum GuestDeviceHubControl {
         default:
             break
         }
+    }
+
+    /// locationd's relay takes DeviceHub's controls itself (dtuhidd's
+    /// avpCustom service carries the host controls' usage), as on Apple's VM
+    /// host, so the guest follows the slider as it moves. The virtual hinge,
+    /// which resends its stored angle every few seconds for a restarted
+    /// locationd, takes each value too: a resend of the old angle in the
+    /// middle of a run sent the fold back. Opening from closed lights the
+    /// screen first, as `display.posture` does: SpringBoard's pose provider
+    /// commits a moving pose only on display frames, and a sleeping cover
+    /// left the inner display black.
+    private static func follow(_ angle: Double) {
+        if let held = (vp_hinge_get()["angle"] as? NSNumber)?.doubleValue,
+           GuestAPI.hingeState(for: held) == 1, GuestAPI.hingeState(for: angle) != 1 {
+            wake.async { GuestScreenUnlock.wakeDisplay() }
+        }
+        _ = vp_hinge_set(angle, 0)
     }
 }

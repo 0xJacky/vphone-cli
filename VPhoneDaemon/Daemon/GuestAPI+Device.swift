@@ -442,16 +442,10 @@ extension GuestAPI {
     }
 
     /// A fold Xcode's DeviceHub asked for (GuestDeviceHubControl): the sweep
-    /// `display.posture` runs for a position, to `angle` degrees.
-    /// With CoreMotion's relay the hinge takes the angle at once, keeping its
-    /// orientation: SpringBoard folds from the hinge as on a device.
+    /// `display.posture` runs for a position, to `angle` degrees. With
+    /// CoreMotion's relay the hinge follows DeviceHub's values instead.
     static func foldFromDeviceHub(angle: Double) throws {
-        let angle = min(max(angle, 0), 180)
-        if vp_core_motion_hinge() {
-            _ = try setDevicePose(["hinge": hingeState(for: angle), "angle": angle, "orientation": 0])
-        } else {
-            _ = try setDevicePose(["position": NSNumber(value: angle / 180)])
-        }
+        _ = try setDevicePose(["position": NSNumber(value: min(max(angle, 0), 180) / 180)])
     }
 
     /// A device orientation DeviceHub's picker chose (1 portrait … 6 face
