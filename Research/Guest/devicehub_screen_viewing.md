@@ -185,9 +185,11 @@ processes only (`vpIsDeviceHubFixTarget` in `Shared/InjectionEnvironment.h`):
   filesystem without protection classes. Every other call and failure is
   untouched.
 - **`dtremotedisplayd`**: interposes `MediaStreamSupportedFeatures.current`,
-  which answers `0x18c`: `0x8c`, what a Mac host reports for itself (the host
-  intersects it with its own), plus video output by display ID `0x100`, which
-  an iPhone Duo's inner panel streams through (see
+  which answers `0x184`: `0x8c`, what a Mac host reports for itself (the host
+  intersects it with its own), without system audio `0x8` (the VM window
+  plays the guest's audio already, and DeviceHub played it a second time),
+  plus video output by display ID `0x100`, which an iPhone Duo's inner panel
+  streams through (see
   [iPhone Duo](#iphone-duo-the-fold)); and `CurrentDevice.isCustomerRestricted`, which
   answers false. The struct is resilient (the framework is built for library
   evolution), so the getter returns it indirectly through `x8`; the
@@ -687,12 +689,11 @@ pose until the fold pulled DeviceHub's model back there (closed, open,
 closed).
 
 Measured on sbdisplay-duo after the product-id patch (2026-10-30): every
-DeviceHub click folds the guest once, following the slider. Opening out of
-closed shows about 0.12 s of black on the shared panel: SpringBoard fades
-the cover out to black and the inner display in from black, two screens on
-hardware. Handing the panel to the inner display at the start of the fold
-only showed its black longer (0.2 s); waiting for a fresh page of the inner
-display did not shorten it.
+DeviceHub click folds the guest once, following the slider. The black on
+opening out of closed is SpringBoard's fold effect on one shared panel; see
+`iphone_duo_bringup.md`, "2026-10-30: the fold's fade to black on one
+panel". DeviceHub no longer gets the guest's system audio (`0x184`): the VM
+window plays it, and DeviceHub played it again.
 
 ## Other open items
 
