@@ -574,6 +574,19 @@ test-vcam-drive-gate:
 		Tests/VCamDriveGateTests.c VCamCaptured/Frames/VCamDriveGate.c
 	@$(OUT)/VCamDriveGateTests
 
+# Host proof harness for camera-session weak registration during teardown.
+.PHONY: test-camfix-session-lifetime
+test-camfix-session-lifetime:
+	@mkdir -p $(OUT)
+	xcrun --sdk macosx clang -fobjc-arc -O1 -Wall -Wextra -Werror \
+		-ICamFix/Session -framework Foundation \
+		-o $(OUT)/CamFixSessionLifetimeTests Tests/CamFixSessionLifetimeTests.m
+	@$(OUT)/CamFixSessionLifetimeTests
+
+.PHONY: build-camfix-session-reproducer
+build-camfix-session-reproducer:
+	zsh Tests/CameraSessionReproducer/build.zsh "$(OUT)/camera-session-reproducer"
+
 # Host proof harness for the crop, size and turn plan libcamfix uses for
 # AVCaptureVideoDataOutput frames.
 .PHONY: test-camfix-geometry

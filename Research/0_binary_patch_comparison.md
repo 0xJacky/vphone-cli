@@ -1,5 +1,12 @@
 # Patch Comparison: Regular / Development / Jailbreak / Experimental
 
+> **Camera session teardown (2026-10-29).** Source-only change in libcamfix.
+> Session tracking uses `objc_storeWeakOrNil` and a strong weak-load before
+> weak-table insertion. It skips sessions already in deallocation.
+> No firmware patch or preset changes. A small camera app reproduces the
+> original abort on iOS 27.0.1 (24A446). See
+> [reproduction and crash stack](Guest/camera_session_teardown.md).
+
 > **Apple TV RootHide bootstrap and environment hooks (2026-10-26).** No new
 > declaration or instruction patch. An arm64e Apple TV now admits
 > `system-launchdaemons-boot-environment` and

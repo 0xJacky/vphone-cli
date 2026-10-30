@@ -1,0 +1,27 @@
+SessionProbe crash excerpt
+Libraries: stock vPhone 2.13.4 camera libraries
+Guest: iOS 27.0.1 (24A446)
+Exception: EXC_CRASH (SIGABRT)
+Termination namespace: OBJC
+
+Crashed thread:
+ 0  libsystem_kernel.dylib     __abort_with_payload + 8
+ 1  libsystem_kernel.dylib     abort_with_payload_wrapper_internal + 104
+ 2  libsystem_kernel.dylib     abort_with_reason + 32
+ 3  libobjc.A.dylib            _objc_fatalv(unsigned long long, unsigned long long, char const*, char*) + 116
+ 4  libobjc.A.dylib            _objc_fatal(char const*, ...) + 32
+ 5  libobjc.A.dylib            weak_register_no_lock + 396
+ 6  libobjc.A.dylib            objc_storeWeak + 468
+ 7  Foundation                 -[NSConcreteHashTable addObject:] + 96
+ 8  libcamfix.dylib            cfx_track_vcam_session + 128
+ 9  libcamfix.dylib            cfx_session_isRunning_hook + 76
+10  AVFCapture                 -[AVCaptureInput setSession:] + 64
+11  AVFCapture                 -[AVCaptureDeviceInput setSession:] + 272
+12  AVFCapture                 -[AVCaptureSession _removeInput:] + 232
+13  AVFCapture                 -[AVCaptureSession removeInput:] + 344
+14  AVFCapture                 -[AVCaptureSession dealloc] + 308
+15  Foundation                 _NSKVOPerformWithDeallocatingObservable + 180
+16  Foundation                 NSKVODeallocate + 184
+17  libobjc.A.dylib            AutoreleasePoolPage::releaseUntil(objc_object**) + 204
+18  libobjc.A.dylib            objc_autoreleasePoolPop + 244
+19  SessionProbe               RunCameraSessionProbe + 440
