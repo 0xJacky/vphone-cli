@@ -638,6 +638,22 @@ DeviceHub then waits for its hinge
 reading to agree; vphoned moves the virtual hinge to the target as
 SpringBoard's sweep starts, since a stale angle through the sweep made
 DeviceHub's slider send the old angle back and fold the guest again.
+
+
+`dtdeviceinfod` aborted whenever it let a `CMAngleManager` go, as when
+DeviceHub quit or reconnected: `-[CMAngleManager dealloc]` stops
+CoreMotion's own manager, and `-[CMAngleManagerInternal
+stopAngleUpdatesPrivate]` asserts `CLAngleNotifier::isAvailable()`
+(`CMAngleManager.mm` line 214), which is false on a guest without the
+foldable product-id. The relaunched `dtdeviceinfod` left DeviceHub without
+the device state, and its fold controls stopped working until DeviceHub was
+restarted. The stand-in now skips that internal stop, since under it the
+real manager never started. Its `minAngleDegrees` and `maxAngleDegrees` also
+return floats, as declared. Six crash reports with the same stack were
+collected on 2026-10-29 and 2026-10-30. With the fix, `dtdeviceinfod` kept
+running through a DeviceHub quit and relaunch, and DeviceHub followed the
+guest to book and closed afterwards.
+
 Restarting backboardd breaks `dtuhidd`'s HID connection and DeviceHub keeps
 the dead one: restart DeviceHub after a respring.
 

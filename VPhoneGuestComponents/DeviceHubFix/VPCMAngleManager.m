@@ -280,8 +280,18 @@ static BOOL vpSwizzledIsAvailable(id self, SEL selector) {
     return ((BOOL (*)(id, SEL))vpOriginalIsAvailableIMP)(self, selector);
 }
 
-static double vpSwizzledMinAngle(id self, SEL selector) { return 0.0; }
-static double vpSwizzledMaxAngle(id self, SEL selector) { return 180.0; }
+// Floats, as CoreMotion declares them (`+ (float)minAngleDegrees`): a
+// double in d0 reads back as 0 from s0, the trap the sample fields hit.
+static float vpSwizzledMinAngle(id self, SEL selector) { return 0.0f; }
+static float vpSwizzledMaxAngle(id self, SEL selector) { return 180.0f; }
+
+// -[CMAngleManager dealloc] stops CoreMotion's own manager, and
+// -[CMAngleManagerInternal stopAngleUpdatesPrivate] asserts that the real
+// hinge notifier is available (CMAngleManager.mm line 214). Under the
+// stand-in that manager never started, so its stop is skipped: dtdeviceinfod
+// aborted every time it let a manager go, as when DeviceHub reconnected, and
+// DeviceHub lost the device state until it was restarted.
+static void vpSkippedInternalStop(id self, SEL selector) {}
 
 static void vpSwizzledStartUpdates(id self, SEL selector, id queue, id handler) {
     VPAngleSession *session = vpSession(self);
@@ -563,6 +573,10 @@ __attribute__((constructor)) static void vpInstallAngleManagerStandIn(void) {
         vpOriginalStopIMP = method_getImplementation(stop);
         method_setImplementation(stop, (IMP)vpSwizzledStopUpdates);
     }
+    Method internalStop = class_getInstanceMethod(objc_getClass("CMAngleManagerInternal"),
+                                                  sel_registerName("stopAngleUpdatesPrivate"));
+    if (internalStop && strcmp(method_getTypeEncoding(internalStop), "v16@0:8") == 0)
+        method_setImplementation(internalStop, (IMP)vpSkippedInternalStop);
     Method active = class_getInstanceMethod(manager, sel_registerName("isAngleActive"));
     if (active) {
         vpOriginalActiveIMP = method_getImplementation(active);
@@ -580,8 +594,9 @@ __attribute__((constructor)) static void vpInstallAngleManagerStandIn(void) {
     }
 
     BOOL sampleReady = VPAngleDataClass != NULL;
-    vpMotionLog(@"hinge manager: stand-in v6 installed (start=%@ setHandler=%@ stop=%@ active=%@ interval=%@ sample=%@ base=%@)",
+    vpMotionLog(@"hinge manager: stand-in v7 installed (start=%@ setHandler=%@ stop=%@ internalStop=%@ active=%@ interval=%@ sample=%@ base=%@)",
                 start ? @"yes" : @"MISSING", setHandler ? @"yes" : @"missing", stop ? @"yes" : @"missing",
+                internalStop ? @"yes" : @"MISSING",
                 active ? @"yes" : @"missing", getInterval ? @"yes" : @"missing",
                 sampleReady ? @"ready" : @"MISSING",
                 VPAngleDataClass ? class_getSuperclass(VPAngleDataClass) : nil);
