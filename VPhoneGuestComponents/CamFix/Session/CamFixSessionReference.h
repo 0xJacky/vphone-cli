@@ -6,7 +6,7 @@
 extern id cfx_storeWeakOrNil(id __weak *location, id value)
     __asm("_objc_storeWeakOrNil");
 
-static inline id cfx_live_session(id __unsafe_unretained session) {
+static inline id cfx_load_live_session(id __unsafe_unretained session) {
   __weak id candidate = nil;
   cfx_storeWeakOrNil(&candidate, session);
   return candidate;

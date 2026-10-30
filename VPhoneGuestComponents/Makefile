@@ -575,13 +575,13 @@ test-vcam-drive-gate:
 	@$(OUT)/VCamDriveGateTests
 
 # Host proof harness for camera-session weak registration during teardown.
-.PHONY: test-camfix-session-lifetime
-test-camfix-session-lifetime:
+.PHONY: test-camfix-session-reference
+test-camfix-session-reference:
 	@mkdir -p $(OUT)
 	xcrun --sdk macosx clang -fobjc-arc -O1 -Wall -Wextra -Werror \
 		-ICamFix/Session -framework Foundation \
-		-o $(OUT)/CamFixSessionLifetimeTests Tests/CamFixSessionLifetimeTests.m
-	@$(OUT)/CamFixSessionLifetimeTests
+		-o $(OUT)/CamFixSessionReferenceTests Tests/CamFixSessionReferenceTests.m
+	@$(OUT)/CamFixSessionReferenceTests
 
 .PHONY: build-camfix-session-reproducer
 build-camfix-session-reproducer:

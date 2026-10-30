@@ -1,4 +1,4 @@
-#import "CamFixSessionLifetime.h"
+#import "CamFixSessionReference.h"
 #include <assert.h>
 
 static BOOL checkedDealloc;
@@ -8,18 +8,18 @@ static NSHashTable *sessions;
 @implementation SessionProbe
 - (void)dealloc {
   // Mirrors isRunning -> tracking during AVCaptureSession teardown.
-  assert(cfx_live_session(self) == nil);
+  assert(cfx_load_live_session(self) == nil);
   checkedDealloc = YES;
 }
 @end
 
 int main(void) {
   @autoreleasepool {
-    assert(cfx_live_session(nil) == nil);
+    assert(cfx_load_live_session(nil) == nil);
     sessions = [NSHashTable weakObjectsHashTable];
     @autoreleasepool {
       SessionProbe *session = [SessionProbe new];
-      id live = cfx_live_session(session);
+      id live = cfx_load_live_session(session);
       assert(live == session);
       [sessions addObject:live];
       assert([sessions containsObject:session]);
@@ -28,5 +28,5 @@ int main(void) {
     assert(checkedDealloc);
     assert(sessions.allObjects.count == 0);
   }
-  puts("CamFix session lifetime: passed");
+  puts("CamFix session reference: passed");
 }
