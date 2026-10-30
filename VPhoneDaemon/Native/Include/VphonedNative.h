@@ -222,6 +222,10 @@ NSDictionary * _Nonnull vp_hinge_get(void);
 /// dictionary with `source`, `type` and `value`) to `handler`, on a serial
 /// queue of its own. False on any other device or without the HID API.
 bool vp_devicehub_controls_start(void (^_Nonnull handler)(NSDictionary * _Nonnull control));
+/// Publish a hinge reading (degrees, and the hinge state it names) where the
+/// hinge stand-ins in dtdeviceinfod read the virtual hinge's newest sample,
+/// without moving the hinge.
+void vp_hinge_reading_publish(double angleDegrees, int hingeState);
 /// Every display-ish IOService object the guest published, with its small
 /// properties: what the display stack bound, for the foldable display work.
 NSArray * _Nonnull vp_display_probe(void);

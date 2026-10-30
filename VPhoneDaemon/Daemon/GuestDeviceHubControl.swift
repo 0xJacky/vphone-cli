@@ -36,6 +36,15 @@ enum GuestDeviceHubControl {
             guard let angle = (value as? NSNumber)?.doubleValue ?? (value as? String).flatMap(Double.init),
                   angle.isFinite
             else { return }
+            // DeviceHub draws a closed or open hinge state at 0 or 180 degrees
+            // whatever its own animation shows, so a reading still at the old
+            // pose pulled its model back there between the end of the run and
+            // the fold. The reading follows the run; the fold then sets the
+            // hinge to where it ended, or back if it does not run.
+            if !vp_core_motion_hinge() {
+                let reading = min(max(angle, 0), 180)
+                vp_hinge_reading_publish(reading, Int32(GuestAPI.hingeState(for: reading)))
+            }
             queue.async {
                 pending.generation &+= 1
                 let generation = pending.generation
@@ -45,6 +54,9 @@ enum GuestDeviceHubControl {
                         try GuestAPI.foldFromDeviceHub(angle: angle)
                     } catch {
                         NSLog("vphoned: DeviceHub fold to %.0f° failed: %@", angle, "\(error)")
+                        if !vp_core_motion_hinge(), let held = (vp_hinge_get()["angle"] as? NSNumber)?.doubleValue {
+                            vp_hinge_reading_publish(held, Int32(GuestAPI.hingeState(for: held)))
+                        }
                     }
                 }
             }

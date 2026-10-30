@@ -18,6 +18,7 @@
  */
 
 #import "Include/VphonedNative.h"
+#import "../../VPhoneGuestComponents/Hinge/VPhoneHingeState.h"
 
 #include <dlfcn.h>
 #include <string.h>
@@ -86,4 +87,17 @@ void vp_device_orientation_publish(int deviceOrientation) {
     CFPreferencesSetValue(CFSTR("VPhoneDeviceOrientation"), (__bridge CFNumberRef)@(deviceOrientation),
                           CFSTR("com.apple.backboardd"), CFSTR("mobile"), kCFPreferencesAnyHost);
     CFPreferencesSynchronize(CFSTR("com.apple.backboardd"), CFSTR("mobile"), kCFPreferencesAnyHost);
+}
+
+void vp_hinge_reading_publish(double angleDegrees, int hingeState) {
+    // The sample libvphonehinge writes as the hinge moves (phase 2, between
+    // the ends of a sweep); the hinge itself and its configuration are left
+    // alone.
+    NSDictionary *latest = @{
+        @"angle": @(angleDegrees), @"mechanical_angle": @(angleDegrees), @"velocity": @0,
+        @"state": @(hingeState), @"event_phase": @2, @"timestamp": @(NSDate.date.timeIntervalSince1970),
+    };
+    CFPreferencesSetValue(CFSTR(VP_HINGE_LATEST), (__bridge CFDictionaryRef)latest, CFSTR(VP_HINGE_DOMAIN),
+                          CFSTR("mobile"), kCFPreferencesAnyHost);
+    CFPreferencesSynchronize(CFSTR(VP_HINGE_DOMAIN), CFSTR("mobile"), kCFPreferencesAnyHost);
 }
