@@ -559,6 +559,60 @@
 > each crashed or closed the chain on. See
 > [Duo bring-up](Guest/iphone_duo_bringup.md#virtual-hinge-2026-10-24).
 
+> **Duo panel nodes, product identity on, and CoreMotion's VM relay
+> (2026-10-30):** measured against Apple's iPhone Duo simulator
+> (`Research/Guest/Evidence/duo-sim-baseline/BASELINE.md`), the dual-display
+> guest still reported one display to MobileGestalt, no CoreMotion pose
+> managers, and a 90° book angle from the test-automation override.
+> - `preboot-cfw-devicetree_foldable_displays` (new; guest system set,
+>   Preboot device-tree repair, on in `standard`, blocked in `tvos`, `tvos-4k`
+>   and `homepod-mini`, foldable guests only; verb
+>   `cfw patch-dt-foldable-displays`) copies the board tree's `/product`
+>   children that carry `surface-type` — `display0` (cover) and `display1`
+>   (inner) on V68AP — into the guest's `/product`, first and in board order,
+>   with `AAPL,phandle` renumbered above the tree's highest. libMobileGestalt
+>   reads them live from `IODeviceTree:/product`: `MGGetLogicalDeviceDisplayCount`
+>   counts the children with `surface-type` (1 → 2) and
+>   `DisplayExtendedProperties` takes each one's `surface-type`,
+>   `display-scale`, `display-rotation`, `display-corner-radius`,
+>   `chrome-identifier` and `framebuffer-identifier` (nil → two entries).
+>   QuartzCore gives the cover's hardware display its entry at construction;
+>   `libvphonefolddisplay` now gives the inner virtual display the entry with
+>   surface type 2 and a 460 ppi physical size (`kCAVirtualDisplayPhysical*`).
+>   The cover's radii stay Apple's tree value [5, 5, 59, 59]; the simulator's
+>   device type says [8, 8, 59, 59].
+> - `preboot-exp-devicetree_foldable_product_id` is renamed
+>   `preboot-cfw-devicetree_foldable_product_id` and is on in `standard`
+>   (`renamedPatches` migrates VM records). CoreMotion's
+>   `CLPlatformInfo::queryEmbeddedSystemHardware` matches the V68 token through
+>   `MGIsDeviceOfType`; without it the guest is a generic virtual device with
+>   zero motion capability bits, so `+[CMAngleManager isAvailable]`,
+>   `CMDeviceStateManager` and `CMMagicPoseManager` were NO and locationd
+>   started no `CLDeviceStateRelay`. The single-display crash loop that kept it
+>   off does not apply to the dual-display guest (measured on duobase-01:
+>   SpringBoard stable across boots, posture cycles and rotations).
+> - `system-backboardd-cfw-hinge`'s `libvphonehinge.dylib` no longer
+>   publishes its own `0xFF0C/0x21` angle service (CoreMotion drops its
+>   phase-0 events). It publishes the VM host controls locationd's relay
+>   subscribes to — primary usage `0xFF61/0x5B` — and dispatches
+>   vendor-defined events whose data is an `IOCFSerialize`d dictionary of at
+>   most 256 bytes: `{source: hinge-slider-control, type: range, value:
+>   <integer degrees>}` and `{source: orientation-picker-control, type: enum,
+>   value: portrait|landscape-left|landscape-right|faceup|facedown}`. The
+>   relay publishes `CoreMotion_DeviceStateRelay_Crane` (`0xFF0C/0x21`) and
+>   `_DeviceState` (`0xFF0C/0x22`), the services the simulator shows, and
+>   SpringBoard's `SBFDevicePoseProvider` reads the angle and magic pose
+>   through CoreMotion: book is 99.4° (simulator 100°), not the override's
+>   90°. Stationary values are re-sent every 5 s because the relay reseeds
+>   0°/portrait when locationd restarts. Checked in `make test-hinge`
+>   (serialization round trip, size, vendor event).
+> - vphoned's `display.posture` and `display.rotation` drive the host controls
+>   and skip the test-automation override when CoreMotion has the capability
+>   (`vp_core_motion_hinge`); opening from closed wakes the screen first,
+>   because the pose provider publishes a moving pose only on display frames.
+>   `libdevicehubfix`'s CMAngleManager stand-in steps aside when CoreMotion's
+>   own manager is available.
+
 > **SpringBoard fold-guard (2026-10-25):** `system-springboard-cfw-fold_guard`
 > (guest system set, on in `standard`, blocked in `tvos`, `tvos-4k` and
 > `homepod-mini`, foldable guests only, iOS 27+; installs

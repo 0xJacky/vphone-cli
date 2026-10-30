@@ -69,9 +69,13 @@ static BOOL vpAddInnerRenderDisplayToServer(id server) {
             vpFoldDisplayLog(@"inner display: virtual display initializer ABI unavailable");
             return NO;
         }
-        // The panel's native pixels, landscape: 951x669 points at 3x.
+        // The panel's native pixels, landscape: 951x669 points at 3x. Its
+        // physical size, in inches, is what pixelsPerInch divides by; a
+        // virtual display has none unless given one, and both panels share
+        // the cover's 460 ppi pitch (MobileGestalt main-screen-pitch).
         id display = [(id<VPhoneInnerDisplayInitialization>)[cls alloc] initWithOptions:@{
             @"kCAVirtualDisplayWidth": @2853, @"kCAVirtualDisplayHeight": @2007,
+            @"kCAVirtualDisplayPhysicalWidth": @(2853 / 460.0), @"kCAVirtualDisplayPhysicalHeight": @(2007 / 460.0),
             @"kCAVirtualDisplayUpdateRate": @60, @"kCAVirtualDisplayName": vpInnerDisplayName,
         }];
         if (!display) { vpFoldDisplayLog(@"inner display: initializer returned nil"); return NO; }
@@ -129,7 +133,34 @@ static void vpAddInnerRenderDisplay(unsigned int attempt) {
 // a render display's extendedProperties. The iPhone19,4 device tree gives
 // display0 (the primary, the cover) surface type 1 and display1 (the inner
 // panel) 2; SpringBoard's fold policies pick their panels by these.
+//
+// A hardware display takes its whole entry of MobileGestalt's
+// DisplayExtendedProperties (rotation, scale, corner radii, chrome and
+// framebuffer identifiers, read from the panel nodes the device tree repair
+// adds) when QuartzCore builds it. A virtual display takes nothing, so the
+// inner display is given the entry with its surface type here.
 static IMP vpOriginalExtendedProperties;
+
+static NSDictionary *vpGestaltDisplayProperties(NSNumber *surfaceType) {
+    // Kept once MobileGestalt has an answer; asked again until then.
+    static NSArray *entries;
+    NSArray *known;
+    @synchronized(NSNull.class) {
+        if (!entries) {
+            CFTypeRef (*copyAnswer)(CFStringRef, CFDictionaryRef) = dlsym(RTLD_DEFAULT, "MGCopyAnswer");
+            id answer = copyAnswer ? CFBridgingRelease(copyAnswer(CFSTR("DisplayExtendedProperties"), NULL)) : nil;
+            if ([answer isKindOfClass:NSArray.class] && [answer count]) {
+                entries = answer;
+                vpFoldDisplayLog([NSString stringWithFormat:@"inner display: %lu MobileGestalt display entries",
+                    (unsigned long)entries.count]);
+            }
+        }
+        known = entries;
+    }
+    for (NSDictionary *entry in known)
+        if ([entry isKindOfClass:NSDictionary.class] && [entry[@"DeviceSurfaceType"] isEqual:surfaceType]) return entry;
+    return nil;
+}
 
 static id vpSurfaceExtendedProperties(id self, SEL cmd) {
     id properties = ((id (*)(id, SEL))vpOriginalExtendedProperties)(self, cmd);
@@ -137,6 +168,8 @@ static id vpSurfaceExtendedProperties(id self, SEL cmd) {
     NSNumber *surfaceType = [name isEqual:@"primary"] ? @1 : [name isEqual:vpInnerDisplayName] ? @2 : nil;
     if (!surfaceType || (properties && ![properties isKindOfClass:NSDictionary.class])) return properties;
     NSMutableDictionary *derived = properties ? [properties mutableCopy] : [NSMutableDictionary dictionary];
+    if ([surfaceType isEqual:@2])
+        [derived addEntriesFromDictionary:vpGestaltDisplayProperties(surfaceType) ?: @{}];
     derived[@"DeviceSurfaceType"] = surfaceType;
     return [derived copy];
 }

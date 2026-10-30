@@ -586,6 +586,7 @@ struct VPhoneCustomFirmwareInstaller {
         if !Self.isFoldable(device) {
             notApplicableGuest.insert(FirmwareGuestSystemPatchSet.prebootFoldableVMSubtype)
             notApplicableGuest.insert(FirmwareGuestSystemPatchSet.prebootFoldableProductId)
+            notApplicableGuest.insert(FirmwareGuestSystemPatchSet.prebootFoldableDisplays)
             notApplicableGuest.insert(FirmwareGuestSystemPatchSet.hinge)
             notApplicableGuest.insert(FirmwareGuestSystemPatchSet.foldGuard)
         }
@@ -3307,8 +3308,13 @@ struct VPhoneCustomFirmwareInstaller {
             if enabled(FirmwareGuestSystemPatchSet.prebootFoldableProductId), boardDeviceTree == nil {
                 throw ValidationError("Foldable product identity needs the board's own device tree.")
             }
+            if enabled(FirmwareGuestSystemPatchSet.prebootFoldableDisplays), boardDeviceTree == nil {
+                throw ValidationError("Foldable panel nodes need the board's own device tree.")
+            }
             repairGroup.append((FirmwareGuestSystemPatchSet.prebootFoldableVMSubtype, "patch-dt-foldable-vm-subtype", []))
             repairGroup.append((FirmwareGuestSystemPatchSet.prebootFoldableProductId, "patch-dt-foldable-product-id",
+                                boardDeviceTree.map { [$0.path] } ?? []))
+            repairGroup.append((FirmwareGuestSystemPatchSet.prebootFoldableDisplays, "patch-dt-foldable-displays",
                                 boardDeviceTree.map { [$0.path] } ?? []))
         }
         repairGroup.append((FirmwareGuestSystemPatchSet.prebootHaptics, "patch-dt-haptics", []))

@@ -408,9 +408,9 @@ test-accelerometer:
 		-o $(OUT)/AccelerometerTests Tests/AccelerometerTests.m Accelerometer/VPhoneOrientationSink.m -framework Foundation
 	@$(OUT)/AccelerometerTests
 
-# The hinge's transport and, on a Mac with Apple's HID.framework, a real
-# IOHIDEventCreateHingeAngleEvent call whose fields read back from the event's
-# own description.
+# The hinge's transport and, on a Mac whose IOKit has them, the host-control
+# dictionaries serialized, read back and wrapped in a vendor-defined event as
+# the guest library does.
 test-hinge:
 	@mkdir -p $(OUT)
 	xcrun --sdk macosx clang -fobjc-arc -Wall -Wextra -Werror -IHinge \
