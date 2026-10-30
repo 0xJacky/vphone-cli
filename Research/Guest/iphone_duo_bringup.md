@@ -4900,3 +4900,68 @@ Reveal and validation on a new guest: `device.input_devices` lists
 `MGGetLogicalDeviceDisplayCount()` is 2, `+[CMAngleManager isAvailable]` is
 YES and `SBFDevicePoseProvider`'s description reads `.partiallyOpen` at
 ~99.4° six seconds after `{"hinge":"partially-open","position":"book"}`.
+
+## 2026-10-30: the panel hosts the inner display's own pages
+
+Open, the guest lagged badly. A spindump of backboardd on an idle Home Screen
+(iOS 27.1, M5 Pro host, no DeviceHub viewer) had the render server thread in
+`_XRenderDisplaySurface → VirtualServer::render_surface → ShadowNode::apply →
+blur_surface → … -[MTLCommandBuffer waitUntilCompleted]` in 116 of 125
+samples, SpringBoard's inner-panel queue inside `CARenderServerRenderDisplay`
+in 118 of 126, and the inner display's own `VirtualServer` thread waiting on
+the render server's lock. The compositor above re-rendered the whole inner
+display, blurs included, for every panel frame, while the inner display was
+rendering itself as well: `VirtualDisplay::begin_update` /
+`finish_update_` draw only damage, into three pages in turn
+(`displayed_surface` returns the last finished one).
+
+Ruled out as a "did the inner display change" signal:
+`CARenderServerGetDirtyFrameCountByIndex` and `GetFrameCounterByIndex` count
+only the LCD (index 0); every other display, the inner one included, reads 0,
+so gating the copy on it froze the panel on its first frame.
+`updateRequestCallback` is a bare `ret` for non-IOMFB displays,
+`frameInfoCallback` is IOMFB-only, `CADisplay.seed` is configuration, and
+`-acquireFrozenSurface` is `Display::acquire_frozen_surface`, which returns
+NULL unless an `IOMFBDisplay` overrides it.
+
+**The fix** (`FoldDisplayInnerPages.m`): backboardd shows the inner display's
+last finished page in a layer of a context of its own (`remoteContextWithOptions:`
+with `displayable` NO and `ignoresHitTest` YES) and publishes the context id
+as the state of the Darwin notification `com.vphone.folddisplay.inner-pages`;
+SpringBoard's compositor layer is a `CALayerHost` of that context. A 120 Hz
+timer on a backboardd queue reads the shown page under the two mutexes
+`acquireFrozenSurface` takes and commits only when it changed. Nothing in
+QuartzCore hands out the pages, so the path is read from QuartzCore itself and
+checked at each step: the `_impl` type encoding (Server after the 64-byte
+mutex); the instructions of `-acquireFrozenSurface` (server lock at +0x18,
+C++ display at +0x60 on 27.1); the one vtable function with
+`displayed_surface`'s body (slot 63); and the one pair of
+`CA::WindowServer::IOSurface` getters for an object and the 32-bit value after
+it (`iosurface()` +0x128 and `id()` +0x130, slots 21 and 24), checked against
+`IOSurfaceGetID` before first use. The page is 2853×2007 BGRA. If a step does
+not match, backboardd publishes 0 and SpringBoard keeps the
+`CARenderServerRenderDisplay` path; it switches when the state changes while
+the panel is shown (tested both ways with vphoned `notify.post`).
+
+Measured on a clone of duospike-inner (duopanel-perf), the same session, CPU
+from `processes.list` over 8–10 s, panel rate from
+`CARenderServerGetFrameCounterByIndex(0, 0)` every 2 s:
+
+| | upstream compositor | hosted pages |
+|---|---|---|
+| idle Home Screen: backboardd / SpringBoard | 60–77% / 10–18% | 5–8% / 2–3% |
+| idle Home Screen: panel frames per second | 37–46 (nothing changed) | 10 (what changed) |
+| Home Screen page swipes: panel fps | 7.5–13.5 | 34–44 |
+| scrolling Settings: panel fps, backboardd | 45–79, 91% | 111–117, 51% |
+| folded closed: backboardd / SpringBoard | | 3% / 1% |
+
+Without SpringBoard's 120 Hz display link the panel still reaches the inner
+display's rate: the render server composites the LCD on each commit of the
+hosted context. Checked on the same VM: Settings launch and taps, Home,
+unlock, fold closed (cover shows natively) and open again, backboardd
+restarts (a new context id each time, SpringBoard restarts with it); no
+backboardd or SpringBoard crash reports.
+
+Trap seen while probing: the CA `IOSurface` object in a page is a C++ object,
+not an `IOSurfaceRef`; `CFRetain` on it is a PAC failure that crash-loops
+backboardd.
