@@ -287,6 +287,28 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
     private var minimumDuoPanelSize: CGSize?
     private var orientationPollInFlight = false
     private var lastPolledFoldAngle: Double?
+    private var screenRevealWork: DispatchWorkItem?
+
+    /// Covers a foldable guest's panel while its screen is off, and for a
+    /// moment after it comes on: its display first shows the frame it showed
+    /// before going off (after a fold made asleep, the other panel's picture,
+    /// sideways), until the guest draws again.
+    private func followGuestScreen(off: Bool) {
+        guard let container = displayContainer else { return }
+        if off {
+            screenRevealWork?.cancel()
+            screenRevealWork = nil
+            container.isScreenDark = true
+            return
+        }
+        guard container.isScreenDark, screenRevealWork == nil else { return }
+        let work = DispatchWorkItem { [weak self] in
+            self?.displayContainer?.isScreenDark = false
+            self?.screenRevealWork = nil
+        }
+        screenRevealWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
 
     /// Asks vphoned for the interface orientation once a second (a foldable
     /// guest four times a second). Guests without `display.orientation` stay
@@ -307,6 +329,9 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
             if let foldAngle = (result["fold_angle"] as? NSNumber)?.doubleValue {
                 if foldAngle == lastPolledFoldAngle { control.followGuestFold(angle: foldAngle) }
                 lastPolledFoldAngle = foldAngle
+            }
+            if let screenOff = result["screen_off"] as? Bool {
+                followGuestScreen(off: screenOff)
             }
             guard !control.isChangingOrientation,
                   let degrees = (result["degrees"] as? NSNumber)?.intValue,

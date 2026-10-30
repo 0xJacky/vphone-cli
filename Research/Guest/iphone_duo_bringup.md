@@ -5090,3 +5090,18 @@ DeviceHub's slider as it animates, and taking every read reshaped the window
 at each step of a sweep. The cover drawn in the window's open shape,
 sideways, now lasts a fraction of the half second it did. A fold while the screen sleeps lights it, and the
 panel's first 0.2 s are its last frame from before sleep.
+
+The fade to black stays for a fold that starts with the panel off or lit
+less than a second ago. A fold made while the screen sleeps (DeviceHub, a
+guest-side request) runs only as the screen comes on, since SpringBoard's
+pose provider commits on display frames; without the fade, the effect's
+carried-over inner content (its Home Screen, sideways on the cover) showed
+for about half a second after the wake. And coming on, the panel first shows
+its last frame from before it went off (the unlocked Home Screen on a plain
+wake), which nothing in the guest replaces: SpringBoard stops compositing
+before it turns the panel off, and neither `-[CAWindowServerDisplay
+presentSurface:withOptions:]` nor `acquireFrozenSurface` reached the shown
+surface (`willUnblank` never runs: the panel goes off by display state). So
+`display.orientation` reports `screen_off`, and the VM window covers the
+panel with black while it is off and for 0.3 s after it comes on. Both wakes
+now go from black to the lock screen (60 fps capture).

@@ -39,8 +39,12 @@ static unsigned int vpStateControlDisplayId(id control) {
     return *(unsigned int *)((uint8_t *)(__bridge void *)control + ivar_getOffset(ivar));
 }
 
+// When the panel last came on (system uptime), for vpFollowContentModeTransition.
+static NSTimeInterval vpPanelOnAt;
+
 static void vpApplyPanelState(id control, long long state, long long *applied, id completion) {
     if (!control || (state == *applied && !completion)) return;
+    if (control == vpPrimaryStateControl && state && !*applied) vpPanelOnAt = NSProcessInfo.processInfo.systemUptime;
     *applied = state;
     ((void (*)(id, SEL, long long, id))vpOriginalTransitionDisplayState)(control,
         sel_registerName("transitionToDisplayState:withCompletion:"), state, completion);
@@ -122,7 +126,22 @@ static void vpFollowPanelOwner(void) {
     dispatch_async(dispatch_get_main_queue(), ^{ vpApplyPanelOwner(); });
 }
 
+// SpringBoard's fold effect fades the panel being folded away to black and
+// the arriving one in from black: two screens on hardware, about 0.12 s of
+// black on this one panel each time it opens. Without the fade the cover dims
+// and blurs and the inner display takes over at the swap. A fold made while
+// the screen is dark runs only as it comes on (the pose provider commits on
+// display frames), and there the fade hides what the effect carries over from
+// the inner display (its Home Screen, sideways on the cover), so it stays for
+// a fold that starts with the panel off or just lit.
+static void vpSetFoldFadeToBlack(BOOL enabled) {
+    id settings = ((id (*)(id, SEL))objc_msgSend)(objc_getClass("SBDeviceContinuousFoldInteractionDomain"), sel_registerName("rootSettings"));
+    SEL setFade = sel_registerName("setFadeToBlackEnabled:");
+    if ([settings respondsToSelector:setFade]) ((void (*)(id, SEL, BOOL))objc_msgSend)(settings, setFade, enabled);
+}
+
 static void vpFollowContentModeTransition(id self, SEL selector, id transitionCoordinator) {
+    vpSetFoldFadeToBlack(!vpPrimaryAppliedState || NSProcessInfo.processInfo.systemUptime - vpPanelOnAt < 1);
     ((void (*)(id, SEL, id))vpOriginalPerformContentModeTransition)(self, selector, transitionCoordinator);
     vpFollowPanelOwner();
 }
@@ -164,14 +183,7 @@ void vpInstallSharedPanel(void) {
     vpOriginalTransitionDisplayState = method_setImplementation(transition, (IMP)vpSharedScanoutTransition);
     vpInstallContentModeOwnership();
     vpFollowInnerPages();
-    // SpringBoard's fold effect fades the panel being folded away to black and
-    // the arriving one in from black: two screens on hardware, about 0.12 s of
-    // black on this one panel each time it opens. Without the fade the cover
-    // dims and blurs and the inner display takes over at the swap.
-    id settings =((id (*)(id, SEL))objc_msgSend)(objc_getClass("SBDeviceContinuousFoldInteractionDomain"), sel_registerName("rootSettings"));
-    SEL setFade = sel_registerName("setFadeToBlackEnabled:");
-    if ([settings respondsToSelector:setFade]) ((void (*)(id, SEL, BOOL))objc_msgSend)(settings, setFade, NO);
-    vpFoldDisplayLog([NSString stringWithFormat:@"inner display: fold fade to black off=%d", [settings respondsToSelector:setFade]]);
+    vpSetFoldFadeToBlack(NO);
     vpFoldDisplayLog(@"inner display: shared scanout installed");
 }
 

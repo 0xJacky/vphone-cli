@@ -176,7 +176,12 @@ extension GuestAPI {
             "degrees": interfaceRotationDegrees().map { $0 as Any } ?? NSNull(),
             "source": "springboard",
         ]
-        if let angle = settledFoldAngle() { reply["fold_angle"] = angle }
+        if let angle = settledFoldAngle() {
+            reply["fold_angle"] = angle
+            // The window covers the panel while it is off: coming on, it
+            // shows its last frame from before until the guest draws again.
+            reply["screen_off"] = GuestScreenUnlock.screenIsOff
+        }
         return reply
     }
 
