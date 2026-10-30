@@ -173,6 +173,9 @@ enum GuestScreenUnlock {
 
     // MARK: - State
 
+    /// Whether SpringBoard has the screen off.
+    static var screenIsOff: Bool { state().screenOff }
+
     private struct State {
         let locked: Bool
         let screenOff: Bool

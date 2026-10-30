@@ -87,6 +87,17 @@ int main(void) {
             bad[@"orientation"] = invalid;
             assert(!VPhoneHingeDecode(bad, &state));
         }
+        // A quiet update: a boolean, absent as no, encoded only when set.
+        NSMutableDictionary *quiet = [sample mutableCopy];
+        quiet[@"quiet"] = @YES;
+        assert(VPhoneHingeDecode(quiet, &state) && state.quiet);
+        assert([VPhoneHingeEncode(state) isEqual:quiet]);
+        assert(VPhoneHingeDecode(sample, &state) && !state.quiet);
+        for (id invalid in @[@1, @"yes"]) {
+            NSMutableDictionary *bad = [sample mutableCopy];
+            bad[@"quiet"] = invalid;
+            assert(!VPhoneHingeDecode(bad, &state));
+        }
         assert(!VPhoneHingeDecode(@"flat", &state));
         assert(VPhoneHingeInterval(nil) == 0);
         assert(VPhoneHingeInterval(@YES) == 0);

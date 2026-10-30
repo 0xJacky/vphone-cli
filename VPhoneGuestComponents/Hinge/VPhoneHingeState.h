@@ -34,6 +34,10 @@ typedef struct {
     // CoreMotion's device orientation, 1 portrait … 6 face down; 0 leaves
     // the orientation the relay holds.
     int32_t orientation;
+    // Stored without a host-control event: the relay already has the angle
+    // (DeviceHub sends it there itself), and the hinge only keeps it for its
+    // periodic resend.
+    BOOL quiet;
 } VPhoneHingeState;
 
 typedef enum {
@@ -95,8 +99,12 @@ static inline BOOL VPhoneHingeDecode(id value, VPhoneHingeState *state) {
         if (orientation < 0 || orientation > 6 || orientation != [value[@"orientation"] doubleValue])
             return NO;
     }
+    id quietValue = value[@"quiet"];
+    if (quietValue != nil && (![quietValue isKindOfClass:NSNumber.class] ||
+                              CFGetTypeID((__bridge CFTypeRef)quietValue) != CFBooleanGetTypeID()))
+        return NO;
     *state = (VPhoneHingeState){
-        [enabled boolValue], sweep, degrees, duration, profile, orientation,
+        [enabled boolValue], sweep, degrees, duration, profile, orientation, [quietValue boolValue],
     };
     return YES;
 }
@@ -111,6 +119,8 @@ static inline NSDictionary *VPhoneHingeEncode(VPhoneHingeState state) {
     } mutableCopy];
     if (state.orientation)
         encoded[@"orientation"] = @(state.orientation);
+    if (state.quiet)
+        encoded[@"quiet"] = @YES;
     return encoded;
 }
 

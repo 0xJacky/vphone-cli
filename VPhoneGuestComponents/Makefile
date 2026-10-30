@@ -63,8 +63,9 @@ BATTERYHEALTHFIX_INCLUDES := $(wildcard BatteryHealthFix/*.h)
 # the image is mounted only after the host enables developer services. The two
 # interposed Swift getters are weak flat-namespace imports. CoreVideo, IOSurface
 # and libobjc are for the avconferenced band reads it waits on the scaler for;
-# Foundation and the ObjC runtime are for the CMAngleManager stand-in
-# (VPCMAngleManager.m) dtdeviceinfod answers the hinge stream from.
+# Foundation and the ObjC runtime are for the CMAngleManager and
+# CMDeviceStateManager stand-ins (VPCMAngleManager.m) dtdeviceinfod answers
+# the hinge and device motion state streams from.
 DEVICEHUBFIX := $(STAGE)/devicehubfix/libdevicehubfix.dylib
 DEVICEHUBFIX_SOURCES := $(sort $(wildcard DeviceHubFix/*.c) $(wildcard DeviceHubFix/*.m))
 DEVICEHUBFIX_INCLUDES := $(wildcard DeviceHubFix/*.h)

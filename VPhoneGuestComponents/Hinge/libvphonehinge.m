@@ -73,7 +73,7 @@
             // HID service enumerates and on the rare tick it is down.
             [self publishLatestAngle:self.currentAngle velocity:0
                                state:VPhoneHingeStateForAngle(self.currentAngle) phase:0];
-            if (self.enumerated)
+            if (self.enumerated && !state.quiet)
                 [self dispatchSample];
         }
         if (state.orientation && state.orientation != self.orientation) {

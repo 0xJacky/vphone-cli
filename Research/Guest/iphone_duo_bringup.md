@@ -4811,8 +4811,10 @@ with the ProMotion patch) runs at 120. Two caps, one in each process:
   (Colorimetry 16 adds 2, plain RGB nothing); with no preferred mode the
   display comes up 0×0 and SpringBoard aborts in
   `-[SBMainDisplayConfigurationTransformer transformDisplayConfiguration:]`.
-  FoldDisplay now sets one timing, 2853×2007 at 120, with Colorimetry 1 and
-  Score 1: the inner mode reads `RGB_8bit` like the panel's.
+  FoldDisplay now sets one timing at 120 (2853×2007 when this was measured,
+  2007×2853 since the inner display took the hardware's shape, below), with
+  Colorimetry 1 and Score 1: the inner mode reads `RGB_8bit` like the
+  panel's.
 - **SpringBoard.** The compositor's display link asks for the panel's
   `maximumFramesPerSecond` (120 with the ProMotion patch, else 60).
 
@@ -4836,6 +4838,89 @@ Window captures (ScreenCaptureKit) cannot judge 120 Hz here: the cover, which
 is natively 120, measures the same 40-55 changes per second as the inner
 display, because the host composites the window at its own rate. Use guest
 display links, or the host's `lastSubmittedTime` poller from the vGPU notes.
+
+## 2026-10-29 night: folds go through SpringBoard's display tool service
+
+Xcode 27's iPhone Duo simulator has no hinge: CoreSimulator gives it two real
+displays (screenID 1 cover, 3 inner), and SpringBoard folds itself through
+its display tool service, the one Apple's internal `sbdisplaytool` / `suiatool
+swap` drives. The device SpringBoard has the same service
+(`com.apple.springboard.sbdisplay` in `BSServiceDomains` under
+`com.apple.frontboard`), so `display.posture`'s `position` now uses it instead
+of the test-automation override plus a virtual hinge sweep. Measured on a
+test VM (iPhone19,4 27.1, 24A94425) with the two-display path:
+
+- `-[SBSDisplayToolService swapDisplayWithSettings:completion:]` takes
+  `{q; d duration; q deviceOrientation; q profileOverride; B wait; q
+  targetMode; d targetHingePosition; d}` (`v88@0:8{?=qdqqBqdd}16@?80`).
+  Target mode 1 sweeps to an absolute position (0 closed, 1 open flat);
+  duration < 0 is the per-direction default (0.391 s open, 0.420 s close);
+  profile 1 fade, 2 continuous (`.continuousLive`), 0 SpringBoard's own.
+  The server checks `com.apple.springboard.sbdisplay.service` (read from
+  the simulator SpringBoard's swap handler); without it SpringBoard logs
+  "Insufficient authorization" and never answers. The completion block's
+  arguments are not objects: the client forwards a raw register, and
+  retaining it as an `NSError` PAC-faults.
+- SpringBoard takes a 10 s test lock, sweeps its own pose (`absoluteSweeping
+  0.0 -> 180.0 over 0.39s`), resolves `FullyClosed→FoldingDual` (or back) as
+  the sweep crosses the boundary, and answers after `completed` / `idle`,
+  about 1.2–1.6 s after the request. Book (100°) from closed swaps to the
+  inner panel; book from open does not.
+- After the lock SpringBoard does not return to the override; it applies the
+  next override against its current pose, so a later `hinge` request equal
+  to the old override still lands. The override does reach SpringBoard under
+  the lock, and it only means 0, 90 or 180°: setting it after a book sweep
+  slid the pose from 100° to 90° and started a transition toward the cover,
+  so vphoned leaves it alone after a SpringBoard sweep.
+- `-[SBSTestAutomationService getDevicePose]` does not follow these sweeps
+  (it kept reading open-flat after a sweep to closed); the replayed posture
+  takes the hinge state from the completed request.
+- Closing with the continuous profile is an interactive transition: it is
+  performed while the inner display still holds the primary content and
+  swaps it as it finishes. FoldDisplay re-read the panel's owner only when a
+  transition was performed, so the panel kept showing the inner display,
+  which SpringBoard keeps lit (and black) for 3 s after a swap. Ownership is
+  now re-read on `-[SpringBoard displayContentModeCoordinator:
+  handleSwapTransitionFromPrimaryWindowScene:toPrimaryWindowScene:
+  withContinuationLockProvider:]` too.
+- Folding from the lock screen or sleep lights the arriving panel's lock
+  screen, which sleeps again after the lock screen's short idle time (about
+  7 s), as on hardware.
+- DeviceHub (Xcode 27.1) draws a Duo guest as a 3D V68 model from CoreDevice's
+  device motion state, which needed a `CMDeviceStateManager` stand-in in
+  `dtdeviceinfod`. Details: `Research/Guest/devicehub_screen_viewing.md`,
+  "iPhone Duo: the fold".
+- One posture request runs at a time. SpringBoard answers a swap it refuses
+  ("rejecting swap request — system is not idle") at once and the same way
+  as a finished one, so a reply under 0.3 s for a sweep that had to move
+  counts as a refusal and is retried every 0.25 s for 10 s plus the
+  duration.
+
+## 2026-10-29 late: the inner display takes the hardware's shape
+
+DeviceHub shows its pose controls only for an integrated inner display with
+its own stream, and draws that stream on the inner panel as the panel's
+native framebuffer. The landscape 2853×2007 inner render display therefore
+came out pillarboxed through the mirror and sideways through a per-display
+stream. FoldDisplay now publishes it the way the simulator's inner
+`CADisplay` is: a portrait 2007×2853 framebuffer at 3×, with
+`DisplayRotation` 270, `DeviceSurfaceType` 2, chrome `phone14` and corner
+radius 55 in its extended properties. SpringBoard lays the inner UI out at
+interface orientation 90 and rotates it into the framebuffer, the
+compositor draws the inner display's frames onto the panel without a turn,
+and the 120 Hz timing is 2007×2853. The digitizer needs no turn either. The
+clone redirect from the first DeviceHub fix is gone.
+
+`display.rotation`'s inner map (0 landscape-left, 90 portrait, 180
+landscape-right, from pose orientations 3, 1, 4) still holds on the portrait
+framebuffer: measured on sbdisplay-duo, pose orientation 1 gives interface
+90, 3 gives 0 and 4 gives 180.
+
+The host window follows folds it did not ask for (DeviceHub's, another
+client's): `display.orientation` carries `fold_angle`, the virtual hinge's
+settled angle, and the window's once-a-second orientation poll moves its
+fold chrome to the nearest of closed, book and open while none of its own
+fold requests is in flight.
 
 ## 2026-10-30: CoreMotion, MobileGestalt displays and the book angle, against Apple's simulator
 
@@ -4965,3 +5050,58 @@ backboardd or SpringBoard crash reports.
 Trap seen while probing: the CA `IOSurface` object in a page is a C++ object,
 not an `IOSurfaceRef`; `CFRetain` on it is a PAC failure that crash-loops
 backboardd.
+
+## 2026-10-30: the fold's fade to black on one panel
+
+Opening out of closed showed 7 to 13 frames of black (about 0.12 to 0.2 s)
+on the shared panel, measured on sbdisplay-duo (iPhone19,4 27.1, CoreMotion
+relay path) from a ScreenCaptureKit stream of the VM window at 60 fps
+(`screencapture -l` manages about 8 fps, and a screen-region recording misses
+a covered window). The frames show SpringBoard's continuous fold effect: the
+cover blurs, then fades to black, and after the swap the inner display fades
+in from black. On hardware those are two screens. The panel itself never goes
+off: the inner display is lit, then takes the panel, then the cover is turned
+off. It is the same with SpringBoard drawing the inner display itself
+(`com.vphone.folddisplay.inner-pages` state 0), so the pages path is not the
+cause.
+
+The effect is tuned by `SBDeviceContinuousFoldInteractionSettings`
+(SpringBoard.framework, `+[SBDeviceContinuousFoldInteractionDomain
+rootSettings]`): `fadeToBlackEnabled` with `outerFadeToBlackStart/End` and
+`innerFadeToBlackStart/End`, `dimmingEnabled`, cone, cylinder and seam dims,
+blur radii. FoldDisplay turns `fadeToBlackEnabled` off in SpringBoard, so the
+cover dims and blurs but does not go black. The panel also changes hands
+inside SpringBoard's primary-swap callback, with the inner display's layer
+added in the same transaction, instead of two main-queue hops later, when
+SpringBoard had already hidden the cover's content. Opening now shows 0 to 9
+dark frames, usually 2 to 6; closing shows none, as before.
+
+Tried and dropped: handing the panel to the inner display when a fold toward
+it starts (`SBFDisplayContentModeTransitionContext`'s
+`initial/finalContentModeOfDisplayForWindowScene:`), lighting it early: it
+then showed its own fade in from black, 0.2 s; holding the inner layer back
+until backboardd shows a new page: no change.
+
+Two related host-window effects: the window follows a fold it did not ask for
+(DeviceHub, a guest-side request) from `display.orientation`'s `fold_angle`,
+which it now reads four times a second on a foldable guest (once before),
+taking a fold once two reads agree: through the relay the hinge follows
+DeviceHub's slider as it animates, and taking every read reshaped the window
+at each step of a sweep. The cover drawn in the window's open shape,
+sideways, now lasts a fraction of the half second it did. A fold while the screen sleeps lights it, and the
+panel's first 0.2 s are its last frame from before sleep.
+
+The fade to black stays for a fold that starts with the panel off or lit
+less than a second ago. A fold made while the screen sleeps (DeviceHub, a
+guest-side request) runs only as the screen comes on, since SpringBoard's
+pose provider commits on display frames; without the fade, the effect's
+carried-over inner content (its Home Screen, sideways on the cover) showed
+for about half a second after the wake. And coming on, the panel first shows
+its last frame from before it went off (the unlocked Home Screen on a plain
+wake), which nothing in the guest replaces: SpringBoard stops compositing
+before it turns the panel off, and neither `-[CAWindowServerDisplay
+presentSurface:withOptions:]` nor `acquireFrozenSurface` reached the shown
+surface (`willUnblank` never runs: the panel goes off by display state). So
+`display.orientation` reports `screen_off`, and the VM window covers the
+panel with black while it is off and for 0.3 s after it comes on. Both wakes
+now go from black to the lock screen (60 fps capture).

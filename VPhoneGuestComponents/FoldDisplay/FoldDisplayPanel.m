@@ -39,8 +39,12 @@ static unsigned int vpStateControlDisplayId(id control) {
     return *(unsigned int *)((uint8_t *)(__bridge void *)control + ivar_getOffset(ivar));
 }
 
+// When the panel last came on (system uptime), for vpFollowContentModeTransition.
+static NSTimeInterval vpPanelOnAt;
+
 static void vpApplyPanelState(id control, long long state, long long *applied, id completion) {
     if (!control || (state == *applied && !completion)) return;
+    if (control == vpPrimaryStateControl && state && !*applied) vpPanelOnAt = NSProcessInfo.processInfo.systemUptime;
     *applied = state;
     ((void (*)(id, SEL, long long, id))vpOriginalTransitionDisplayState)(control,
         sel_registerName("transitionToDisplayState:withCompletion:"), state, completion);
@@ -53,7 +57,10 @@ static void vpApplyPanelStates(id primaryCompletion, id innerCompletion) {
     long long inner = innerOwns && vpInnerWantedState ? 1 : 0;
     BOOL changed = inner != vpInnerAppliedState;
     vpApplyPanelState(vpInnerStateControl, inner, &vpInnerAppliedState, innerCompletion);
-    if (changed && vpInnerStateControl) dispatch_async(dispatch_get_main_queue(), ^{ vpShowInnerDisplay(inner != 0); });
+    if (changed && vpInnerStateControl) {
+        if (NSThread.isMainThread) vpShowInnerDisplay(inner != 0);
+        else dispatch_async(dispatch_get_main_queue(), ^{ vpShowInnerDisplay(inner != 0); });
+    }
 }
 
 // SpringBoard asks for a transition only when it wants a state the panel is
@@ -98,19 +105,52 @@ static void vpSharedScanoutTransition(id self, SEL selector, long long state, id
 }
 
 // A fold moves the primary content to the other panel, which takes the
-// scanout over even when no power request comes with it.
-static IMP vpOriginalPerformContentModeTransition;
+// scanout over even when no power request comes with it. An instant or fading
+// transition has swapped the primary content by the time it is performed; an
+// interactive one (the continuous fold of a hinge sweep) swaps it as it
+// finishes, so the swap itself is followed too. SpringBoard keeps the panel it
+// left lit for 3 s after a swap, and without this the scanout went on showing
+// it (black) until then.
+static IMP vpOriginalPerformContentModeTransition, vpOriginalHandlePrimarySwap;
 static int vpInnerOwnedPanel = -1;
 
+static void vpApplyPanelOwner(void) {
+    BOOL innerOwns = vpInnerOwnsPanel();
+    if (innerOwns == vpInnerOwnedPanel) return;
+    vpInnerOwnedPanel = innerOwns;
+    vpFoldDisplayLog([NSString stringWithFormat:@"inner display: panel owned by the %@", innerOwns ? @"inner display" : @"cover"]);
+    vpApplyPanelStates(nil, nil);
+}
+
+static void vpFollowPanelOwner(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{ vpApplyPanelOwner(); });
+}
+
+// SpringBoard's fold effect fades the panel being folded away to black and
+// the arriving one in from black: two screens on hardware, about 0.12 s of
+// black on this one panel each time it opens. Without the fade the cover dims
+// and blurs and the inner display takes over at the swap. A fold made while
+// the screen is dark runs only as it comes on (the pose provider commits on
+// display frames), and there the fade hides what the effect carries over from
+// the inner display (its Home Screen, sideways on the cover), so it stays for
+// a fold that starts with the panel off or just lit.
+static void vpSetFoldFadeToBlack(BOOL enabled) {
+    id settings = ((id (*)(id, SEL))objc_msgSend)(objc_getClass("SBDeviceContinuousFoldInteractionDomain"), sel_registerName("rootSettings"));
+    SEL setFade = sel_registerName("setFadeToBlackEnabled:");
+    if ([settings respondsToSelector:setFade]) ((void (*)(id, SEL, BOOL))objc_msgSend)(settings, setFade, enabled);
+}
+
 static void vpFollowContentModeTransition(id self, SEL selector, id transitionCoordinator) {
+    vpSetFoldFadeToBlack(!vpPrimaryAppliedState || NSProcessInfo.processInfo.systemUptime - vpPanelOnAt < 1);
     ((void (*)(id, SEL, id))vpOriginalPerformContentModeTransition)(self, selector, transitionCoordinator);
-    dispatch_async(dispatch_get_main_queue(), ^{
-        BOOL innerOwns = vpInnerOwnsPanel();
-        if (innerOwns == vpInnerOwnedPanel) return;
-        vpInnerOwnedPanel = innerOwns;
-        vpFoldDisplayLog([NSString stringWithFormat:@"inner display: panel owned by the %@", innerOwns ? @"inner display" : @"cover"]);
-        vpApplyPanelStates(nil, nil);
-    });
+    vpFollowPanelOwner();
+}
+
+// At once, in SpringBoard's own transaction: it hides the content leaving
+// the panel here, and a later hop showed the panel empty in between.
+static void vpFollowPrimarySwap(id self, SEL selector, id coordinator, id from, id to, id lockProvider) {
+    ((void (*)(id, SEL, id, id, id, id))vpOriginalHandlePrimarySwap)(self, selector, coordinator, from, to, lockProvider);
+    vpApplyPanelOwner();
 }
 
 static void vpInstallContentModeOwnership(void) {
@@ -121,6 +161,14 @@ static void vpInstallContentModeOwnership(void) {
         return;
     }
     vpOriginalPerformContentModeTransition = method_setImplementation(perform, (IMP)vpFollowContentModeTransition);
+    // SpringBoard (the application) observes every primary swap, once each.
+    Method swap = class_getInstanceMethod(objc_getClass("SpringBoard"), sel_registerName(
+        "displayContentModeCoordinator:handleSwapTransitionFromPrimaryWindowScene:toPrimaryWindowScene:withContinuationLockProvider:"));
+    if (!swap || strcmp(method_getTypeEncoding(swap), "v48@0:8@16@24@32@40") != 0) {
+        vpFoldDisplayLog(@"inner display: primary swap ABI unavailable");
+        return;
+    }
+    vpOriginalHandlePrimarySwap = method_setImplementation(swap, (IMP)vpFollowPrimarySwap);
 }
 
 void vpInstallSharedPanel(void) {
@@ -135,6 +183,7 @@ void vpInstallSharedPanel(void) {
     vpOriginalTransitionDisplayState = method_setImplementation(transition, (IMP)vpSharedScanoutTransition);
     vpInstallContentModeOwnership();
     vpFollowInnerPages();
+    vpSetFoldFadeToBlack(NO);
     vpFoldDisplayLog(@"inner display: shared scanout installed");
 }
 
@@ -282,12 +331,12 @@ static void vpShowInnerDisplay(BOOL shown) {
             }
         }
         if (!vpInnerPanelQueue) vpInnerPanelQueue = dispatch_queue_create("com.vphone.folddisplay.inner-panel", DISPATCH_QUEUE_SERIAL);
-        // The inner display fills the panel, turned a quarter (-90 degrees)
-        // when it reads landscape on the portrait panel. The panel is the
-        // cover's, a little narrower than the inner display (1398x2034
-        // against 2007x2853), so the fill is about 2% tighter across than
-        // along; it leaves no bars, and the digitizer, which spans the panel,
-        // maps onto the whole inner display as it is.
+        // The inner display is portrait like the panel and fills it as it is
+        // (one that read landscape would be turned a quarter, -90 degrees).
+        // The panel is the cover's, a little narrower than the inner display
+        // (1398x2034 against 2007x2853), so the fill is about 2% tighter
+        // across than along; it leaves no bars, and the digitizer, which
+        // spans the panel, maps onto the whole inner display as it is.
         id rootLayer = vpReadObject(rootWindow, "layer");
         CGRect panel = ((CGRect (*)(id, SEL))objc_msgSend)(rootLayer, sel_registerName("bounds"));
         CGFloat pointScale = ((double (*)(id, SEL))objc_msgSend)(vpReadObject(rootWindow, "screen"), sel_registerName("scale"));

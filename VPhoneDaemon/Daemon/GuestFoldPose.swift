@@ -41,19 +41,23 @@ enum GuestFoldPose {
 
     /// Capture the actual final state, including a failed request's rollback.
     /// Never retain the requested value as proof that SpringBoard applied it.
-    static func finishExplicitRequest() {
+    /// The one exception is `settledHinge`, the hinge state of a fold
+    /// SpringBoard itself reported finished: the pose readback does not follow
+    /// SpringBoard's own sweeps (it kept reading open-flat after a sweep to
+    /// closed), so the hinge comes from the request there.
+    static func finishExplicitRequest(settledHinge: Int32? = nil) {
         restoration.lock.withLock {
             let actual = vp_device_pose_get()
-            restoration.latestPose = poseValues(actual)
+            restoration.latestPose = poseValues(actual, hinge: settledHinge)
             restoration.explicitRequest = false
             restoration.generation &+= 1
         }
     }
 
-    private static func poseValues(_ actual: [String: Any]) -> [Int32]? {
+    private static func poseValues(_ actual: [String: Any], hinge settled: Int32? = nil) -> [Int32]? {
         guard actual["available"] as? Bool == true,
               let orientation = actual["device_orientation"] as? Int32,
-              let hinge = actual["hinge"] as? Int32,
+              let hinge = settled ?? actual["hinge"] as? Int32,
               let tabletop = actual["tabletop"] as? Int32,
               (1...4).contains(orientation), (1...4).contains(hinge)
         else { return nil }
