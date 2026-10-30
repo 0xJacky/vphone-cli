@@ -5084,7 +5084,9 @@ until backboardd shows a new page: no change.
 
 Two related host-window effects: the window follows a fold it did not ask for
 (DeviceHub, a guest-side request) from `display.orientation`'s `fold_angle`,
-which it now reads four times a second on a foldable guest (once before), so
-the cover drawn in the window's open shape, sideways, lasts about 0.1 s
-instead of about 0.5 s. A fold while the screen sleeps lights it, and the
+which it now reads four times a second on a foldable guest (once before),
+taking a fold once two reads agree: through the relay the hinge follows
+DeviceHub's slider as it animates, and taking every read reshaped the window
+at each step of a sweep. The cover drawn in the window's open shape,
+sideways, now lasts a fraction of the half second it did. A fold while the screen sleeps lights it, and the
 panel's first 0.2 s are its last frame from before sleep.

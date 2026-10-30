@@ -286,11 +286,12 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
     /// minimum larger than this compact physical-size baseline.
     private var minimumDuoPanelSize: CGSize?
     private var orientationPollInFlight = false
+    private var lastPolledFoldAngle: Double?
 
     /// Asks vphoned for the interface orientation once a second (a foldable
-    /// guest four times a second). Guests
-    /// without `display.orientation` stay portrait. A read that overlaps a
-    /// rotation the menu started is dropped: it may predate the turn.
+    /// guest four times a second). Guests without `display.orientation` stay
+    /// portrait. A read that overlaps a rotation the menu started is dropped:
+    /// it may predate the turn.
     private func pollOrientation() {
         guard !orientationPollInFlight,
               let control, control.isConnected, !control.isChangingOrientation,
@@ -300,9 +301,12 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
         Task {
             defer { orientationPollInFlight = false }
             guard let result = try? await control.call("display.orientation") else { return }
-            // A foldable guest reports where its last fold settled.
+            // A foldable guest reports where its hinge is. DeviceHub's slider
+            // moves it as it animates, so the window takes a fold once two
+            // reads agree, rather than reshaping at each step of a sweep.
             if let foldAngle = (result["fold_angle"] as? NSNumber)?.doubleValue {
-                control.followGuestFold(angle: foldAngle)
+                if foldAngle == lastPolledFoldAngle { control.followGuestFold(angle: foldAngle) }
+                lastPolledFoldAngle = foldAngle
             }
             guard !control.isChangingOrientation,
                   let degrees = (result["degrees"] as? NSNumber)?.intValue,
