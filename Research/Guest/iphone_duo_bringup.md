@@ -5050,3 +5050,41 @@ backboardd or SpringBoard crash reports.
 Trap seen while probing: the CA `IOSurface` object in a page is a C++ object,
 not an `IOSurfaceRef`; `CFRetain` on it is a PAC failure that crash-loops
 backboardd.
+
+## 2026-10-30: the fold's fade to black on one panel
+
+Opening out of closed showed 7 to 13 frames of black (about 0.12 to 0.2 s)
+on the shared panel, measured on sbdisplay-duo (iPhone19,4 27.1, CoreMotion
+relay path) from a ScreenCaptureKit stream of the VM window at 60 fps
+(`screencapture -l` manages about 8 fps, and a screen-region recording misses
+a covered window). The frames show SpringBoard's continuous fold effect: the
+cover blurs, then fades to black, and after the swap the inner display fades
+in from black. On hardware those are two screens. The panel itself never goes
+off: the inner display is lit, then takes the panel, then the cover is turned
+off. It is the same with SpringBoard drawing the inner display itself
+(`com.vphone.folddisplay.inner-pages` state 0), so the pages path is not the
+cause.
+
+The effect is tuned by `SBDeviceContinuousFoldInteractionSettings`
+(SpringBoard.framework, `+[SBDeviceContinuousFoldInteractionDomain
+rootSettings]`): `fadeToBlackEnabled` with `outerFadeToBlackStart/End` and
+`innerFadeToBlackStart/End`, `dimmingEnabled`, cone, cylinder and seam dims,
+blur radii. FoldDisplay turns `fadeToBlackEnabled` off in SpringBoard, so the
+cover dims and blurs but does not go black. The panel also changes hands
+inside SpringBoard's primary-swap callback, with the inner display's layer
+added in the same transaction, instead of two main-queue hops later, when
+SpringBoard had already hidden the cover's content. Opening now shows 0 to 9
+dark frames, usually 2 to 6; closing shows none, as before.
+
+Tried and dropped: handing the panel to the inner display when a fold toward
+it starts (`SBFDisplayContentModeTransitionContext`'s
+`initial/finalContentModeOfDisplayForWindowScene:`), lighting it early: it
+then showed its own fade in from black, 0.2 s; holding the inner layer back
+until backboardd shows a new page: no change.
+
+Two related host-window effects: the window follows a fold it did not ask for
+(DeviceHub, a guest-side request) from `display.orientation`'s `fold_angle`,
+which it now reads four times a second on a foldable guest (once before), so
+the cover drawn in the window's open shape, sideways, lasts about 0.1 s
+instead of about 0.5 s. A fold while the screen sleeps lights it, and the
+panel's first 0.2 s are its last frame from before sleep.
