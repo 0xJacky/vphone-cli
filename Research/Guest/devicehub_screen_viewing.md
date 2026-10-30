@@ -676,8 +676,11 @@ DeviceHub reads the real managers. dtuhidd's "CoreDevice avpCustom" service
 carries the same usage, so the relay takes DeviceHub's controls itself, as on
 Apple's VM host, and the guest follows the slider as it moves. The virtual
 hinge, which resends its stored values every 5 s for a restarted locationd,
-takes each slider value too: while it kept the old angle until a debounced
-fold, a resend landing inside a run sent the fold back. An opening run from
+stores each slider value quietly (a `quiet` configuration: no host-control
+event): while it kept the old angle until a debounced fold, a resend landing
+inside a run sent the fold back, and sending each value again reached the
+relay late, behind DeviceHub's own, and swung the hinge back and forth across
+the swap (the panel changed hands eight times on three clicks). An opening run from
 closed lights the screen first, as `display.posture` does; with a sleeping
 cover SpringBoard's pose provider commits no moving pose and the inner
 display stayed black. The picker sets the hinge's orientation. The provider

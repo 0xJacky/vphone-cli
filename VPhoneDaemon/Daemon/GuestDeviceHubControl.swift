@@ -83,8 +83,10 @@ enum GuestDeviceHubControl {
     /// avpCustom service carries the host controls' usage), as on Apple's VM
     /// host, so the guest follows the slider as it moves. The virtual hinge,
     /// which resends its stored angle every few seconds for a restarted
-    /// locationd, takes each value too: a resend of the old angle in the
-    /// middle of a run sent the fold back. Opening from closed lights the
+    /// locationd, stores each value too, quietly: a resend of the old angle
+    /// in the middle of a run sent the fold back, and sending each value
+    /// again reached the relay late, after DeviceHub's own, and swung the
+    /// hinge back and forth across the swap. Opening from closed lights the
     /// screen first, as `display.posture` does: SpringBoard's pose provider
     /// commits a moving pose only on display frames, and a sleeping cover
     /// left the inner display black.
@@ -93,6 +95,6 @@ enum GuestDeviceHubControl {
            GuestAPI.hingeState(for: held) == 1, GuestAPI.hingeState(for: angle) != 1 {
             wake.async { GuestScreenUnlock.wakeDisplay() }
         }
-        _ = vp_hinge_set(angle, 0)
+        _ = vp_hinge_note(angle)
     }
 }

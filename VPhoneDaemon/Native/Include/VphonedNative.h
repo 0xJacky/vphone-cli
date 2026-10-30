@@ -236,6 +236,10 @@ NSDictionary<NSString *, id> * _Nonnull vp_device_pose_get(void);
 /// device orientation for the host controls (1 portrait … 6 face down), or 0
 /// to keep the stored one.
 BOOL vp_hinge_set(double angleDegrees, int orientation);
+/// Store `angleDegrees` as the hinge's angle, keeping its orientation, without
+/// a host-control event or waiting for the provider: the relay already has the
+/// angle, and the hinge keeps it for its periodic resend.
+bool vp_hinge_note(double angleDegrees);
 /// Sweep the hinge to `targetDegrees` the way Apple's Duo tooling does: over
 /// a profiled transition (0 continuous fold, 1 fade-in-out), `durationMs` < 0
 /// the per-direction default (opening faster than closing), 0 an instant

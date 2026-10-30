@@ -193,6 +193,16 @@ bool vp_hinge_set(double angleDegrees, int orientation) {
     return vp_hinge_publish(VPhoneHingeEncode(state), angleDegrees);
 }
 
+bool vp_hinge_note(double angleDegrees) {
+    if (!isfinite(angleDegrees) || angleDegrees < 0 || angleDegrees > 180)
+        return false;
+    VPhoneHingeState state = {true, false, angleDegrees, 0, 0, vp_hinge_orientation(0), true};
+    CFPreferencesSetValue(CFSTR(VP_HINGE_CONFIGURATION), (__bridge CFDictionaryRef)VPhoneHingeEncode(state),
+                          CFSTR(VP_HINGE_DOMAIN), CFSTR("mobile"), kCFPreferencesAnyHost);
+    return CFPreferencesSynchronize(CFSTR(VP_HINGE_DOMAIN), CFSTR("mobile"), kCFPreferencesAnyHost) &&
+           notify_post(VP_HINGE_NOTIFICATION) == NOTIFY_STATUS_OK;
+}
+
 bool vp_hinge_sweep(double targetDegrees, double durationMs, int profile, int orientation) {
     if (!isfinite(targetDegrees) || targetDegrees < 0 || targetDegrees > 180 ||
         !isfinite(durationMs) || durationMs < -1 || durationMs > 10000 ||
