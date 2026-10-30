@@ -192,7 +192,9 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
                 guard let self, let window else { return }
                 applyOrientation(orientation ?? .portrait, to: window)
             }
-            timers.append(Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            // A foldable guest also folds by itself (Xcode DeviceHub), and its
+            // panel shows sideways in the window until the poll catches up.
+            timers.append(Timer.scheduledTimer(withTimeInterval: foldableGuest ? 0.25 : 1, repeats: true) { [weak self] _ in
                 Task { @MainActor in self?.pollOrientation() }
             })
             // A Duo guest shows its lit panel itself, so it takes no fold
@@ -285,7 +287,8 @@ class VPhoneVirtualMachineWindowController: NSObject, NSWindowDelegate {
     private var minimumDuoPanelSize: CGSize?
     private var orientationPollInFlight = false
 
-    /// Asks vphoned for the interface orientation once a second. Guests
+    /// Asks vphoned for the interface orientation once a second (a foldable
+    /// guest four times a second). Guests
     /// without `display.orientation` stay portrait. A read that overlaps a
     /// rotation the menu started is dropped: it may predate the turn.
     private func pollOrientation() {
