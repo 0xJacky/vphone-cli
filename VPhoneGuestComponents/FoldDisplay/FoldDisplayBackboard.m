@@ -87,6 +87,7 @@ static BOOL vpAddInnerRenderDisplayToServer(id server) {
             ((void (*)(id, SEL, BOOL))objc_msgSend)(display, setEnabled, YES);
         vpTagUnknownDisplay(display);
         vpInnerRenderDisplay = display;
+        dispatch_async(dispatch_get_main_queue(), ^{ vpShareInnerDisplayPages(display); });
         vpFoldDisplayLog([NSString stringWithFormat:@"inner display: render display added %@ uniqueId=%@", display,
             [display respondsToSelector:sel_registerName("uniqueId")] ? [display valueForKey:@"uniqueId"] : @"-"]);
         return YES;
