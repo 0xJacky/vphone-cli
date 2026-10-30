@@ -1293,7 +1293,7 @@ fold does not run: Xcode's DeviceHub reads it and, with the old angle
 lingering through the sweep, sent its slider back there. DeviceHub's own fold
 and orientation controls arrive in the guest as vendor-defined HID events,
 and vphoned runs them through this request on an iPhone Duo; with the relay
-a DeviceHub fold sets the hinge at once and keeps its orientation (see
+locationd takes them itself and the virtual hinge follows each slider value (see
 `Guest/devicehub_screen_viewing.md`, "iPhone Duo: the fold").
 
 | Param | Values |

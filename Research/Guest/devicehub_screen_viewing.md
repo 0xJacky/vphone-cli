@@ -667,19 +667,32 @@ scripted folds over every path, and the guest's device orientation had been
 left non-portrait by rotation experiments just before, which the swap keeps.
 
 With the foldable's product-id (`preboot-cfw-devicetree_foldable_product_id`,
-on in standard since Lakr233/vphone-cli#778) CoreMotion has its own angle and device-state
-managers, and locationd's device-state relay reads the virtual hinge's host
-controls, the same `0xFF61/0x5B` dictionaries DeviceHub sends. Both
-`dtdeviceinfod` stand-ins then step aside, and DeviceHub reads the real
-managers. vphoned's handling splits the same way: on such a guest a DeviceHub
-slider run sets the virtual hinge to where it ended at once (keeping its
-orientation) and the picker sets the hinge's orientation, so the hinge,
-which resends its stored values every 5 s, agrees with DeviceHub and
-SpringBoard folds from the hinge; the SpringBoard display-swap path above is
-for guests without the relay. The provider check keeps vphoned from
-following the hinge's own dictionaries, which carry none. The relay path was
-not measured with DeviceHub: the test VM above predates the product-id
-patch.
+on in standard since Lakr233/vphone-cli#778) CoreMotion has its own angle and
+device-state managers, and locationd's device-state relay reads the host
+controls (`0xFF61/0x5B`). Both `dtdeviceinfod` stand-ins then step aside, and
+DeviceHub reads the real managers. dtuhidd's "CoreDevice avpCustom" service
+carries the same usage, so the relay takes DeviceHub's controls itself, as on
+Apple's VM host, and the guest follows the slider as it moves. The virtual
+hinge, which resends its stored values every 5 s for a restarted locationd,
+takes each slider value too: while it kept the old angle until a debounced
+fold, a resend landing inside a run sent the fold back. An opening run from
+closed lights the screen first, as `display.posture` does; with a sleeping
+cover SpringBoard's pose provider commits no moving pose and the inner
+display stayed black. The picker sets the hinge's orientation. The provider
+check keeps vphoned from following the hinge's own dictionaries, which carry
+none. The SpringBoard display-swap path above is for guests without the
+relay; there vphoned also writes each slider value as the hinge sample the
+stand-ins read, without moving the hinge, because a reading left at the old
+pose until the fold pulled DeviceHub's model back there (closed, open,
+closed).
+
+Measured on sbdisplay-duo after the product-id patch (2026-10-30): every
+DeviceHub click folds the guest once, following the slider. Opening out of
+closed shows about 0.12 s of black on the shared panel: SpringBoard fades
+the cover out to black and the inner display in from black, two screens on
+hardware. Handing the panel to the inner display at the start of the fold
+only showed its black longer (0.2 s); waiting for a fresh page of the inner
+display did not shorten it.
 
 ## Other open items
 
