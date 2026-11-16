@@ -8,15 +8,15 @@
 	<string>VPhone</string>
 	<key>CFBundlePackageType</key>
 	<string>BNDL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>2.17.101</string>
 	<key>CFBundleVersion</key>
 	<string>65</string>
-	<key>CFBundleShortVersionString</key>
-	<string>2.17.1</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Shares this Mac's microphone with the virtual iPhone so apps running inside it can record.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Shares this Mac's camera with the virtual iPhone while System Camera streaming is enabled.</string>
 	<key>NSCameraUseContinuityCameraDeviceType</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Shares this Mac's microphone with the virtual iPhone so apps running inside it can record.</string>
 </dict>
 </plist>
